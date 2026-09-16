@@ -1,0 +1,172 @@
+@import url("https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Fira+Code:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700;800&display=swap");
+
+html,
+body {
+  color: var(--mantine-color-text);
+  margin: 0;
+  padding: 0;
+  font-family: "Inter", sans-serif;
+  overflow: hidden;
+  height: 100%;
+}
+
+/* Mantine sets data-mantine-color-scheme on <html> — override background once applied */
+html[data-mantine-color-scheme="dark"],
+html[data-mantine-color-scheme="dark"] body {
+  background-color: #18191c;
+  --mantine-color-body: #18191c;
+}
+
+html[data-mantine-color-scheme],
+html[data-mantine-color-scheme] body {
+  background-color: var(--mantine-color-body);
+}
+
+h1,
+h2,
+h3,
+.heading-font {
+  font-family: "Chakra Petch", sans-serif;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--mantine-color-body);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--mantine-color-default-border);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--mantine-color-blue-5);
+}
+
+/* Clean Repack Card Styling (Light & Dark Compatible) */
+.repack-card {
+  background-color: var(--mantine-color-default);
+  border: 1px solid var(--mantine-color-default-border);
+  transition:
+    transform 200ms ease,
+    border-color 200ms ease,
+    box-shadow 200ms ease;
+}
+
+.repack-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--mantine-color-blue-5);
+}
+
+.repack-card.unread-border {
+  border-left: 3px solid var(--mantine-color-blue-5);
+}
+
+.repack-card.read-card {
+  opacity: 0.85;
+}
+
+.repack-card.read-card:hover {
+  opacity: 1;
+}
+
+/* Spin animation for sync button */
+.spin-icon {
+  animation: spin 1.2s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Repack Media Carousel Specific Styling */
+.repack-carousel-container {
+  position: relative;
+  width: 100%;
+  height: 200px;
+  overflow: hidden;
+  background-color: var(--mantine-color-body);
+}
+
+.repack-carousel-image {
+  width: 100%;
+  height: 200px;
+  object-fit: cover;
+  transition: transform 300ms ease;
+}
+
+.repack-card:hover .repack-carousel-image {
+  transform: scale(1.03);
+}
+
+/* Horizontal Scroll Bar for Category Chips */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* List view row styling */
+.repack-list-row {
+  background: var(--mantine-color-default);
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: 8px;
+  transition: all 200ms ease;
+}
+
+.repack-list-row:hover {
+  border-color: var(--mantine-color-blue-5);
+  background: var(--mantine-color-default-hover);
+}
+
+/* Circular Ripple View Transition API CSS Rules */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+/* Ensure the captured screenshot of the old theme is on the bottom layer */
+::view-transition-old(root) {
+  z-index: 1;
+}
+
+/* Ensure the newly loaded theme (which contains the expanding clip-path) is on top */
+::view-transition-new(root) {
+  z-index: 99999;
+}
+
+/* Native Window Controls Fill Header */
+.window-control-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  outline: none;
+}
+.window-control-btn:hover {
+  background-color: var(--mantine-color-default-hover) !important;
+  color: var(--mantine-color-text) !important;
+}
+
+.window-control-close-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  outline: none;
+}
+.window-control-close-btn:hover {
+  background-color: #e81123 !important;
+  color: #ffffff !important;
+}
