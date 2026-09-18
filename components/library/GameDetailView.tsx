@@ -28,6 +28,8 @@ import { SourceLinkerModal } from "./SourceLinkerModal";
 import { openInBrowser } from "../../lib/openUrl";
 import { RepackUpdateLink } from "../../lib/repackTypes";
 import { isLinuxPlatform } from "../../lib/linuxRunner";
+import { useMapGenieMap, MAPGENIE_FMG_INJECTED_SCRIPT } from "../../lib/mapgenie";
+import { WebviewModal } from "../common/WebviewModal";
 import {
   Title,
   Text,
@@ -83,6 +85,8 @@ import {
   RotateCcw,
   CheckCircle2,
   Clock,
+  MapPin,
+  Map as MapIcon,
 } from "lucide-react";
 
 export interface ParsedUpdateItem {
@@ -358,6 +362,8 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
   const [activeTab, setActiveTab] = useState<string | null>("overview");
   const [copiedLink, setCopiedLink] = useState<string | null>(null);
   const [isSourceLinkerOpen, setIsSourceLinkerOpen] = useState(false);
+  const [isMapModalOpen, setIsMapModalOpen] = useState(false);
+  const mapGenieMap = useMapGenieMap(currentGame.title);
 
   const [isEditingExePath, setIsEditingExePath] = useState(false);
   const [exePathInput, setExePathInput] = useState(game.exePath || "");
@@ -810,7 +816,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                 pos="absolute"
                 bottom={8}
                 left={8}
-                right={8}
+                right={mapGenieMap ? 38 : 8}
                 color="teal"
                 variant="filled"
                 size="xs"
@@ -823,7 +829,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                 pos="absolute"
                 bottom={8}
                 left={8}
-                right={8}
+                right={mapGenieMap ? 38 : 8}
                 color="blue"
                 variant="filled"
                 size="xs"
@@ -836,7 +842,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                 pos="absolute"
                 bottom={8}
                 left={8}
-                right={8}
+                right={mapGenieMap ? 38 : 8}
                 color="dark"
                 variant="filled"
                 size="xs"
@@ -844,6 +850,44 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
               >
                 WISHLIST
               </Badge>
+            )}
+
+            {/* MapGenie Interactive Map Button Overlay on Hero Poster */}
+            {mapGenieMap && (
+              <Box
+                pos="absolute"
+                bottom={8}
+                right={8}
+                style={{ zIndex: 4 }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <Tooltip
+                  label="Open Interactive Map (MapGenie)"
+                  position="top"
+                  withArrow
+                >
+                  <ActionIcon
+                    variant="filled"
+                    radius="xl"
+                    size="sm"
+                    style={{
+                      backgroundColor: "rgba(18, 184, 134, 0.95)",
+                      color: "#ffffff",
+                      backdropFilter: "blur(8px)",
+                      border: "1px solid rgba(255, 255, 255, 0.25)",
+                      boxShadow:
+                        "0 4px 12px rgba(0, 0, 0, 0.5), 0 0 10px rgba(18, 184, 134, 0.5)",
+                      transition: "all 0.18s ease",
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsMapModalOpen(true);
+                    }}
+                  >
+                    <MapPin size={12} strokeWidth={2.2} />
+                  </ActionIcon>
+                </Tooltip>
+              </Box>
             )}
           </Paper>
 
@@ -1072,6 +1116,21 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                     ? " (LATEST)"
                     : ""}{" "}
                   ↗
+                </Badge>
+              )}
+              {mapGenieMap && (
+                <Badge
+                  size="xs"
+                  color="teal"
+                  variant="light"
+                  style={{
+                    cursor: "pointer",
+                    boxShadow: "0 0 8px rgba(32, 201, 151, 0.25)",
+                  }}
+                  leftSection={<MapPin size={10} />}
+                  onClick={() => setIsMapModalOpen(true)}
+                >
+                  MapGenie Map ↗
                 </Badge>
               )}
             </Group>
@@ -1326,6 +1385,19 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                   </Menu.Item>
                 </Menu.Dropdown>
               </Menu>
+
+              {mapGenieMap && (
+                <Button
+                  size="sm"
+                  variant="light"
+                  color="teal"
+                  radius="md"
+                  leftSection={<MapPin size={15} />}
+                  onClick={() => setIsMapModalOpen(true)}
+                >
+                  Interactive Map
+                </Button>
+              )}
 
               <Button
                 size="sm"
@@ -2405,6 +2477,21 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
           if (onGameUpdated) onGameUpdated(updated);
         }}
       />
+
+      {/* MapGenie Interactive Map Webview Modal */}
+      {mapGenieMap && (
+        <WebviewModal
+          opened={isMapModalOpen}
+          onClose={() => setIsMapModalOpen(false)}
+          url={mapGenieMap.url}
+          title={`${currentGame.title} - MapGenie Interactive Map`}
+          webviewLabel={`mapgenie-${mapGenieMap.slug}`}
+          initializationScript={MAPGENIE_FMG_INJECTED_SCRIPT}
+          injectedScript={MAPGENIE_FMG_INJECTED_SCRIPT}
+          fullScreen
+          readOnlyUrl
+        />
+      )}
     </Box>
   );
 };

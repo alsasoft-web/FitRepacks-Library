@@ -14,6 +14,8 @@ import {
 } from "../../lib/db";
 import { parseDateSafe } from "../../lib/versionDetector";
 import { openInBrowser } from "../../lib/openUrl";
+import { useMapGenieMap, MAPGENIE_FMG_INJECTED_SCRIPT } from "../../lib/mapgenie";
+import { WebviewModal } from "../common/WebviewModal";
 import {
   Card,
   Badge,
@@ -43,6 +45,7 @@ import {
   Pin,
   EyeOff,
   Square,
+  MapPin,
 } from "lucide-react";
 import { setGameStatus } from "../../lib/db";
 import { useHover } from "@mantine/hooks";
@@ -82,6 +85,8 @@ export const GameCard = React.memo<GameCardProps>(
   }) => {
     const { ref: hoverRef, hovered } = useHover<HTMLDivElement>();
     const isOtherGameRunning = isAnyGameRunning && !isPlaying;
+    const [isMapOpen, setIsMapOpen] = React.useState(false);
+    const mapGenieMap = useMapGenieMap(game.title);
 
     const handleQuickStatus = (
       status: "installed" | "wishlist" | "completed" | "none",
@@ -636,6 +641,44 @@ export const GameCard = React.memo<GameCardProps>(
               UPDATE AVAILABLE
             </Badge>
           )}
+
+          {/* Bottom-Right Interactive Map Button Overlay on Cover */}
+          {mapGenieMap && (
+            <Box
+              pos="absolute"
+              bottom={8}
+              right={8}
+              style={{ zIndex: 3 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <Tooltip
+                label="Open Interactive Map (MapGenie)"
+                position="left"
+                withArrow
+              >
+                <ActionIcon
+                  variant="filled"
+                  radius="xl"
+                  size="sm"
+                  style={{
+                    backgroundColor: "rgba(18, 184, 134, 0.9)",
+                    color: "#ffffff",
+                    backdropFilter: "blur(8px)",
+                    border: "1px solid rgba(255, 255, 255, 0.25)",
+                    boxShadow:
+                      "0 2px 8px rgba(0, 0, 0, 0.45), 0 0 8px rgba(18, 184, 134, 0.5)",
+                    transition: "all 0.18s ease",
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsMapOpen(true);
+                  }}
+                >
+                  <MapPin size={12} strokeWidth={2.2} />
+                </ActionIcon>
+              </Tooltip>
+            </Box>
+          )}
         </Card.Section>
 
         <Stack gap="xs" mt="sm">
@@ -773,6 +816,28 @@ export const GameCard = React.memo<GameCardProps>(
             </Group>
           </Group>
         </Stack>
+
+        {/* MapGenie Webview Modal directly from Card */}
+        {mapGenieMap && (
+          <Box
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onMouseUp={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => e.stopPropagation()}
+          >
+            <WebviewModal
+              opened={isMapOpen}
+              onClose={() => setIsMapOpen(false)}
+              url={mapGenieMap.url}
+              title={`${game.title} - MapGenie Interactive Map`}
+              webviewLabel={`mapgenie-card-${mapGenieMap.slug}`}
+              initializationScript={MAPGENIE_FMG_INJECTED_SCRIPT}
+              injectedScript={MAPGENIE_FMG_INJECTED_SCRIPT}
+              fullScreen
+              readOnlyUrl
+            />
+          </Box>
+        )}
       </Card>
     );
   },

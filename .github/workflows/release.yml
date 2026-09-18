@@ -19,6 +19,8 @@ jobs:
         include:
           - platform: 'windows-latest'
             args: ''
+          - platform: 'ubuntu-22.04'
+            args: '--bundles appimage,deb'
 
     runs-on: ${{ matrix.platform }}
     env:
@@ -36,6 +38,19 @@ jobs:
         with:
           node-version: 20
           cache: 'npm'
+
+      - name: Install Linux system dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libasound2-dev \
+            libudev-dev \
+            libxdo-dev
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable

@@ -1,6 +1,6 @@
 {
   "name": "fitrepacks-library",
-  "version": "1.0.7",
+  "version": "1.0.9",
   "private": true,
   "scripts": {
     "generate-env": "gen-env-types .env -o env.d.ts -e .",

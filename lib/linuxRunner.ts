@@ -42,6 +42,18 @@ export function isLinuxPlatform(): boolean {
 }
 
 /**
+ * Dynamically resolve the Linux user's home directory
+ */
+export async function getLinuxHomeDir(): Promise<string> {
+  try {
+    const { homeDir } = await import("@tauri-apps/api/path");
+    const h = await homeDir();
+    if (h) return h.replace(/\/$/, "");
+  } catch {}
+  return "/home/deck";
+}
+
+/**
  * Fetch the latest GE-Proton release metadata from GitHub
  */
 export async function fetchLatestGeProtonRelease(): Promise<{
@@ -92,9 +104,10 @@ export async function fetchLatestGeProtonRelease(): Promise<{
 }
 
 /**
- * Discover available Wine and Proton runners on the Linux host
+ * Discover available Wine and Proton runners across Steam, Heroic, Lutris, Bottles, and system directories
  */
 export async function discoverLinuxRunners(): Promise<LinuxRunner[]> {
+  const home = await getLinuxHomeDir();
   const runners: LinuxRunner[] = [];
 
   // Default managed runner entry
@@ -102,7 +115,7 @@ export async function discoverLinuxRunners(): Promise<LinuxRunner[]> {
     id: "managed-ge-proton",
     name: "GloriousEggroll GE-Proton (Auto-Managed)",
     type: "proton-ge",
-    path: "~/.local/share/fitrepacks-library/runners/latest/proton",
+    path: `${home}/.local/share/fitrepacks-library/runners/latest/proton`,
     version: "Latest",
     isManaged: true,
   });
@@ -113,65 +126,153 @@ export async function discoverLinuxRunners(): Promise<LinuxRunner[]> {
     const { exists, readDir } = await import("@tauri-apps/plugin-fs");
 
     // 1. Managed GE-Proton runners in ~/.local/share/fitrepacks-library/runners/
-    const managedDir = "/home/user/.local/share/fitrepacks-library/runners";
-
+    const managedDir = `${home}/.local/share/fitrepacks-library/runners`;
     if (await exists(managedDir)) {
-      const entries = await readDir(managedDir);
-      for (const entry of entries) {
-        if (entry.isDirectory && entry.name.toLowerCase().includes("proton")) {
-          const protonBin = `${managedDir}/${entry.name}/proton`;
-          if (await exists(protonBin)) {
-            runners.push({
-              id: `managed-${entry.name}`,
-              name: `GE-Proton (${entry.name}) [Managed]`,
-              type: "proton-ge",
-              path: protonBin,
-              version: entry.name,
-              isManaged: true,
-            });
+      try {
+        const entries = await readDir(managedDir);
+        for (const entry of entries) {
+          if (entry.isDirectory && entry.name.toLowerCase().includes("proton")) {
+            const protonBin = `${managedDir}/${entry.name}/proton`;
+            if (await exists(protonBin)) {
+              runners.push({
+                id: `managed-${entry.name}`,
+                name: `GE-Proton (${entry.name}) [Managed]`,
+                type: "proton-ge",
+                path: protonBin,
+                version: entry.name,
+                isManaged: true,
+              });
+            }
           }
         }
+      } catch {}
+    }
+
+    // 2. Steam compatibility tools directories (Steam Native & Flatpak)
+    const steamCompatDirs = [
+      `${home}/.local/share/Steam/compatibilitytools.d`,
+      `${home}/.steam/root/compatibilitytools.d`,
+      `${home}/.steam/steam/compatibilitytools.d`,
+      `${home}/.var/app/com.valvesoftware.Steam/data/Steam/compatibilitytools.d`,
+    ];
+
+    for (const compatDir of steamCompatDirs) {
+      if (await exists(compatDir)) {
+        try {
+          const entries = await readDir(compatDir);
+          for (const entry of entries) {
+            if (entry.isDirectory) {
+              const protonBin = `${compatDir}/${entry.name}/proton`;
+              if (await exists(protonBin)) {
+                const id = `steam-compat-${entry.name}`;
+                if (!runners.some((r) => r.id === id)) {
+                  runners.push({
+                    id,
+                    name: `${entry.name} (Steam Compatibility)`,
+                    type: "proton-ge",
+                    path: protonBin,
+                    version: entry.name,
+                    isManaged: false,
+                  });
+                }
+              }
+            }
+          }
+        } catch {}
       }
     }
 
-    // 2. Steam compatibilitytools.d (e.g. Proton-GE installed via ProtonUp-Qt)
-    const steamCompatDir = "/home/user/.local/share/Steam/compatibilitytools.d";
-    if (await exists(steamCompatDir)) {
-      const entries = await readDir(steamCompatDir);
-      for (const entry of entries) {
-        if (entry.isDirectory) {
-          const protonBin = `${steamCompatDir}/${entry.name}/proton`;
-          if (await exists(protonBin)) {
-            runners.push({
-              id: `steam-compat-${entry.name}`,
-              name: `${entry.name} (Steam Compatibility)`,
-              type: "proton-ge",
-              path: protonBin,
-              version: entry.name,
-              isManaged: false,
-            });
+    // 3. Official Steam Proton installations
+    const steamAppsCommonDirs = [
+      `${home}/.local/share/Steam/steamapps/common`,
+      `${home}/.steam/root/steamapps/common`,
+      `${home}/.steam/steam/steamapps/common`,
+      `${home}/.var/app/com.valvesoftware.Steam/data/Steam/steamapps/common`,
+    ];
+
+    for (const commonDir of steamAppsCommonDirs) {
+      if (await exists(commonDir)) {
+        try {
+          const entries = await readDir(commonDir);
+          for (const entry of entries) {
+            if (entry.isDirectory && entry.name.toLowerCase().startsWith("proton")) {
+              const protonBin = `${commonDir}/${entry.name}/proton`;
+              if (await exists(protonBin)) {
+                const id = `steam-proton-${entry.name}`;
+                if (!runners.some((r) => r.id === id)) {
+                  runners.push({
+                    id,
+                    name: `Valve ${entry.name}`,
+                    type: "steam-proton",
+                    path: protonBin,
+                    version: entry.name,
+                    isManaged: false,
+                  });
+                }
+              }
+            }
           }
-        }
+        } catch {}
       }
     }
 
-    // 3. System Wine binaries
+    // 4. Heroic & Lutris & Bottles Wine/Proton paths
+    const otherRunnerDirs = [
+      { dir: `${home}/.config/heroic/tools/wine`, type: "wine" as const, label: "Heroic Wine" },
+      { dir: `${home}/.config/heroic/tools/proton`, type: "proton-ge" as const, label: "Heroic Proton" },
+      { dir: `${home}/.local/share/lutris/runners/wine`, type: "wine" as const, label: "Lutris Wine" },
+      { dir: `${home}/.local/share/bottles/runners`, type: "wine" as const, label: "Bottles Wine" },
+    ];
+
+    for (const item of otherRunnerDirs) {
+      if (await exists(item.dir)) {
+        try {
+          const entries = await readDir(item.dir);
+          for (const entry of entries) {
+            if (entry.isDirectory) {
+              const exePath = item.type === "proton-ge"
+                ? `${item.dir}/${entry.name}/proton`
+                : `${item.dir}/${entry.name}/bin/wine`;
+              if (await exists(exePath)) {
+                const id = `custom-${entry.name}`;
+                if (!runners.some((r) => r.id === id)) {
+                  runners.push({
+                    id,
+                    name: `${entry.name} (${item.label})`,
+                    type: item.type,
+                    path: exePath,
+                    version: entry.name,
+                    isManaged: false,
+                  });
+                }
+              }
+            }
+          }
+        } catch {}
+      }
+    }
+
+    // 5. System Wine binaries
     const systemWinePaths = [
       { name: "System Wine", path: "/usr/bin/wine" },
       { name: "System Wine64", path: "/usr/bin/wine64" },
       { name: "Wine Development", path: "/opt/wine-staging/bin/wine" },
+      { name: "Wine Local", path: "/usr/local/bin/wine" },
     ];
 
     for (const w of systemWinePaths) {
       if (await exists(w.path)) {
-        runners.push({
-          id: `system-${w.path.replace(/\//g, "-")}`,
-          name: w.name,
-          type: "wine",
-          path: w.path,
-          version: "System",
-          isManaged: false,
-        });
+        const id = `system-${w.path.replace(/\//g, "-")}`;
+        if (!runners.some((r) => r.id === id)) {
+          runners.push({
+            id,
+            name: w.name,
+            type: "wine",
+            path: w.path,
+            version: "System",
+            isManaged: false,
+          });
+        }
       }
     }
   } catch (err) {
@@ -237,7 +338,7 @@ export async function ensureProtonGeInstalled(
 }
 
 /**
- * Build launch parameters and environment variables for Linux Proton / Wine execution
+ * Build launch parameters and environment variables for Linux Proton / Wine execution of a game
  */
 export async function buildLinuxLaunchConfiguration(
   game: Game,
@@ -248,10 +349,11 @@ export async function buildLinuxLaunchConfiguration(
   envVars: Record<string, string>;
   workingDir: string;
 }> {
+  const home = await getLinuxHomeDir();
   const settings = await getLinuxCompatibilitySettings();
   const runners = await discoverLinuxRunners();
 
-  // If auto-update is enabled, run update check
+  // If auto-update is enabled, run update check in background
   if (settings.autoUpdateProtonGe) {
     ensureProtonGeInstalled().catch(console.error);
   }
@@ -259,6 +361,7 @@ export async function buildLinuxLaunchConfiguration(
   let selectedRunner =
     overrideRunner ||
     runners.find((r) => r.id === settings.preferredRunnerId) ||
+    runners.find((r) => r.type === "proton-ge" || r.type === "steam-proton") ||
     runners[0];
 
   const envVars: Record<string, string> = {};
@@ -266,11 +369,10 @@ export async function buildLinuxLaunchConfiguration(
   // 1. Isolated Wine Prefix per game
   const prefixDir =
     settings.customWinePrefix ||
-    `/home/${typeof window !== "undefined" ? "user" : ""}/.local/share/fitrepacks-library/prefixes/${game.id}`;
+    `${home}/.local/share/fitrepacks-library/prefixes/${game.id}`;
   envVars["WINEPREFIX"] = prefixDir;
   envVars["STEAM_COMPAT_DATA_PATH"] = prefixDir;
-  envVars["STEAM_COMPAT_CLIENT_INSTALL_PATH"] =
-    `/home/${typeof window !== "undefined" ? "user" : ""}/.local/share/Steam`;
+  envVars["STEAM_COMPAT_CLIENT_INSTALL_PATH"] = `${home}/.local/share/Steam`;
 
   // 2. Gaming Performance & Features
   if (settings.enableEsyncFsync) {
@@ -298,6 +400,7 @@ export async function buildLinuxLaunchConfiguration(
 
   if (
     selectedRunner?.type === "proton-ge" ||
+    selectedRunner?.type === "steam-proton" ||
     selectedRunner?.path.endsWith("/proton")
   ) {
     runnerArgs = ["run", game.exePath];
@@ -309,6 +412,65 @@ export async function buildLinuxLaunchConfiguration(
   if (settings.enableGameMode) {
     runnerArgs = [runnerCommand, ...runnerArgs];
     runnerCommand = "gamemoderun";
+  }
+
+  return {
+    runnerCommand,
+    runnerArgs,
+    envVars,
+    workingDir,
+  };
+}
+
+/**
+ * Build launch parameters and environment variables for Linux Proton / Wine execution of a setup installer
+ */
+export async function buildLinuxInstallerLaunchConfiguration(
+  installerExePath: string,
+  targetDir: string,
+  installId: string,
+  overrideRunner?: LinuxRunner,
+): Promise<{
+  runnerCommand: string;
+  runnerArgs: string[];
+  envVars: Record<string, string>;
+  workingDir: string;
+}> {
+  const home = await getLinuxHomeDir();
+  const settings = await getLinuxCompatibilitySettings();
+  const runners = await discoverLinuxRunners();
+
+  let selectedRunner =
+    overrideRunner ||
+    runners.find((r) => r.id === settings.preferredRunnerId) ||
+    runners.find((r) => r.type === "proton-ge" || r.type === "steam-proton") ||
+    runners[0];
+
+  const envVars: Record<string, string> = {};
+
+  // Designated prefix for installer execution
+  const prefixDir = `${home}/.local/share/fitrepacks-library/prefixes/installer_${installId}`;
+  envVars["WINEPREFIX"] = prefixDir;
+  envVars["STEAM_COMPAT_DATA_PATH"] = prefixDir;
+  envVars["STEAM_COMPAT_CLIENT_INSTALL_PATH"] = `${home}/.local/share/Steam`;
+
+  if (settings.enableEsyncFsync) {
+    envVars["WINEESYNC"] = "1";
+    envVars["WINEFSYNC"] = "1";
+  }
+
+  const workingDir = targetDir;
+  let runnerCommand = selectedRunner ? selectedRunner.path : "wine";
+  let runnerArgs: string[] = [];
+
+  if (
+    selectedRunner?.type === "proton-ge" ||
+    selectedRunner?.type === "steam-proton" ||
+    selectedRunner?.path.endsWith("/proton")
+  ) {
+    runnerArgs = ["run", installerExePath];
+  } else {
+    runnerArgs = [installerExePath];
   }
 
   return {

@@ -1862,6 +1862,76 @@ fn is_dev_mode() -> bool {
     cfg!(debug_assertions)
 }
 
+#[command]
+fn close_webview(app: tauri::AppHandle, label: String) -> Result<(), String> {
+    if let Some(webview) = app.get_webview(&label) {
+        webview.close().map_err(|e| e.to_string())?;
+    } else if let Some(wv_win) = app.get_webview_window(&label) {
+        wv_win.close().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[command]
+fn set_webview_bounds(
+    app: tauri::AppHandle,
+    label: String,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+) -> Result<(), String> {
+    if let Some(webview) = app.get_webview(&label) {
+        let _ = webview.set_position(tauri::LogicalPosition::new(x as f64, y as f64));
+        let _ = webview.set_size(tauri::LogicalSize::new(width as f64, height as f64));
+    }
+    Ok(())
+}
+
+#[command]
+fn eval_in_webview(app: tauri::AppHandle, label: String, script: String) -> Result<(), String> {
+    if let Some(webview) = app.get_webview(&label) {
+        webview.eval(&script).map_err(|e| e.to_string())
+    } else if let Some(webview_window) = app.get_webview_window(&label) {
+        webview_window.eval(&script).map_err(|e| e.to_string())
+    } else {
+        Err(format!("Webview '{}' not found", label))
+    }
+}
+
+#[command]
+fn get_webview_url(app: tauri::AppHandle, label: String) -> Result<String, String> {
+    if let Some(webview) = app.get_webview(&label) {
+        webview.url().map(|u| u.to_string()).map_err(|e| e.to_string())
+    } else if let Some(webview_window) = app.get_webview_window(&label) {
+        webview_window.url().map(|u| u.to_string()).map_err(|e| e.to_string())
+    } else {
+        Err(format!("Webview '{}' not found", label))
+    }
+}
+
+#[command]
+fn navigate_webview(app: tauri::AppHandle, label: String, url: String) -> Result<(), String> {
+    if let Some(webview) = app.get_webview(&label) {
+        if let Ok(parsed_url) = url.parse::<tauri::Url>() {
+            let _ = webview.navigate(parsed_url);
+        } else {
+            let script = format!("window.location.href = {};", serde_json::to_string(&url).unwrap_or_default());
+            let _ = webview.eval(&script);
+        }
+        return Ok(());
+    } else if let Some(wv_win) = app.get_webview_window(&label) {
+        if let Ok(parsed_url) = url.parse::<tauri::Url>() {
+            let _ = wv_win.navigate(parsed_url);
+        } else {
+            let script = format!("window.location.href = {};", serde_json::to_string(&url).unwrap_or_default());
+            let _ = wv_win.eval(&script);
+        }
+        return Ok(());
+    }
+    Err(format!("Webview '{}' not found", label))
+}
+
 fn show_and_focus_window(window: &tauri::WebviewWindow) {
     let _ = window.show();
     if window.is_minimized().unwrap_or(false) {
@@ -1913,7 +1983,9 @@ fn handle_tray_menu_event(app: &tauri::AppHandle, id_str: &str) {
 
 fn main() {
     #[cfg(target_os = "windows")]
-    register_windows_aumid();
+    {
+        register_windows_aumid();
+    }
 
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default()
@@ -2023,7 +2095,12 @@ fn main() {
             set_close_to_tray,
             update_recent_games,
             update_tray_downloads,
-            is_dev_mode
+            is_dev_mode,
+            eval_in_webview,
+            navigate_webview,
+            get_webview_url,
+            close_webview,
+            set_webview_bounds
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

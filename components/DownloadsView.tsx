@@ -140,11 +140,33 @@ export const DownloadsView: React.FC = () => {
         text: `Launching ${installerPath.split(/[\\/]/).pop()}... Watching desktop for new shortcuts!`,
       });
 
-      await invoke("launch_game_exe", {
-        exePath: installerPath,
-        workingDir: targetDir,
-        gameId: `installer-${item.id}`,
-      });
+      const { isLinuxPlatform, buildLinuxInstallerLaunchConfiguration } =
+        await import("../lib/linuxRunner");
+
+      if (isLinuxPlatform()) {
+        const config = await buildLinuxInstallerLaunchConfiguration(
+          installerPath,
+          targetDir,
+          item.id,
+        );
+        await invoke("launch_game_exe", {
+          exePath: installerPath,
+          workingDir: config.workingDir,
+          gameId: `installer-${item.id}`,
+          runnerCommand: config.runnerCommand,
+          runnerArgs: config.runnerArgs,
+          envVars: config.envVars,
+        });
+      } else {
+        await invoke("launch_game_exe", {
+          exePath: installerPath,
+          workingDir: targetDir,
+          gameId: `installer-${item.id}`,
+          runnerCommand: null,
+          runnerArgs: null,
+          envVars: null,
+        });
+      }
 
       let checksLeft = 200;
       const watchInterval = setInterval(async () => {

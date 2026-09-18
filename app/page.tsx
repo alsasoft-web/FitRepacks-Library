@@ -36,6 +36,7 @@ import { RepacksPostsView } from "../components/repacks/RepacksPostsView";
 import { TorrentDownloadModal } from "../components/repacks/TorrentDownloadModal";
 import { DownloadsView } from "../components/DownloadsView";
 import { SettingsModal } from "../components/SettingsModal";
+import { WebviewModal } from "../components/common/WebviewModal";
 import { UserMenu } from "../components/auth/UserMenu";
 import {
   useDownloadQueueStore,
@@ -103,6 +104,7 @@ import {
   Star,
   Layers,
   Trash2,
+  Globe,
 } from "lucide-react";
 
 export default function Home() {
@@ -131,6 +133,7 @@ export default function Home() {
   const [selectedListGameId, setSelectedListGameId] = useState<string | null>(
     null,
   );
+  const [isWebviewModalOpen, setIsWebviewModalOpen] = useState(false);
 
   // Restore all UI settings from localStorage
   useEffect(() => {
@@ -999,7 +1002,7 @@ export default function Home() {
       header={{ height: 56 }}
       navbar={{
         width: viewMode === "list" ? 280 : 260,
-        breakpoint: "sm",
+        breakpoint: 0,
       }}
       padding={0}
       bg="var(--mantine-color-body)"
@@ -1197,6 +1200,18 @@ export default function Home() {
                     <Moon size={16} />
                   )}
                 </span>
+              </ActionIcon>
+            </Tooltip>
+
+            <Tooltip label="Test Webview Modal (with JS Injection)">
+              <ActionIcon
+                variant="light"
+                color="blue"
+                onClick={() => setIsWebviewModalOpen(true)}
+                size="sm"
+                radius="md"
+              >
+                <Globe size={16} />
               </ActionIcon>
             </Tooltip>
 
@@ -1889,6 +1904,13 @@ export default function Home() {
           onClose={() => setIsSettingsOpen(false)}
         />
       )}
+
+      <WebviewModal
+        opened={isWebviewModalOpen}
+        onClose={() => setIsWebviewModalOpen(false)}
+        url="https://fitgirl-repacks.site"
+        title="Webview Modal (Tauri Native)"
+      />
     </AppShell>
   );
 }
