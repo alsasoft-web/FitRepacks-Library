@@ -17,6 +17,8 @@ import {
   MultiSelect,
   Select,
   Tabs,
+  Progress,
+  Alert,
 } from "@mantine/core";
 import {
   Settings,
@@ -36,7 +38,11 @@ import {
   Film,
   Power,
   Minimize2,
+  Sparkles,
+  CheckCircle2,
+  AlertCircle,
 } from "lucide-react";
+import { useAppUpdater } from "../lib/updater";
 import { invoke } from "@tauri-apps/api/core";
 import {
   getDefaultDownloadDir,
@@ -488,6 +494,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [closeToTrayEnabled, setCloseToTrayEnabled] = useState<boolean>(false);
   const [isCloseToTrayLoading, setIsCloseToTrayLoading] = useState<boolean>(false);
 
+  const {
+    status: updaterStatus,
+    updateDetails,
+    progress: updateProgress,
+    error: updaterError,
+    checkForUpdates,
+    installUpdate,
+    restartApp,
+  } = useAppUpdater();
+
   useEffect(() => {
     if (opened) {
       const isLin = isLinuxPlatform();
@@ -768,6 +784,174 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           {/* APPLICATION / GENERAL TAB */}
           <Tabs.Panel value="application">
             <Stack gap="md">
+              {/* Application Updates */}
+              <Paper
+                p="md"
+                radius="md"
+                bg="var(--mantine-color-default)"
+                style={{ border: "1px solid var(--mantine-color-default-border)" }}
+              >
+                <Stack gap="sm">
+                  <Group justify="space-between" align="center">
+                    <Group gap="xs">
+                      <Sparkles size={16} color="var(--mantine-color-blue-4)" />
+                      <Text size="sm" fw={700}>
+                        Application Updates
+                      </Text>
+                    </Group>
+                    <Badge color="blue" size="xs" variant="light">
+                      v{updateDetails?.currentVersion || "1.0.10"}
+                    </Badge>
+                  </Group>
+
+                  <Text size="xs" c="dimmed">
+                    Check for new versions, bug fixes, and feature updates directly from GitHub Releases.
+                  </Text>
+
+                  {updaterStatus === "error" && updaterError && (
+                    <Alert
+                      icon={<AlertCircle size={15} />}
+                      title="Update Check Error"
+                      color="red"
+                      variant="light"
+                      radius="md"
+                      p="xs"
+                    >
+                      <Text size="xs">{updaterError}</Text>
+                    </Alert>
+                  )}
+
+                  {updaterStatus === "up-to-date" && (
+                    <Paper p="xs" radius="md" bg="var(--mantine-color-body)" withBorder>
+                      <Group gap="xs">
+                        <CheckCircle2 size={16} color="var(--mantine-color-teal-5)" />
+                        <Text size="xs" fw={600} c="teal">
+                          FitRepacks Library is up to date!
+                        </Text>
+                      </Group>
+                    </Paper>
+                  )}
+
+                  {updaterStatus === "available" && updateDetails && (
+                    <Paper
+                      p="sm"
+                      radius="md"
+                      bg="var(--mantine-color-body)"
+                      style={{ border: "1px solid var(--mantine-color-blue-6)" }}
+                    >
+                      <Stack gap="xs">
+                        <Group justify="space-between" align="center">
+                          <Group gap="xs">
+                            <Badge color="blue" size="sm" variant="filled">
+                              Update Available: v{updateDetails.version}
+                            </Badge>
+                            {updateDetails.date && (
+                              <Text size="xs" c="dimmed">
+                                {new Date(updateDetails.date).toLocaleDateString()}
+                              </Text>
+                            )}
+                          </Group>
+                          <Button
+                            size="xs"
+                            color="blue"
+                            radius="md"
+                            leftSection={<DownloadCloud size={14} />}
+                            onClick={installUpdate}
+                          >
+                            Download & Install
+                          </Button>
+                        </Group>
+
+                        {updateDetails.body && (
+                          <Paper
+                            p="xs"
+                            radius="sm"
+                            bg="var(--mantine-color-default)"
+                            style={{ maxHeight: 120, overflowY: "auto" }}
+                          >
+                            <Text size="xs" style={{ whiteSpace: "pre-wrap" }}>
+                              {updateDetails.body}
+                            </Text>
+                          </Paper>
+                        )}
+                      </Stack>
+                    </Paper>
+                  )}
+
+                  {updaterStatus === "downloading" && (
+                    <Paper p="sm" radius="md" bg="var(--mantine-color-body)" withBorder>
+                      <Stack gap="xs">
+                        <Group justify="space-between" align="center">
+                          <Text size="xs" fw={600}>
+                            Downloading Update ({updateProgress.percent}%)...
+                          </Text>
+                          <Text size="xs" c="dimmed">
+                            {(updateProgress.downloadedBytes / (1024 * 1024)).toFixed(1)} MB
+                            {updateProgress.totalBytes > 0 &&
+                              ` / ${(updateProgress.totalBytes / (1024 * 1024)).toFixed(1)} MB`}
+                          </Text>
+                        </Group>
+                        <Progress
+                          value={updateProgress.percent}
+                          animated
+                          color="blue"
+                          size="sm"
+                          radius="xl"
+                        />
+                      </Stack>
+                    </Paper>
+                  )}
+
+                  {updaterStatus === "ready-to-restart" && (
+                    <Paper
+                      p="sm"
+                      radius="md"
+                      bg="var(--mantine-color-body)"
+                      style={{ border: "1px solid var(--mantine-color-teal-6)" }}
+                    >
+                      <Group justify="space-between" align="center">
+                        <Group gap="xs">
+                          <CheckCircle2 size={18} color="var(--mantine-color-teal-5)" />
+                          <Stack gap={2}>
+                            <Text size="xs" fw={700} c="teal">
+                              Update Downloaded!
+                            </Text>
+                            <Text size="xs" c="dimmed">
+                              Restart the application to finish applying the update.
+                            </Text>
+                          </Stack>
+                        </Group>
+                        <Button
+                          size="xs"
+                          color="teal"
+                          radius="md"
+                          leftSection={<RefreshCw size={14} />}
+                          onClick={restartApp}
+                        >
+                          Restart Now
+                        </Button>
+                      </Group>
+                    </Paper>
+                  )}
+
+                  {updaterStatus !== "downloading" && updaterStatus !== "ready-to-restart" && (
+                    <Group justify="flex-end">
+                      <Button
+                        variant="light"
+                        color="blue"
+                        size="xs"
+                        radius="md"
+                        loading={updaterStatus === "checking"}
+                        leftSection={<RefreshCw size={14} />}
+                        onClick={() => checkForUpdates()}
+                      >
+                        Check for Updates
+                      </Button>
+                    </Group>
+                  )}
+                </Stack>
+              </Paper>
+
               {/* System Startup / Autostart */}
               <Paper
                 p="md"

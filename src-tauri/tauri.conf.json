@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2.0.0",
   "productName": "FitRepacks Library",
-  "version": "1.0.9",
+  "version": "1.0.11",
   "identifier": "com.fitrepacks.library",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -64,6 +64,14 @@
       "appimage": {
         "bundleMediaFramework": false
       }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEIzNDI1QUQ2MENDNTBCOTAKUldTUUM4VU0xbHBDczJxVHYzQ0IvZWxxdHN3ZFE1dVFsVTVRdTI3bmgrSlVObEtjNWYwNDQ5N2UK",
+      "endpoints": [
+        "https://github.com/alsasoft-web/FitRepacks-Library/releases/latest/download/latest.json"
+      ]
     }
   }
 }

@@ -24,6 +24,11 @@
     "dialog:default",
     "opener:default",
     "opener:allow-open-path",
+    "updater:default",
+    "updater:allow-check",
+    "updater:allow-download-and-install",
+    "process:default",
+    "process:allow-restart",
     "fs:default",
     {
       "identifier": "fs:allow-read-text-file",

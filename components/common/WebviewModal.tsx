@@ -81,6 +81,7 @@ export const WebviewModal: React.FC<WebviewModalProps> = ({
     type: "idle" | "success" | "error";
     message: string;
   }>({ type: "idle", message: "" });
+  const isDev = process.env.NODE_ENV === "development";
 
   // Sync state if url prop changes
   useEffect(() => {
@@ -465,23 +466,25 @@ export const WebviewModal: React.FC<WebviewModalProps> = ({
                   </ActionIcon>
                 </Tooltip>
 
-                <Tooltip label="Toggle JS Injection Console">
-                  <ActionIcon
-                    variant={showJsConsole ? "filled" : "light"}
-                    color="violet"
-                    size="sm"
-                    radius="md"
-                    onClick={() => {
-                      setShowJsConsole(!showJsConsole);
-                    }}
-                  >
-                    <Code2 size={15} />
-                  </ActionIcon>
-                </Tooltip>
+                {isDev && (
+                  <Tooltip label="Toggle JS Injection Console">
+                    <ActionIcon
+                      variant={showJsConsole ? "filled" : "light"}
+                      color="violet"
+                      size="sm"
+                      radius="md"
+                      onClick={() => {
+                        setShowJsConsole(!showJsConsole);
+                      }}
+                    >
+                      <Code2 size={15} />
+                    </ActionIcon>
+                  </Tooltip>
+                )}
               </Group>
 
               {/* JS Injection Console */}
-              {showJsConsole && (
+              {isDev && showJsConsole && (
                 <Paper
                   p="xs"
                   radius="md"

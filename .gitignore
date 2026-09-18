@@ -138,3 +138,5 @@ dist
 .pnp.*
 
 .DS_Store
+src-tauri/updater.key
+src-tauri/target/
