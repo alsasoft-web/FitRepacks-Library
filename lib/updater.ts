@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { create } from "zustand";
 import { check, Update, DownloadEvent } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { getVersion } from "@tauri-apps/api/app";
@@ -26,13 +26,27 @@ export type UpdateStatus =
   | "ready-to-restart"
   | "error";
 
+export interface AppUpdaterState {
+  status: UpdateStatus;
+  currentVersion: string;
+  updateDetails: AppUpdateDetails | null;
+  progress: UpdateProgress;
+  error: string | null;
+  hasCheckedOnStartup: boolean;
+  checkForUpdates: (silent?: boolean) => Promise<AppUpdateDetails | null>;
+  installUpdate: () => Promise<void>;
+  restartApp: () => Promise<void>;
+  resetStatus: () => void;
+  loadCurrentVersion: () => Promise<string>;
+}
+
 /**
  * Check for available application updates from the configured updater endpoints
  */
 export async function checkAppUpdate(): Promise<AppUpdateDetails | null> {
   const [update, currentVersion] = await Promise.all([
     check(),
-    getVersion().catch(() => "Unknown"),
+    getVersion().catch(() => ""),
   ]);
 
   if (!update) {
@@ -49,37 +63,70 @@ export async function checkAppUpdate(): Promise<AppUpdateDetails | null> {
 }
 
 /**
- * React hook to manage checking, downloading, and installing app updates
+ * Global Zustand store and hook to manage checking, downloading, and installing app updates
  */
-export function useAppUpdater() {
-  const [status, setStatus] = useState<UpdateStatus>("idle");
-  const [updateDetails, setUpdateDetails] = useState<AppUpdateDetails | null>(null);
-  const [progress, setProgress] = useState<UpdateProgress>({
+export const useAppUpdater = create<AppUpdaterState>((set, get) => ({
+  status: "idle",
+  currentVersion: "",
+  updateDetails: null,
+  progress: {
     downloadedBytes: 0,
     totalBytes: 0,
     percent: 0,
-  });
-  const [error, setError] = useState<string | null>(null);
+  },
+  error: null,
+  hasCheckedOnStartup: false,
 
-  const checkForUpdates = useCallback(async (silent = false) => {
-    setStatus("checking");
-    setError(null);
+  loadCurrentVersion: async () => {
+    try {
+      const v = await getVersion();
+      if (v) {
+        set({ currentVersion: v });
+        return v;
+      }
+    } catch (_) {}
+    return get().currentVersion;
+  },
+
+  checkForUpdates: async (silent = false) => {
+    const currentStatus = get().status;
+    if (
+      currentStatus === "downloading" ||
+      currentStatus === "ready-to-restart"
+    ) {
+      return get().updateDetails;
+    }
+
+    set({ status: "checking", error: null });
+
+    try {
+      const v = await getVersion().catch(() => null);
+      if (v) {
+        set({ currentVersion: v });
+      }
+    } catch (_) {}
 
     try {
       const update = await checkAppUpdate();
 
       if (update) {
-        setUpdateDetails(update);
-        setStatus("available");
+        set({
+          updateDetails: update,
+          status: "available",
+          hasCheckedOnStartup: true,
+        });
         return update;
       } else {
-        setUpdateDetails(null);
-        setStatus("up-to-date");
+        set({
+          updateDetails: null,
+          status: "up-to-date",
+          hasCheckedOnStartup: true,
+        });
         return null;
       }
     } catch (err: any) {
       const msg = err?.message || String(err) || "Failed to check for updates";
-      
+
       // When no release with latest.json is published yet on GitHub (404 Not Found)
       const isMissingManifest =
         msg.includes("404") ||
@@ -87,91 +134,111 @@ export function useAppUpdater() {
         msg.includes("Not Found");
 
       if (isMissingManifest) {
-        setUpdateDetails(null);
-        setStatus("up-to-date");
+        set({
+          updateDetails: null,
+          status: "up-to-date",
+          hasCheckedOnStartup: true,
+        });
         return null;
       }
 
-      setError(msg);
-      setStatus("error");
+      set({
+        error: msg,
+        status: "error",
+        hasCheckedOnStartup: true,
+      });
+
       if (!silent) {
         console.error("App update check error:", err);
       }
       return null;
     }
-  }, []);
+  },
 
-  const installUpdate = useCallback(async () => {
-    if (!updateDetails?.rawUpdate) return;
+  installUpdate: async () => {
+    const details = get().updateDetails;
+    if (!details?.rawUpdate) return;
 
-    setStatus("downloading");
-    setError(null);
-    setProgress({ downloadedBytes: 0, totalBytes: 0, percent: 0 });
+    set({
+      status: "downloading",
+      error: null,
+      progress: { downloadedBytes: 0, totalBytes: 0, percent: 0 },
+    });
 
     try {
       let totalBytes = 0;
       let downloadedBytes = 0;
 
-      await updateDetails.rawUpdate.downloadAndInstall((event: DownloadEvent) => {
+      await details.rawUpdate.downloadAndInstall((event: DownloadEvent) => {
         switch (event.event) {
           case "Started":
             totalBytes = event.data.contentLength || 0;
-            setProgress({
-              downloadedBytes: 0,
-              totalBytes,
-              percent: 0,
+            set({
+              progress: {
+                downloadedBytes: 0,
+                totalBytes,
+                percent: 0,
+              },
             });
             break;
           case "Progress":
             downloadedBytes += event.data.chunkLength;
-            const percent = totalBytes > 0 ? Math.min(100, Math.round((downloadedBytes / totalBytes) * 100)) : 0;
-            setProgress({
-              downloadedBytes,
-              totalBytes,
-              percent,
+            const percent =
+              totalBytes > 0
+                ? Math.min(
+                    100,
+                    Math.round((downloadedBytes / totalBytes) * 100),
+                  )
+                : 0;
+            set({
+              progress: {
+                downloadedBytes,
+                totalBytes,
+                percent,
+              },
             });
             break;
           case "Finished":
-            setProgress({
-              downloadedBytes: totalBytes || downloadedBytes,
-              totalBytes: totalBytes || downloadedBytes,
-              percent: 100,
+            set({
+              progress: {
+                downloadedBytes: totalBytes || downloadedBytes,
+                totalBytes: totalBytes || downloadedBytes,
+                percent: 100,
+              },
             });
             break;
         }
       });
 
-      setStatus("ready-to-restart");
+      set({ status: "ready-to-restart" });
     } catch (err: any) {
-      const msg = err?.message || String(err) || "Failed to download and install update";
-      setError(msg);
-      setStatus("error");
+      const msg =
+        err?.message || String(err) || "Failed to download and install update";
+      set({ error: msg, status: "error" });
       console.error("App update install error:", err);
     }
-  }, [updateDetails]);
+  },
 
-  const restartApp = useCallback(async () => {
+  restartApp: async () => {
     try {
       await relaunch();
     } catch (err: any) {
       console.error("Failed to relaunch application:", err);
-      setError(err?.message || "Failed to restart application");
+      set({ error: err?.message || "Failed to restart application" });
     }
-  }, []);
+  },
 
-  const resetStatus = useCallback(() => {
-    setStatus("idle");
-    setError(null);
-  }, []);
+  resetStatus: () => {
+    set({ status: "idle", error: null });
+  },
+}));
 
-  return {
-    status,
-    updateDetails,
-    progress,
-    error,
-    checkForUpdates,
-    installUpdate,
-    restartApp,
-    resetStatus,
-  };
+if (typeof window !== "undefined") {
+  getVersion()
+    .then((v) => {
+      if (v) {
+        useAppUpdater.setState({ currentVersion: v });
+      }
+    })
+    .catch(() => {});
 }

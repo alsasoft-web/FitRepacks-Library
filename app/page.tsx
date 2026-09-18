@@ -38,6 +38,7 @@ import { DownloadsView } from "../components/DownloadsView";
 import { SettingsModal } from "../components/SettingsModal";
 import { WebviewModal } from "../components/common/WebviewModal";
 import { UserMenu } from "../components/auth/UserMenu";
+import { useAppUpdater } from "../lib/updater";
 import {
   useDownloadQueueStore,
   resumeActiveDownloadsOnStartup,
@@ -261,6 +262,18 @@ export default function Home() {
   const [isAddOrScanModalOpen, setIsAddOrScanModalOpen] = useState(false);
   const [isIgdbSearchOpen, setIsIgdbSearchOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  // Global App Updater Store
+  const {
+    status: updaterStatus,
+    updateDetails,
+    checkForUpdates,
+  } = useAppUpdater();
+
+  // Autocheck update silently at startup
+  useEffect(() => {
+    checkForUpdates(true);
+  }, [checkForUpdates]);
 
   // Download Queue Store for Header Live Progress & Global Polling
   const { magnetDownloads, queuedGames, aggregateStats, syncFromLiveStats } =
@@ -1060,6 +1073,70 @@ export default function Home() {
                   >
                     DEV MODE
                   </Badge>
+                )}
+                {updaterStatus === "available" && updateDetails && (
+                  <Tooltip
+                    label={`Update v${updateDetails.version} is available! Click to view details & install.`}
+                    withArrow
+                  >
+                    <Badge
+                      size="sm"
+                      color="teal"
+                      variant="filled"
+                      leftSection={<Sparkles size={12} />}
+                      onClick={() => setIsSettingsOpen(true)}
+                      style={{
+                        cursor: "pointer",
+                        fontWeight: 700,
+                        letterSpacing: 0.3,
+                        boxShadow: "0 0 10px rgba(32, 201, 151, 0.4)",
+                        transition: "transform 0.15s ease",
+                      }}
+                    >
+                      Update v{updateDetails.version}
+                    </Badge>
+                  </Tooltip>
+                )}
+                {updaterStatus === "downloading" && (
+                  <Tooltip
+                    label="Downloading update... Click to open settings."
+                    withArrow
+                  >
+                    <Badge
+                      size="sm"
+                      color="blue"
+                      variant="filled"
+                      leftSection={<DownloadCloud size={12} />}
+                      onClick={() => setIsSettingsOpen(true)}
+                      style={{
+                        cursor: "pointer",
+                        fontWeight: 700,
+                      }}
+                    >
+                      Downloading Update...
+                    </Badge>
+                  </Tooltip>
+                )}
+                {updaterStatus === "ready-to-restart" && (
+                  <Tooltip
+                    label="Update is ready to install! Click to restart."
+                    withArrow
+                  >
+                    <Badge
+                      size="sm"
+                      color="green"
+                      variant="filled"
+                      leftSection={<CheckCircle2 size={12} />}
+                      onClick={() => setIsSettingsOpen(true)}
+                      style={{
+                        cursor: "pointer",
+                        fontWeight: 700,
+                        boxShadow: "0 0 12px rgba(64, 192, 87, 0.6)",
+                      }}
+                    >
+                      Restart to Update
+                    </Badge>
+                  </Tooltip>
                 )}
               </Group>
             </Group>

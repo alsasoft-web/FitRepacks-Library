@@ -456,14 +456,16 @@ const ALL_GENRE_OPTIONS = [
   "World War I",
   "World War II",
   "Zombie",
-  "Zombies"
+  "Zombies",
 ];
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   opened,
   onClose,
 }) => {
-  const [downloadDir, setDownloadDir] = useState<string>("C:\\Games\\Downloads");
+  const [downloadDir, setDownloadDir] = useState<string>(
+    "C:\\Games\\Downloads",
+  );
   const [preferredLangs, setPreferredLangs] = useState<string[]>(["english"]);
   const [excludedGenres, setExcludedGenres] = useState<string[]>([]);
   const [carouselVideoPosition, setCarouselVideoPosition] = useState<
@@ -473,9 +475,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [uploadLimit, setUploadLimit] = useState<number>(0);
   const [maxActiveTorrents, setMaxActiveTorrents] = useState<number>(3);
   const [seedAfterComplete, setSeedAfterComplete] = useState<boolean>(false);
-  const [applyFolderCoverIcon, setApplyFolderCoverIcon] = useState<boolean>(true);
+  const [applyFolderCoverIcon, setApplyFolderCoverIcon] =
+    useState<boolean>(true);
   const [isLinux, setIsLinux] = useState<boolean>(false);
-  const [linuxSettings, setLinuxSettings] = useState<LinuxCompatibilitySettings>(DEFAULT_LINUX_SETTINGS);
+  const [linuxSettings, setLinuxSettings] =
+    useState<LinuxCompatibilitySettings>(DEFAULT_LINUX_SETTINGS);
   const [availableRunners, setAvailableRunners] = useState<LinuxRunner[]>([]);
   const [isUpdatingProton, setIsUpdatingProton] = useState<boolean>(false);
   const [protonUpdateMsg, setProtonUpdateMsg] = useState<string>("");
@@ -486,16 +490,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     libraryGameUpdates: true,
     showUpdateBadge: true,
   });
-  const [isTestingNotification, setIsTestingNotification] = useState<boolean>(false);
-  const [testNotificationSuccess, setTestNotificationSuccess] = useState<boolean>(false);
+  const [isTestingNotification, setIsTestingNotification] =
+    useState<boolean>(false);
+  const [testNotificationSuccess, setTestNotificationSuccess] =
+    useState<boolean>(false);
   const [isBrowsing, setIsBrowsing] = useState<boolean>(false);
   const [autostartEnabled, setAutostartEnabled] = useState<boolean>(false);
   const [isAutostartLoading, setIsAutostartLoading] = useState<boolean>(false);
   const [closeToTrayEnabled, setCloseToTrayEnabled] = useState<boolean>(false);
-  const [isCloseToTrayLoading, setIsCloseToTrayLoading] = useState<boolean>(false);
+  const [isCloseToTrayLoading, setIsCloseToTrayLoading] =
+    useState<boolean>(false);
 
   const {
     status: updaterStatus,
+    currentVersion,
     updateDetails,
     progress: updateProgress,
     error: updaterError,
@@ -652,7 +660,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
-  const updateTorrentSetting = <K extends keyof import("../lib/db").TorrentSettings>(
+  const updateTorrentSetting = <
+    K extends keyof import("../lib/db").TorrentSettings,
+  >(
     key: K,
     value: import("../lib/db").TorrentSettings[K],
   ) => {
@@ -660,19 +670,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     if (key === "uploadLimitKbps") setUploadLimit(value as number);
     if (key === "maxActiveDownloads") setMaxActiveTorrents(value as number);
     if (key === "seedAfterComplete") setSeedAfterComplete(value as boolean);
-    if (key === "applyFolderCoverIcon") setApplyFolderCoverIcon(value as boolean);
+    if (key === "applyFolderCoverIcon")
+      setApplyFolderCoverIcon(value as boolean);
 
     const updated = {
-      downloadLimitKbps: key === "downloadLimitKbps" ? (value as number) : downloadLimit,
-      uploadLimitKbps: key === "uploadLimitKbps" ? (value as number) : uploadLimit,
-      maxActiveDownloads: key === "maxActiveDownloads" ? (value as number) : maxActiveTorrents,
-      seedAfterComplete: key === "seedAfterComplete" ? (value as boolean) : seedAfterComplete,
-      applyFolderCoverIcon: key === "applyFolderCoverIcon" ? (value as boolean) : applyFolderCoverIcon,
+      downloadLimitKbps:
+        key === "downloadLimitKbps" ? (value as number) : downloadLimit,
+      uploadLimitKbps:
+        key === "uploadLimitKbps" ? (value as number) : uploadLimit,
+      maxActiveDownloads:
+        key === "maxActiveDownloads" ? (value as number) : maxActiveTorrents,
+      seedAfterComplete:
+        key === "seedAfterComplete" ? (value as boolean) : seedAfterComplete,
+      applyFolderCoverIcon:
+        key === "applyFolderCoverIcon"
+          ? (value as boolean)
+          : applyFolderCoverIcon,
     };
     saveTorrentSettings(updated);
   };
 
-  const updateNotifSetting = (key: keyof NotificationSettings, value: boolean) => {
+  const updateNotifSetting = (
+    key: keyof NotificationSettings,
+    value: boolean,
+  ) => {
     const updated = {
       ...notifSettings,
       [key]: value,
@@ -729,7 +750,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       opened={opened}
       onClose={onClose}
       title={
-        <Group justify="space-between" align="center" style={{ width: "100%" }} pr="md">
+        <Group
+          justify="space-between"
+          align="center"
+          style={{ width: "100%" }}
+          pr="md"
+        >
           <Group gap="xs">
             <Settings size={18} color="var(--mantine-color-blue-4)" />
             <Text fw={700} size="sm" className="heading-font">
@@ -757,24 +783,35 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       }}
     >
       <Stack gap="md" mt="xs">
-        <Tabs defaultValue="application" color="blue" radius="md" variant="pills">
+        <Tabs
+          defaultValue="application"
+          color="blue"
+          radius="md"
+          variant="pills"
+        >
           <Tabs.List grow mb="sm">
             <Tabs.Tab
               value="application"
-              leftSection={<Settings size={15} color="var(--mantine-color-blue-4)" />}
+              leftSection={
+                <Settings size={15} color="var(--mantine-color-blue-4)" />
+              }
             >
               General
             </Tabs.Tab>
             <Tabs.Tab
               value="downloads"
-              leftSection={<DownloadCloud size={15} color="var(--mantine-color-teal-4)" />}
+              leftSection={
+                <DownloadCloud size={15} color="var(--mantine-color-teal-4)" />
+              }
             >
               Downloads
             </Tabs.Tab>
             {isLinux && (
               <Tabs.Tab
                 value="linux"
-                leftSection={<Gauge size={15} color="var(--mantine-color-cyan-4)" />}
+                leftSection={
+                  <Gauge size={15} color="var(--mantine-color-cyan-4)" />
+                }
               >
                 Linux Compatibility
               </Tabs.Tab>
@@ -789,7 +826,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 p="md"
                 radius="md"
                 bg="var(--mantine-color-default)"
-                style={{ border: "1px solid var(--mantine-color-default-border)" }}
+                style={{
+                  border: "1px solid var(--mantine-color-default-border)",
+                }}
               >
                 <Stack gap="sm">
                   <Group justify="space-between" align="center">
@@ -800,12 +839,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </Text>
                     </Group>
                     <Badge color="blue" size="xs" variant="light">
-                      v{updateDetails?.currentVersion || "1.0.10"}
+                      v{currentVersion || updateDetails?.currentVersion}
                     </Badge>
                   </Group>
 
                   <Text size="xs" c="dimmed">
-                    Check for new versions, bug fixes, and feature updates directly from GitHub Releases.
+                    Check for new versions, bug fixes, and feature updates
+                    directly from GitHub Releases.
                   </Text>
 
                   {updaterStatus === "error" && updaterError && (
@@ -822,9 +862,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   )}
 
                   {updaterStatus === "up-to-date" && (
-                    <Paper p="xs" radius="md" bg="var(--mantine-color-body)" withBorder>
+                    <Paper
+                      p="xs"
+                      radius="md"
+                      bg="var(--mantine-color-body)"
+                      withBorder
+                    >
                       <Group gap="xs">
-                        <CheckCircle2 size={16} color="var(--mantine-color-teal-5)" />
+                        <CheckCircle2
+                          size={16}
+                          color="var(--mantine-color-teal-5)"
+                        />
                         <Text size="xs" fw={600} c="teal">
                           FitRepacks Library is up to date!
                         </Text>
@@ -837,7 +885,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       p="sm"
                       radius="md"
                       bg="var(--mantine-color-body)"
-                      style={{ border: "1px solid var(--mantine-color-blue-6)" }}
+                      style={{
+                        border: "1px solid var(--mantine-color-blue-6)",
+                      }}
                     >
                       <Stack gap="xs">
                         <Group justify="space-between" align="center">
@@ -847,7 +897,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             </Badge>
                             {updateDetails.date && (
                               <Text size="xs" c="dimmed">
-                                {new Date(updateDetails.date).toLocaleDateString()}
+                                {new Date(
+                                  updateDetails.date,
+                                ).toLocaleDateString()}
                               </Text>
                             )}
                           </Group>
@@ -879,14 +931,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   )}
 
                   {updaterStatus === "downloading" && (
-                    <Paper p="sm" radius="md" bg="var(--mantine-color-body)" withBorder>
+                    <Paper
+                      p="sm"
+                      radius="md"
+                      bg="var(--mantine-color-body)"
+                      withBorder
+                    >
                       <Stack gap="xs">
                         <Group justify="space-between" align="center">
                           <Text size="xs" fw={600}>
                             Downloading Update ({updateProgress.percent}%)...
                           </Text>
                           <Text size="xs" c="dimmed">
-                            {(updateProgress.downloadedBytes / (1024 * 1024)).toFixed(1)} MB
+                            {(
+                              updateProgress.downloadedBytes /
+                              (1024 * 1024)
+                            ).toFixed(1)}{" "}
+                            MB
                             {updateProgress.totalBytes > 0 &&
                               ` / ${(updateProgress.totalBytes / (1024 * 1024)).toFixed(1)} MB`}
                           </Text>
@@ -907,17 +968,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       p="sm"
                       radius="md"
                       bg="var(--mantine-color-body)"
-                      style={{ border: "1px solid var(--mantine-color-teal-6)" }}
+                      style={{
+                        border: "1px solid var(--mantine-color-teal-6)",
+                      }}
                     >
                       <Group justify="space-between" align="center">
                         <Group gap="xs">
-                          <CheckCircle2 size={18} color="var(--mantine-color-teal-5)" />
+                          <CheckCircle2
+                            size={18}
+                            color="var(--mantine-color-teal-5)"
+                          />
                           <Stack gap={2}>
                             <Text size="xs" fw={700} c="teal">
                               Update Downloaded!
                             </Text>
                             <Text size="xs" c="dimmed">
-                              Restart the application to finish applying the update.
+                              Restart the application to finish applying the
+                              update.
                             </Text>
                           </Stack>
                         </Group>
@@ -934,21 +1001,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </Paper>
                   )}
 
-                  {updaterStatus !== "downloading" && updaterStatus !== "ready-to-restart" && (
-                    <Group justify="flex-end">
-                      <Button
-                        variant="light"
-                        color="blue"
-                        size="xs"
-                        radius="md"
-                        loading={updaterStatus === "checking"}
-                        leftSection={<RefreshCw size={14} />}
-                        onClick={() => checkForUpdates()}
-                      >
-                        Check for Updates
-                      </Button>
-                    </Group>
-                  )}
+                  {updaterStatus !== "downloading" &&
+                    updaterStatus !== "ready-to-restart" && (
+                      <Group justify="flex-end">
+                        <Button
+                          variant="light"
+                          color="blue"
+                          size="xs"
+                          radius="md"
+                          loading={updaterStatus === "checking"}
+                          leftSection={<RefreshCw size={14} />}
+                          onClick={() => checkForUpdates()}
+                        >
+                          Check for Updates
+                        </Button>
+                      </Group>
+                    )}
                 </Stack>
               </Paper>
 
@@ -957,7 +1025,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 p="md"
                 radius="md"
                 bg="var(--mantine-color-default)"
-                style={{ border: "1px solid var(--mantine-color-default-border)" }}
+                style={{
+                  border: "1px solid var(--mantine-color-default-border)",
+                }}
               >
                 <Stack gap="sm">
                   <Group justify="space-between" align="center">
@@ -977,7 +1047,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     description="Automatically launch FitRepacks Library when your computer boots up"
                     checked={autostartEnabled}
                     disabled={isAutostartLoading}
-                    onChange={(e) => handleToggleAutostart(e.currentTarget.checked)}
+                    onChange={(e) =>
+                      handleToggleAutostart(e.currentTarget.checked)
+                    }
                     color="teal"
                     size="sm"
                   />
@@ -989,12 +1061,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 p="md"
                 radius="md"
                 bg="var(--mantine-color-default)"
-                style={{ border: "1px solid var(--mantine-color-default-border)" }}
+                style={{
+                  border: "1px solid var(--mantine-color-default-border)",
+                }}
               >
                 <Stack gap="sm">
                   <Group justify="space-between" align="center">
                     <Group gap="xs">
-                      <Minimize2 size={16} color="var(--mantine-color-blue-4)" />
+                      <Minimize2
+                        size={16}
+                        color="var(--mantine-color-blue-4)"
+                      />
                       <Text size="sm" fw={700}>
                         System Tray & Close Action
                       </Text>
@@ -1009,7 +1086,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     description="When closing the app window, keep FitRepacks Library running minimized in the system tray"
                     checked={closeToTrayEnabled}
                     disabled={isCloseToTrayLoading}
-                    onChange={(e) => handleToggleCloseToTray(e.currentTarget.checked)}
+                    onChange={(e) =>
+                      handleToggleCloseToTray(e.currentTarget.checked)
+                    }
                     color="blue"
                     size="sm"
                   />
@@ -1021,12 +1100,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 p="md"
                 radius="md"
                 bg="var(--mantine-color-default)"
-                style={{ border: "1px solid var(--mantine-color-default-border)" }}
+                style={{
+                  border: "1px solid var(--mantine-color-default-border)",
+                }}
               >
                 <Stack gap="sm">
                   <Group justify="space-between" align="center">
                     <Group gap="xs">
-                      <BellRing size={16} color="var(--mantine-color-violet-4)" />
+                      <BellRing
+                        size={16}
+                        color="var(--mantine-color-violet-4)"
+                      />
                       <Text size="sm" fw={700}>
                         Notifications
                       </Text>
@@ -1037,7 +1121,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </Group>
 
                   <Text size="xs" c="dimmed">
-                    Get notified when new repacks drop or games in your library receive updates.
+                    Get notified when new repacks drop or games in your library
+                    receive updates.
                   </Text>
 
                   <Group justify="space-between" align="center">
@@ -1045,7 +1130,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       label="Desktop Notifications"
                       description="Show system notifications for game updates and releases"
                       checked={notifSettings.masterEnabled}
-                      onChange={(e) => updateNotifSetting("masterEnabled", e.currentTarget.checked)}
+                      onChange={(e) =>
+                        updateNotifSetting(
+                          "masterEnabled",
+                          e.currentTarget.checked,
+                        )
+                      }
                       color="violet"
                       size="sm"
                     />
@@ -1056,7 +1146,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       size="xs"
                       radius="md"
                       loading={isTestingNotification}
-                      leftSection={testNotificationSuccess ? <Check size={14} /> : <Bell size={14} />}
+                      leftSection={
+                        testNotificationSuccess ? (
+                          <Check size={14} />
+                        ) : (
+                          <Bell size={14} />
+                        )
+                      }
                       onClick={handleTestNotification}
                     >
                       {testNotificationSuccess ? "Sent!" : "Test Notification"}
@@ -1084,7 +1180,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           description="New repacks and patch updates"
                           checked={notifSettings.fitgirlNotifications}
                           onChange={(e) =>
-                            updateNotifSetting("fitgirlNotifications", e.currentTarget.checked)
+                            updateNotifSetting(
+                              "fitgirlNotifications",
+                              e.currentTarget.checked,
+                            )
                           }
                           color="pink"
                           size="sm"
@@ -1098,7 +1197,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           description="New direct-play releases and updates"
                           checked={notifSettings.steamripNotifications}
                           onChange={(e) =>
-                            updateNotifSetting("steamripNotifications", e.currentTarget.checked)
+                            updateNotifSetting(
+                              "steamripNotifications",
+                              e.currentTarget.checked,
+                            )
                           }
                           color="cyan"
                           size="sm"
@@ -1112,7 +1214,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           description="When a game you have installed receives a newer version"
                           checked={notifSettings.libraryGameUpdates}
                           onChange={(e) =>
-                            updateNotifSetting("libraryGameUpdates", e.currentTarget.checked)
+                            updateNotifSetting(
+                              "libraryGameUpdates",
+                              e.currentTarget.checked,
+                            )
                           }
                           color="teal"
                           size="sm"
@@ -1126,7 +1231,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           description="Show an UPDATE badge on games with available patches"
                           checked={notifSettings.showUpdateBadge}
                           onChange={(e) =>
-                            updateNotifSetting("showUpdateBadge", e.currentTarget.checked)
+                            updateNotifSetting(
+                              "showUpdateBadge",
+                              e.currentTarget.checked,
+                            )
                           }
                           color="yellow"
                           size="sm"
@@ -1142,7 +1250,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 p="md"
                 radius="md"
                 bg="var(--mantine-color-default)"
-                style={{ border: "1px solid var(--mantine-color-default-border)" }}
+                style={{
+                  border: "1px solid var(--mantine-color-default-border)",
+                }}
               >
                 <Stack gap="sm">
                   <Group justify="space-between" align="center">
@@ -1162,7 +1272,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     description="Automatically sets folder.ico so Windows Explorer displays the cover image"
                     checked={applyFolderCoverIcon}
                     onChange={(e) => {
-                      updateTorrentSetting("applyFolderCoverIcon", e.currentTarget.checked);
+                      updateTorrentSetting(
+                        "applyFolderCoverIcon",
+                        e.currentTarget.checked,
+                      );
                     }}
                     color="blue"
                     size="sm"
@@ -1175,7 +1288,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 p="md"
                 radius="md"
                 bg="var(--mantine-color-default)"
-                style={{ border: "1px solid var(--mantine-color-default-border)" }}
+                style={{
+                  border: "1px solid var(--mantine-color-default-border)",
+                }}
               >
                 <Stack gap="sm">
                   <Group justify="space-between" align="center">
@@ -1191,7 +1306,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </Group>
 
                   <Text size="xs" c="dimmed">
-                    Hide games from specific genres in your FitGirl and SteamRIP feeds.
+                    Hide games from specific genres in your FitGirl and SteamRIP
+                    feeds.
                   </Text>
 
                   <MultiSelect
@@ -1206,7 +1322,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     clearable
                     size="sm"
                     radius="md"
-                    leftSection={<Filter size={14} color="var(--mantine-color-red-4)" />}
+                    leftSection={
+                      <Filter size={14} color="var(--mantine-color-red-4)" />
+                    }
                   />
                 </Stack>
               </Paper>
@@ -1216,7 +1334,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 p="md"
                 radius="md"
                 bg="var(--mantine-color-default)"
-                style={{ border: "1px solid var(--mantine-color-default-border)" }}
+                style={{
+                  border: "1px solid var(--mantine-color-default-border)",
+                }}
               >
                 <Stack gap="sm">
                   <Group justify="space-between" align="center">
@@ -1239,11 +1359,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     data={[
                       {
                         value: "first",
-                        label: "Trailers First (Play video trailers first, then screenshots)",
+                        label:
+                          "Trailers First (Play video trailers first, then screenshots)",
                       },
                       {
                         value: "last",
-                        label: "Screenshots First (Show screenshots first, video trailers last)",
+                        label:
+                          "Screenshots First (Show screenshots first, video trailers last)",
                       },
                     ]}
                     value={carouselVideoPosition}
@@ -1255,7 +1377,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     }}
                     size="sm"
                     radius="md"
-                    leftSection={<Film size={14} color="var(--mantine-color-blue-4)" />}
+                    leftSection={
+                      <Film size={14} color="var(--mantine-color-blue-4)" />
+                    }
                   />
                 </Stack>
               </Paper>
@@ -1270,12 +1394,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 p="md"
                 radius="md"
                 bg="var(--mantine-color-default)"
-                style={{ border: "1px solid var(--mantine-color-default-border)" }}
+                style={{
+                  border: "1px solid var(--mantine-color-default-border)",
+                }}
               >
                 <Stack gap="sm">
                   <Group justify="space-between" align="center">
                     <Group gap="xs">
-                      <DownloadCloud size={16} color="var(--mantine-color-blue-4)" />
+                      <DownloadCloud
+                        size={16}
+                        color="var(--mantine-color-blue-4)"
+                      />
                       <Text size="sm" fw={700}>
                         Download Location
                       </Text>
@@ -1301,7 +1430,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       style={{ flex: 1 }}
                       size="sm"
                       radius="md"
-                      leftSection={<Folder size={16} color="var(--mantine-color-blue-4)" />}
+                      leftSection={
+                        <Folder size={16} color="var(--mantine-color-blue-4)" />
+                      }
                     />
                     <Button
                       variant="light"
@@ -1322,7 +1453,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 p="md"
                 radius="md"
                 bg="var(--mantine-color-default)"
-                style={{ border: "1px solid var(--mantine-color-default-border)" }}
+                style={{
+                  border: "1px solid var(--mantine-color-default-border)",
+                }}
               >
                 <Stack gap="sm">
                   <Group justify="space-between" align="center">
@@ -1338,7 +1471,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </Group>
 
                   <Text size="xs" c="dimmed">
-                    Automatically select these voiceover and audio packs when adding a game.
+                    Automatically select these voiceover and audio packs when
+                    adding a game.
                   </Text>
 
                   <MultiSelect
@@ -1346,14 +1480,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     value={preferredLangs}
                     onChange={(langs) => {
                       setPreferredLangs(langs);
-                      savePreferredLanguages(langs.length > 0 ? langs : ["english"]);
+                      savePreferredLanguages(
+                        langs.length > 0 ? langs : ["english"],
+                      );
                     }}
                     placeholder="Choose languages..."
                     searchable
                     clearable
                     size="sm"
                     radius="md"
-                    leftSection={<Languages size={16} color="var(--mantine-color-teal-4)" />}
+                    leftSection={
+                      <Languages
+                        size={16}
+                        color="var(--mantine-color-teal-4)"
+                      />
+                    }
                   />
                 </Stack>
               </Paper>
@@ -1363,7 +1504,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 p="md"
                 radius="md"
                 bg="var(--mantine-color-default)"
-                style={{ border: "1px solid var(--mantine-color-default-border)" }}
+                style={{
+                  border: "1px solid var(--mantine-color-default-border)",
+                }}
               >
                 <Stack gap="sm">
                   <Group justify="space-between" align="center">
@@ -1397,7 +1540,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       }}
                       size="sm"
                       radius="md"
-                      leftSection={<ArrowDown size={14} color="var(--mantine-color-teal-4)" />}
+                      leftSection={
+                        <ArrowDown
+                          size={14}
+                          color="var(--mantine-color-teal-4)"
+                        />
+                      }
                     />
 
                     <NumberInput
@@ -1414,7 +1562,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       }}
                       size="sm"
                       radius="md"
-                      leftSection={<ArrowUp size={14} color="var(--mantine-color-blue-4)" />}
+                      leftSection={
+                        <ArrowUp
+                          size={14}
+                          color="var(--mantine-color-blue-4)"
+                        />
+                      }
                     />
                   </Group>
 
@@ -1432,7 +1585,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       }}
                       size="sm"
                       radius="md"
-                      leftSection={<HardDrive size={14} color="var(--mantine-color-orange-4)" />}
+                      leftSection={
+                        <HardDrive
+                          size={14}
+                          color="var(--mantine-color-orange-4)"
+                        />
+                      }
                     />
 
                     <Stack gap={6} justify="center" mt="xs">
@@ -1444,7 +1602,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         description="Keep uploading to peers once download reaches 100%"
                         checked={seedAfterComplete}
                         onChange={(e) => {
-                          updateTorrentSetting("seedAfterComplete", e.currentTarget.checked);
+                          updateTorrentSetting(
+                            "seedAfterComplete",
+                            e.currentTarget.checked,
+                          );
                         }}
                         color="teal"
                         size="sm"
@@ -1463,7 +1624,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 p="md"
                 radius="md"
                 bg="var(--mantine-color-default)"
-                style={{ border: "1px solid var(--mantine-color-default-border)" }}
+                style={{
+                  border: "1px solid var(--mantine-color-default-border)",
+                }}
               >
                 <Stack gap="sm">
                   <Group justify="space-between" align="center">
@@ -1495,7 +1658,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           : [
                               {
                                 value: "managed-ge-proton",
-                                label: "GloriousEggroll GE-Proton (Auto-Managed)",
+                                label:
+                                  "GloriousEggroll GE-Proton (Auto-Managed)",
                               },
                             ]
                       }
@@ -1534,7 +1698,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     description="Keep GE-Proton updated to the latest release"
                     checked={linuxSettings.autoUpdateProtonGe}
                     onChange={(e) =>
-                      updateLinuxSetting("autoUpdateProtonGe", e.currentTarget.checked)
+                      updateLinuxSetting(
+                        "autoUpdateProtonGe",
+                        e.currentTarget.checked,
+                      )
                     }
                     color="cyan"
                     size="sm"
@@ -1545,7 +1712,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     description="Temporary system optimizations while gaming"
                     checked={linuxSettings.enableGameMode}
                     onChange={(e) =>
-                      updateLinuxSetting("enableGameMode", e.currentTarget.checked)
+                      updateLinuxSetting(
+                        "enableGameMode",
+                        e.currentTarget.checked,
+                      )
                     }
                     color="cyan"
                     size="sm"
@@ -1556,7 +1726,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     description="Vulkan graphics translation for DirectX games"
                     checked={linuxSettings.enableDxvkAsync}
                     onChange={(e) =>
-                      updateLinuxSetting("enableDxvkAsync", e.currentTarget.checked)
+                      updateLinuxSetting(
+                        "enableDxvkAsync",
+                        e.currentTarget.checked,
+                      )
                     }
                     color="cyan"
                     size="sm"
@@ -1567,7 +1740,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     description="Reduced CPU overhead for multi-threaded games"
                     checked={linuxSettings.enableEsyncFsync}
                     onChange={(e) =>
-                      updateLinuxSetting("enableEsyncFsync", e.currentTarget.checked)
+                      updateLinuxSetting(
+                        "enableEsyncFsync",
+                        e.currentTarget.checked,
+                      )
                     }
                     color="cyan"
                     size="sm"
@@ -1578,7 +1754,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     description="In-game FPS and hardware monitoring"
                     checked={linuxSettings.enableMangoHud}
                     onChange={(e) =>
-                      updateLinuxSetting("enableMangoHud", e.currentTarget.checked)
+                      updateLinuxSetting(
+                        "enableMangoHud",
+                        e.currentTarget.checked,
+                      )
                     }
                     color="cyan"
                     size="sm"
@@ -1592,7 +1771,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         <Divider my="xs" />
 
         <Group justify="flex-end">
-          <Button variant="light" color="blue" size="sm" radius="md" onClick={onClose}>
+          <Button
+            variant="light"
+            color="blue"
+            size="sm"
+            radius="md"
+            onClick={onClose}
+          >
             Close
           </Button>
         </Group>
