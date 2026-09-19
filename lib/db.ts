@@ -1,5 +1,5 @@
 import Database from "@tauri-apps/plugin-sql";
-import { Game } from "./types";
+import { Game, PlaySession } from "./types";
 import { RepackPost } from "./repackTypes";
 import { extractGameVersion, cleanGameTitle } from "./gameLinker";
 import { pb } from "./pocketbase";
@@ -268,9 +268,11 @@ async function loadGamesFromSQLite(): Promise<Game[]> {
           ignoredUpdateDate: r.ignored_update_date || undefined,
         };
       });
-      cachedGames = parsed;
+      const sanitized = parsed.map(sanitizeGameRecord);
+      cachedGames = sanitized;
       isInitialized = true;
-      return parsed;
+      saveGamesToSQLite(sanitized);
+      return sanitized;
     }
   } catch (err) {
     console.error("Error loading games from SQLite via plugin-sql:", err);
@@ -1004,6 +1006,73 @@ export function findMatchingGameInLibrary(
 }
 
 /**
+ * Deduplicate play sessions that were recorded concurrently due to race conditions or duplicate exit triggers.
+ */
+export function deduplicatePlaySessions(sessions: PlaySession[]): PlaySession[] {
+  if (!Array.isArray(sessions) || sessions.length === 0) return [];
+  const deduplicated: PlaySession[] = [];
+  const sorted = [...sessions].sort(
+    (a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime(),
+  );
+
+  for (const session of sorted) {
+    if (!session || !session.startTime) continue;
+    const sessionTime = new Date(session.startTime).getTime();
+    if (isNaN(sessionTime)) continue;
+
+    // Check if another session was recorded within 120 seconds of this session
+    const existingIndex = deduplicated.findIndex((s) => {
+      const existingTime = new Date(s.startTime).getTime();
+      return Math.abs(existingTime - sessionTime) <= 120000;
+    });
+
+    if (existingIndex === -1) {
+      deduplicated.push({
+        id: session.id || `session_${sessionTime}`,
+        startTime: session.startTime,
+        durationMinutes: Math.max(session.durationMinutes || 1, 1),
+      });
+    } else {
+      // Keep the longer duration recorded during the burst
+      deduplicated[existingIndex].durationMinutes = Math.max(
+        deduplicated[existingIndex].durationMinutes,
+        session.durationMinutes || 1,
+      );
+    }
+  }
+
+  return deduplicated.slice(0, 50);
+}
+
+/**
+ * Sanitize and heal game records with corrupted, duplicated, or drifted playtime data.
+ */
+export function sanitizeGameRecord(g: Game): Game {
+  const existingSessions = Array.isArray(g.playSessions) ? g.playSessions : [];
+  const cleanSessions = deduplicatePlaySessions(existingSessions);
+
+  let finalMinutes = g.playtimeMinutes || 0;
+  if (cleanSessions.length > 0) {
+    const sessionTotal = cleanSessions.reduce(
+      (acc, s) => acc + (s.durationMinutes || 0),
+      0,
+    );
+    finalMinutes = sessionTotal;
+  } else if (g.hoursPlayed !== undefined && g.hoursPlayed > 0 && finalMinutes === 0) {
+    finalMinutes = g.hoursPlayed * 60;
+  }
+
+  const finalHours = finalMinutes / 60;
+
+  return {
+    ...g,
+    playtimeMinutes: finalMinutes,
+    hoursPlayed: finalHours,
+    playSessions: cleanSessions,
+  };
+}
+
+/**
  * Merge an incoming game (e.g. from scanning / installation) into an existing library game
  */
 export function mergeGameRecords(existing: Game, incoming: Game): Game {
@@ -1044,7 +1113,17 @@ export function mergeGameRecords(existing: Game, incoming: Game): Game {
     updatedTags = updatedTags.filter((t) => t.toLowerCase() !== "wishlist");
   }
 
-  return {
+  const mergedSessions = deduplicatePlaySessions([
+    ...(Array.isArray(existing.playSessions) ? existing.playSessions : []),
+    ...(Array.isArray(incoming.playSessions) ? incoming.playSessions : []),
+  ]);
+
+  const maxPlaytimeMinutes = Math.max(
+    existing.playtimeMinutes || 0,
+    incoming.playtimeMinutes || 0,
+  );
+
+  const rawMerged: Game = {
     ...existing,
     ...incoming,
     id: existing.id,
@@ -1063,16 +1142,13 @@ export function mergeGameRecords(existing: Game, incoming: Game): Game {
       incoming.version ||
       existing.installedVersion ||
       existing.version,
-    playtimeMinutes:
-      (existing.playtimeMinutes || 0) +
-      (incoming.playtimeMinutes && incoming.id === existing.id
-        ? incoming.playtimeMinutes
-        : 0),
-    hoursPlayed: existing.hoursPlayed || incoming.hoursPlayed,
-    playSessions:
-      existing.playSessions && existing.playSessions.length > 0
-        ? existing.playSessions
-        : incoming.playSessions,
+    playtimeMinutes: maxPlaytimeMinutes,
+    hoursPlayed: Math.max(
+      existing.hoursPlayed || 0,
+      incoming.hoursPlayed || 0,
+      maxPlaytimeMinutes / 60,
+    ),
+    playSessions: mergedSessions,
     isFavorite: existing.isFavorite ?? incoming.isFavorite,
     isCompleted: isEffectivelyCompleted,
     completedAt: existing.completedAt || incoming.completedAt,
@@ -1112,6 +1188,7 @@ export function mergeGameRecords(existing: Game, incoming: Game): Game {
     mirrorGroups: existing.mirrorGroups || incoming.mirrorGroups,
     gameUpdates: existing.gameUpdates || incoming.gameUpdates,
   };
+  return sanitizeGameRecord(rawMerged);
 }
 
 export function addGameToStorage(game: Game): Game[] {
@@ -1421,32 +1498,72 @@ export function updateGamePlaytime(
   id: string,
   additionalMinutes: number,
 ): Game[] {
+  if (!additionalMinutes || additionalMinutes <= 0) return getStoredGames();
   const games = getStoredGames();
   const now = new Date().toISOString();
+  const sessionDuration = Math.max(Math.round(additionalMinutes), 1);
+
   const updated = games.map((g) => {
     if (g.id === id) {
-      const newMinutes = (g.playtimeMinutes || 0) + additionalMinutes;
-      const newHours = newMinutes / 60;
-      const sessionDuration = Math.max(Math.round(additionalMinutes), 1);
-      const existingSessions = Array.isArray(g.playSessions) ? g.playSessions : [];
-      const newSession = {
+      const existingSessions = Array.isArray(g.playSessions) ? [...g.playSessions] : [];
+
+      // Check if another session was recorded within the last 120 seconds for this game
+      const lastSession = existingSessions[0];
+      if (
+        lastSession &&
+        Math.abs(new Date(now).getTime() - new Date(lastSession.startTime).getTime()) < 120000
+      ) {
+        lastSession.durationMinutes = Math.max(
+          lastSession.durationMinutes || 1,
+          sessionDuration,
+        );
+        const cleanSessions = deduplicatePlaySessions(existingSessions);
+        const totalMins = cleanSessions.reduce(
+          (acc, s) => acc + (s.durationMinutes || 0),
+          0,
+        );
+        return {
+          ...g,
+          playtimeMinutes: totalMins,
+          hoursPlayed: totalMins / 60,
+          lastPlayed: now,
+          playSessions: cleanSessions,
+        };
+      }
+
+      const newSession: PlaySession = {
         id: `session_${Date.now()}`,
         startTime: now,
         durationMinutes: sessionDuration,
       };
+
+      const cleanSessions = deduplicatePlaySessions([
+        newSession,
+        ...existingSessions,
+      ]);
+      const totalMins = cleanSessions.reduce(
+        (acc, s) => acc + (s.durationMinutes || 0),
+        0,
+      );
+
       return {
         ...g,
-        playtimeMinutes: newMinutes,
-        hoursPlayed: newHours,
+        playtimeMinutes: totalMins,
+        hoursPlayed: totalMins / 60,
         lastPlayed: now,
-        playSessions: [newSession, ...existingSessions].slice(0, 50),
+        playSessions: cleanSessions,
       };
     }
     return g;
   });
-  saveGamesToSQLite(updated);
-  syncRecentGamesToTrayAndTaskbar(updated);
-  return updated;
+
+  const sanitized = updated.map(sanitizeGameRecord);
+  saveGamesToSQLite(sanitized);
+  syncRecentGamesToTrayAndTaskbar(sanitized);
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("fitrepacks-games-updated"));
+  }
+  return sanitized;
 }
 
 export interface RecentGamePayload {

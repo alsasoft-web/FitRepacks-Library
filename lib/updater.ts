@@ -33,7 +33,8 @@ export interface AppUpdaterState {
   progress: UpdateProgress;
   error: string | null;
   hasCheckedOnStartup: boolean;
-  checkForUpdates: (silent?: boolean) => Promise<AppUpdateDetails | null>;
+  lastCheckedTime: number;
+  checkForUpdates: (silent?: boolean, force?: boolean) => Promise<AppUpdateDetails | null>;
   installUpdate: () => Promise<void>;
   restartApp: () => Promise<void>;
   resetStatus: () => void;
@@ -76,6 +77,7 @@ export const useAppUpdater = create<AppUpdaterState>((set, get) => ({
   },
   error: null,
   hasCheckedOnStartup: false,
+  lastCheckedTime: 0,
 
   loadCurrentVersion: async () => {
     try {
@@ -88,16 +90,23 @@ export const useAppUpdater = create<AppUpdaterState>((set, get) => ({
     return get().currentVersion;
   },
 
-  checkForUpdates: async (silent = false) => {
+  checkForUpdates: async (silent = false, force = false) => {
     const currentStatus = get().status;
     if (
+      currentStatus === "checking" ||
       currentStatus === "downloading" ||
       currentStatus === "ready-to-restart"
     ) {
       return get().updateDetails;
     }
 
-    set({ status: "checking", error: null });
+    const now = Date.now();
+    // Throttle silent checks to avoid rapid repeat requests when toggling focus (e.g. 30s)
+    if (silent && !force && now - get().lastCheckedTime < 30000) {
+      return get().updateDetails;
+    }
+
+    set({ status: "checking", error: null, lastCheckedTime: now });
 
     try {
       const v = await getVersion().catch(() => null);

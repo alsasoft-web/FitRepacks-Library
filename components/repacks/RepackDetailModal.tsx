@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   Modal,
   Image,
@@ -68,6 +68,7 @@ import {
   getRiotpixelsFullResUrl,
 } from "../../lib/gameLinker";
 import { openInBrowser } from "../../lib/openUrl";
+import { ImageLightboxModal } from "../common/ImageLightboxModal";
 
 /** Extract a clean hoster display name from a URL */
 function getHosterName(url: string): string {
@@ -210,12 +211,25 @@ export const RepackDetailModal: React.FC<RepackDetailModalProps> = ({
   onToggleRead,
   onOpenTorrentDownload,
 }) => {
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [isLightboxOpen, setIsLightboxOpen] = useState<boolean>(false);
+  const [selectedScreenshotIndex, setSelectedScreenshotIndex] = useState<number>(0);
   const [activeVideoIndex, setActiveVideoIndex] = useState<number>(0);
   const [isWishlisted, setIsWishlisted] = useState<boolean>(false);
   const [isCompleted, setIsCompleted] = useState<boolean>(false);
   const [isInstalled, setIsInstalled] = useState<boolean>(false);
   const [isFavorite, setIsFavorite] = useState<boolean>(false);
+
+  const sortedScreenshots = useMemo(() => {
+    if (!post?.screenshots || post.screenshots.length === 0) return [];
+    const allScreenshots = post.screenshots || [];
+    const gifScreenshots = allScreenshots.filter(
+      (s) => s && /\.gif(?:\?.*)?$/i.test(s),
+    );
+    const staticScreenshots = allScreenshots.filter(
+      (s) => s && !/\.gif(?:\?.*)?$/i.test(s),
+    );
+    return [...gifScreenshots, ...staticScreenshots];
+  }, [post?.screenshots]);
 
   useEffect(() => {
     if (post) {
@@ -1071,11 +1085,13 @@ export const RepackDetailModal: React.FC<RepackDetailModalProps> = ({
                         {sortedScreenshots.map((src, idx) => {
                           const isGif = /\.gif(?:\?.*)?$/i.test(src);
                           const thumbUrl = getRiotpixels240pUrl(src);
-                          const fullUrl = getRiotpixelsFullResUrl(src);
                           return (
                             <Box
                               key={idx}
-                              onClick={() => setSelectedImage(fullUrl)}
+                              onClick={() => {
+                                setSelectedScreenshotIndex(idx);
+                                setIsLightboxOpen(true);
+                              }}
                               style={{
                                 position: "relative",
                                 borderRadius: "8px",
@@ -1364,32 +1380,13 @@ export const RepackDetailModal: React.FC<RepackDetailModalProps> = ({
       </Modal>
 
       {/* Lightbox Screenshot Modal */}
-      <Modal
-        opened={!!selectedImage}
-        onClose={() => setSelectedImage(null)}
-        size="calc(100vw - 3rem)"
-        padding="0"
-        withCloseButton={true}
-        centered
-        styles={{
-          content: {
-            backgroundColor: "var(--mantine-color-dark-9)",
-            border: "1px solid var(--mantine-color-dark-4)",
-            overflow: "hidden",
-          },
-        }}
-      >
-        {selectedImage && (
-          <Box p="xs" style={{ display: "flex", justifyContent: "center" }}>
-            <Image
-              src={selectedImage}
-              alt="Screenshot Preview"
-              fit="contain"
-              style={{ maxHeight: "85vh", borderRadius: "8px" }}
-            />
-          </Box>
-        )}
-      </Modal>
+      <ImageLightboxModal
+        opened={isLightboxOpen}
+        onClose={() => setIsLightboxOpen(false)}
+        images={sortedScreenshots}
+        initialIndex={selectedScreenshotIndex}
+        title={cleanGameTitle(post.title)}
+      />
     </>
   );
 };

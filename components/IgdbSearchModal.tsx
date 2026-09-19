@@ -38,6 +38,7 @@ import {
 } from "lucide-react";
 import { IgdbGameMetadata, Game } from "../lib/types";
 import { searchIgdbMetadata } from "../lib/igdb";
+import { ImageLightboxModal } from "./common/ImageLightboxModal";
 import {
   addGameToStorage,
   getStoredGames,
@@ -66,6 +67,8 @@ export const IgdbSearchModal: React.FC<IgdbSearchModalProps> = ({
   const [selectedGame, setSelectedGame] = useState<IgdbGameMetadata | null>(null);
   const [libraryGames, setLibraryGames] = useState<Game[]>(() => getStoredGames());
   const [lastError, setLastError] = useState<string | null>(null);
+  const [isLightboxOpen, setIsLightboxOpen] = useState(false);
+  const [selectedScreenshotIndex, setSelectedScreenshotIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -695,11 +698,17 @@ export const IgdbSearchModal: React.FC<IgdbSearchModalProps> = ({
                       {selectedGame.screenshots.slice(0, 6).map((s, i) => (
                         <Box
                           key={i}
+                          onClick={() => {
+                            setSelectedScreenshotIndex(i);
+                            setIsLightboxOpen(true);
+                          }}
                           style={{
                             height: 80,
                             borderRadius: 6,
                             overflow: "hidden",
                             border: "1px solid var(--mantine-color-default-border)",
+                            cursor: "pointer",
+                            transition: "transform 150ms ease, border-color 150ms ease",
                           }}
                         >
                           <Image
@@ -707,7 +716,7 @@ export const IgdbSearchModal: React.FC<IgdbSearchModalProps> = ({
                             alt={`screenshot ${i + 1}`}
                             h={80}
                             w="100%"
-                            style={{ objectFit: "cover" }}
+                            style={{ objectFit: "cover", transition: "transform 200ms ease" }}
                           />
                         </Box>
                       ))}
@@ -759,6 +768,17 @@ export const IgdbSearchModal: React.FC<IgdbSearchModalProps> = ({
           </Paper>
         )}
       </Stack>
+
+      {/* In-App Screenshot Lightbox Modal */}
+      {selectedGame?.screenshots && (
+        <ImageLightboxModal
+          opened={isLightboxOpen}
+          onClose={() => setIsLightboxOpen(false)}
+          images={selectedGame.screenshots}
+          initialIndex={selectedScreenshotIndex}
+          title={selectedGame.name}
+        />
+      )}
     </Modal>
   );
 };

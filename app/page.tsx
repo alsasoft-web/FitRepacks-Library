@@ -270,9 +270,48 @@ export default function Home() {
     checkForUpdates,
   } = useAppUpdater();
 
-  // Autocheck update silently at startup
+  // Check for application updates on startup and whenever window gains focus
   useEffect(() => {
+    // Initial silent check on startup
     checkForUpdates(true);
+
+    let unlistenTauriFocus: (() => void) | undefined;
+
+    const handleFocus = () => {
+      checkForUpdates(true);
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        checkForUpdates(true);
+      }
+    };
+
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+      import("@tauri-apps/api/window")
+        .then(({ getCurrentWindow }) => {
+          return getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+            if (focused) {
+              checkForUpdates(true);
+            }
+          });
+        })
+        .then((unlisten) => {
+          unlistenTauriFocus = unlisten;
+        })
+        .catch(() => {});
+    }
+
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibility);
+      if (unlistenTauriFocus) {
+        unlistenTauriFocus();
+      }
+    };
   }, [checkForUpdates]);
 
   // Download Queue Store for Header Live Progress & Global Polling
@@ -447,6 +486,10 @@ export default function Home() {
   // Active game execution monitor state
   const [activeGame, setActiveGame] = useState<Game | null>(null);
   const [activeTimerSeconds, setActiveTimerSeconds] = useState(0);
+  const activeGameRef = useRef<Game | null>(null);
+  const activeTimerSecondsRef = useRef<number>(0);
+  const sessionStartTimeRef = useRef<number | null>(null);
+  const isStoppingSessionRef = useRef<boolean>(false);
   const [isDevMode, setIsDevMode] = useState<boolean>(false);
 
   useEffect(() => {
@@ -551,45 +594,93 @@ export default function Home() {
     }
   }, [games]);
 
+  const stopActiveSession = useCallback(() => {
+    const game = activeGameRef.current;
+    if (!game || isStoppingSessionRef.current) {
+      return;
+    }
+    isStoppingSessionRef.current = true;
+
+    let elapsedSecs = activeTimerSecondsRef.current;
+    if (sessionStartTimeRef.current) {
+      const wallClockSecs = Math.floor(
+        (Date.now() - sessionStartTimeRef.current) / 1000,
+      );
+      elapsedSecs = Math.max(elapsedSecs, wallClockSecs);
+    }
+
+    if (elapsedSecs >= 5) {
+      const elapsedMinutes = elapsedSecs / 60;
+      const updated = updateGamePlaytime(game.id, elapsedMinutes);
+      setGames(updated);
+    }
+    setActiveGame(null);
+    setActiveTimerSeconds(0);
+    activeGameRef.current = null;
+    activeTimerSecondsRef.current = 0;
+    sessionStartTimeRef.current = null;
+  }, []);
+
   // Active Game Execution Timer effect
   useEffect(() => {
+    activeGameRef.current = activeGame;
     let interval: NodeJS.Timeout | null = null;
+    let isChecking = false;
+
     if (activeGame) {
+      isStoppingSessionRef.current = false;
+      sessionStartTimeRef.current = Date.now();
+
       interval = setInterval(async () => {
         setActiveTimerSeconds((prev) => {
           const nextVal = prev + 1;
+          activeTimerSecondsRef.current = nextVal;
           // Verify if game process is still active in Tauri backend (allow 15s startup grace window)
-          if (nextVal > 15 && typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+          if (
+            nextVal > 15 &&
+            typeof window !== "undefined" &&
+            "__TAURI_INTERNALS__" in window &&
+            !isChecking &&
+            !isStoppingSessionRef.current
+          ) {
+            isChecking = true;
             invoke<boolean>("is_game_running", {
               gameId: activeGame.id,
               exePath: activeGame.exePath,
             })
               .then((stillRunning) => {
-                if (!stillRunning) {
+                isChecking = false;
+                if (!stillRunning && !isStoppingSessionRef.current) {
                   stopActiveSession();
                 }
               })
-              .catch(() => {});
+              .catch(() => {
+                isChecking = false;
+              });
           }
           return nextVal;
         });
       }, 1000);
     } else {
       setActiveTimerSeconds(0);
+      activeTimerSecondsRef.current = 0;
+      sessionStartTimeRef.current = null;
     }
     return () => {
       if (interval) {
         clearInterval(interval);
       }
     };
-  }, [activeGame]);
+  }, [activeGame, stopActiveSession]);
 
   // Tauri game-process-closed listener to auto stop timer when process exits
   useEffect(() => {
     let unlistenFn: (() => void) | null = null;
     if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
       listen<{ gameId: string }>("game-process-closed", () => {
-        stopActiveSession();
+        if (!isStoppingSessionRef.current) {
+          stopActiveSession();
+        }
       })
         .then((unsub) => {
           if (unsub) unlistenFn = unsub;
@@ -601,20 +692,7 @@ export default function Home() {
     return () => {
       if (unlistenFn) unlistenFn();
     };
-  }, [activeGame, activeTimerSeconds]);
-
-  const stopActiveSession = useCallback(() => {
-    if (!activeGame) {
-      return;
-    }
-    if (activeTimerSeconds > 0) {
-      const elapsedMinutes = activeTimerSeconds / 60;
-      const updated = updateGamePlaytime(activeGame.id, elapsedMinutes);
-      setGames(updated);
-    }
-    setActiveGame(null);
-    setActiveTimerSeconds(0);
-  }, [activeGame, activeTimerSeconds]);
+  }, [stopActiveSession]);
 
   const handleMinimizeWindow = async () => {
     if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {

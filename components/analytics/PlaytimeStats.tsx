@@ -3,6 +3,7 @@
 import React, { useMemo, useState } from "react";
 import { Game } from "../../lib/types";
 import { CachedImage } from "../common/CachedImage";
+import { deduplicatePlaySessions } from "../../lib/db";
 import {
   SimpleGrid,
   Paper,
@@ -75,6 +76,14 @@ export const PlaytimeStats: React.FC<PlaytimeStatsProps> = ({
   }, [games, searchQuery]);
 
   const getHours = (g: Game) => {
+    if (g.playSessions && g.playSessions.length > 0) {
+      const cleanSessions = deduplicatePlaySessions(g.playSessions);
+      const totalMins = cleanSessions.reduce(
+        (acc, s) => acc + (s.durationMinutes || 0),
+        0,
+      );
+      return totalMins / 60;
+    }
     const mins =
       g.playtimeMinutes !== undefined && g.playtimeMinutes > 0
         ? g.playtimeMinutes
@@ -128,16 +137,19 @@ export const PlaytimeStats: React.FC<PlaytimeStatsProps> = ({
         completedCount: number;
         totalPlaytimeHours: number;
         totalGamesCount: number;
-        topTitles: string[];
+        wishlistedTitles: string[];
+        installedTitles: string[];
+        completedTitles: string[];
+        playtimeTitles: { title: string; hours: number }[];
       }
     > = {};
 
     filteredGames.forEach((g) => {
       const gHours = getHours(g);
       const isInstalled =
-        g.isInstalled || (g.exePath && g.exePath.trim() !== "");
-      const isWishlisted = g.isWishlisted;
-      const isCompleted = g.isCompleted;
+        Boolean(g.isInstalled) || Boolean(g.exePath && g.exePath.trim() !== "");
+      const isWishlisted = Boolean(g.isWishlisted);
+      const isCompleted = Boolean(g.isCompleted);
 
       const genres =
         g.genres && g.genres.length > 0 ? g.genres : ["Uncategorized"];
@@ -150,18 +162,44 @@ export const PlaytimeStats: React.FC<PlaytimeStatsProps> = ({
             completedCount: 0,
             totalPlaytimeHours: 0,
             totalGamesCount: 0,
-            topTitles: [],
+            wishlistedTitles: [],
+            installedTitles: [],
+            completedTitles: [],
+            playtimeTitles: [],
           };
         }
 
         map[genre].totalGamesCount += 1;
-        if (isWishlisted) map[genre].wishlistedCount += 1;
-        if (isInstalled) map[genre].installedCount += 1;
-        if (isCompleted) map[genre].completedCount += 1;
-        if (isInstalled) map[genre].totalPlaytimeHours += gHours;
-
-        if (map[genre].topTitles.length < 3 && !map[genre].topTitles.includes(g.title)) {
-          map[genre].topTitles.push(g.title);
+        if (isWishlisted) {
+          map[genre].wishlistedCount += 1;
+          if (
+            map[genre].wishlistedTitles.length < 5 &&
+            !map[genre].wishlistedTitles.includes(g.title)
+          ) {
+            map[genre].wishlistedTitles.push(g.title);
+          }
+        }
+        if (isInstalled) {
+          map[genre].installedCount += 1;
+          map[genre].totalPlaytimeHours += gHours;
+          if (
+            map[genre].installedTitles.length < 5 &&
+            !map[genre].installedTitles.includes(g.title)
+          ) {
+            map[genre].installedTitles.push(g.title);
+          }
+          if (gHours > 0 || (g.playtimeMinutes ?? 0) > 0) {
+            map[genre].playtimeTitles.push({ title: g.title, hours: gHours });
+          }
+        }
+        if (isCompleted) {
+          map[genre].completedCount += 1;
+          if (
+            map[genre].completedTitles.length < 5 &&
+            !map[genre].completedTitles.includes(g.title)
+          ) {
+            map[genre].completedTitles.push(g.title);
+          }
         }
       });
     });
@@ -170,22 +208,32 @@ export const PlaytimeStats: React.FC<PlaytimeStatsProps> = ({
       genre,
       ...data,
       totalPlaytimeHours: Number(data.totalPlaytimeHours.toFixed(1)),
+      playtimeTitles: data.playtimeTitles
+        .sort((a, b) => b.hours - a.hours)
+        .map((t) => t.title),
     }));
   }, [filteredGames]);
 
   const activeGenreList = useMemo(() => {
-    return [...genreRankings].sort((a, b) => {
-      switch (genreCategory) {
-        case "wishlisted":
-          return b.wishlistedCount - a.wishlistedCount;
-        case "installed":
-          return b.installedCount - a.installedCount;
-        case "completed":
-          return b.completedCount - a.completedCount;
-        case "playtime":
-          return b.totalPlaytimeHours - a.totalPlaytimeHours;
-      }
-    });
+    return [...genreRankings]
+      .filter((item) => {
+        if (genreCategory === "wishlisted") return item.wishlistedCount > 0;
+        if (genreCategory === "installed") return item.installedCount > 0;
+        if (genreCategory === "completed") return item.completedCount > 0;
+        return item.totalPlaytimeHours > 0 || item.installedCount > 0;
+      })
+      .sort((a, b) => {
+        switch (genreCategory) {
+          case "wishlisted":
+            return b.wishlistedCount - a.wishlistedCount;
+          case "installed":
+            return b.installedCount - a.installedCount;
+          case "completed":
+            return b.completedCount - a.completedCount;
+          case "playtime":
+            return b.totalPlaytimeHours - a.totalPlaytimeHours;
+        }
+      });
   }, [genreRankings, genreCategory]);
 
   const maxGenreValue = useMemo(() => {
@@ -208,8 +256,11 @@ export const PlaytimeStats: React.FC<PlaytimeStatsProps> = ({
     }[] = [];
 
     filteredGames.forEach((g) => {
-      if (g.playSessions && g.playSessions.length > 0) {
-        g.playSessions.forEach((s) => {
+      const cleanSessions = Array.isArray(g.playSessions) && g.playSessions.length > 0
+        ? deduplicatePlaySessions(g.playSessions)
+        : [];
+      if (cleanSessions.length > 0) {
+        cleanSessions.forEach((s) => {
           sessions.push({
             gameId: g.id,
             gameTitle: g.title,
@@ -538,13 +589,26 @@ export const PlaytimeStats: React.FC<PlaytimeStatsProps> = ({
           {/* Ranking Cards Grid */}
           {activeGenreList.length > 0 ? (
             <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="md" mt="xs">
-              {activeGenreList.slice(0, 9).map((item, idx) => {
+              {activeGenreList.slice(0, 3).map((item, idx) => {
                 const rankStyle = getRankBadgeProps(idx);
                 let metricValueText = "";
                 let metricPercentage = 0;
+                let subtext = `${item.totalGamesCount} total in library`;
+
+                const categoryTitles =
+                  genreCategory === "installed"
+                    ? item.installedTitles
+                    : genreCategory === "wishlisted"
+                      ? item.wishlistedTitles
+                      : genreCategory === "completed"
+                        ? item.completedTitles
+                        : item.playtimeTitles.length > 0
+                          ? item.playtimeTitles
+                          : item.installedTitles;
 
                 if (genreCategory === "wishlisted") {
                   metricValueText = `${item.wishlistedCount} wishlisted`;
+                  subtext = `${item.wishlistedCount} wishlisted (${item.totalGamesCount} in library)`;
                   metricPercentage =
                     stats.wishlistedCount > 0
                       ? Math.round(
@@ -553,6 +617,7 @@ export const PlaytimeStats: React.FC<PlaytimeStatsProps> = ({
                       : 0;
                 } else if (genreCategory === "installed") {
                   metricValueText = `${item.installedCount} installed`;
+                  subtext = `${item.installedCount} installed (${item.totalGamesCount} in library)`;
                   metricPercentage =
                     stats.installedCount > 0
                       ? Math.round(
@@ -561,14 +626,20 @@ export const PlaytimeStats: React.FC<PlaytimeStatsProps> = ({
                       : 0;
                 } else if (genreCategory === "completed") {
                   metricValueText = `${item.completedCount} completed`;
+                  subtext = `${item.completedCount} completed (${item.totalGamesCount} in library)`;
                   metricPercentage =
-                    item.totalGamesCount > 0
+                    stats.completedCount > 0
                       ? Math.round(
-                          (item.completedCount / item.totalGamesCount) * 100,
+                          (item.completedCount / stats.completedCount) * 100,
                         )
-                      : 0;
+                      : item.totalGamesCount > 0
+                        ? Math.round(
+                            (item.completedCount / item.totalGamesCount) * 100,
+                          )
+                        : 0;
                 } else {
                   metricValueText = `${item.totalPlaytimeHours.toFixed(1)} hrs`;
+                  subtext = `${item.installedCount} installed games`;
                   metricPercentage =
                     stats.totalHours > 0
                       ? Math.round(
@@ -657,14 +728,14 @@ export const PlaytimeStats: React.FC<PlaytimeStatsProps> = ({
 
                     <Group justify="space-between" align="center">
                       <Text size="11px" c="dimmed">
-                        {item.totalGamesCount} total games in genre
+                        {subtext}
                       </Text>
                       <Text size="11px" fw={600} c={`${getCategoryColor()}.4`}>
                         {metricPercentage}% share
                       </Text>
                     </Group>
 
-                    {item.topTitles.length > 0 && (
+                    {categoryTitles.length > 0 && (
                       <Box
                         mt="xs"
                         pt="xs"
@@ -674,7 +745,7 @@ export const PlaytimeStats: React.FC<PlaytimeStatsProps> = ({
                         }}
                       >
                         <Text size="10px" c="dimmed" truncate>
-                          e.g. {item.topTitles.slice(0, 2).join(", ")}
+                          e.g. {categoryTitles.slice(0, 3).join(", ")}
                         </Text>
                       </Box>
                     )}
@@ -722,11 +793,7 @@ export const PlaytimeStats: React.FC<PlaytimeStatsProps> = ({
                 Math.round((hours / maxHours) * 100),
                 100,
               );
-              const totalMinutes =
-                game.playtimeMinutes !== undefined && game.playtimeMinutes > 0
-                  ? game.playtimeMinutes
-                  : (game.hoursPlayed ?? 0) * 60;
-              const totalSecs = Math.round(totalMinutes * 60);
+              const totalSecs = Math.round(hours * 3600);
               const timeDisplay =
                 totalSecs < 3600
                   ? `${Math.floor(totalSecs / 60)}m ${totalSecs % 60}s`

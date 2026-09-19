@@ -25,6 +25,7 @@ import {
 import { HoldToUninstallButton } from "../HoldToUninstallButton";
 import { CachedImage } from "../common/CachedImage";
 import { SourceLinkerModal } from "./SourceLinkerModal";
+import { ImageLightboxModal } from "../common/ImageLightboxModal";
 import { openInBrowser } from "../../lib/openUrl";
 import { RepackUpdateLink } from "../../lib/repackTypes";
 import { isLinuxPlatform } from "../../lib/linuxRunner";
@@ -363,6 +364,8 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
   const [copiedLink, setCopiedLink] = useState<string | null>(null);
   const [isSourceLinkerOpen, setIsSourceLinkerOpen] = useState(false);
   const [isMapModalOpen, setIsMapModalOpen] = useState(false);
+  const [isLightboxOpen, setIsLightboxOpen] = useState(false);
+  const [selectedScreenshotIndex, setSelectedScreenshotIndex] = useState(0);
   const mapGenieMap = useMapGenieMap(currentGame.title);
 
   const [isEditingExePath, setIsEditingExePath] = useState(false);
@@ -541,6 +544,19 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
       }
     }
   };
+
+  const sortedScreenshots = useMemo(() => {
+    if (!currentGame.screenshots || currentGame.screenshots.length === 0)
+      return [];
+    const allScreenshots = currentGame.screenshots || [];
+    const gifScreenshots = allScreenshots.filter(
+      (s) => s && /\.gif(?:\?.*)?$/i.test(s),
+    );
+    const staticScreenshots = allScreenshots.filter(
+      (s) => s && !/\.gif(?:\?.*)?$/i.test(s),
+    );
+    return [...gifScreenshots, ...staticScreenshots];
+  }, [currentGame.screenshots]);
 
   const bannerBackground = useMemo(() => {
     if (currentGame.bannerUrl) return currentGame.bannerUrl;
@@ -2383,15 +2399,23 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                                   ? "1px solid var(--mantine-color-grape-6)"
                                   : "1px solid var(--mantine-color-default-border)",
                                 cursor: "pointer",
+                                transition:
+                                  "transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease",
                               }}
                               bg="var(--mantine-color-body)"
-                              onClick={() => openInBrowser(img)}
+                              onClick={() => {
+                                setSelectedScreenshotIndex(i);
+                                setIsLightboxOpen(true);
+                              }}
                             >
                               <CachedImage
                                 src={img}
                                 h={140}
                                 w="100%"
                                 fit="cover"
+                                style={{
+                                  transition: "transform 200ms ease",
+                                }}
                               />
                               {isGif && (
                                 <Badge
@@ -2492,6 +2516,15 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
           readOnlyUrl
         />
       )}
+
+      {/* In-App Screenshot Lightbox Modal */}
+      <ImageLightboxModal
+        opened={isLightboxOpen}
+        onClose={() => setIsLightboxOpen(false)}
+        images={sortedScreenshots}
+        initialIndex={selectedScreenshotIndex}
+        title={cleanGameTitle(currentGame.title)}
+      />
     </Box>
   );
 };

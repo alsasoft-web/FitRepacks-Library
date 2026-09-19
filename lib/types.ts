@@ -40,13 +40,13 @@ export interface IgdbGameMetadata {
   developer?: string;
 }
 
-interface PlaySession {
+export interface PlaySession {
   id?: string;
   startTime: string;
   durationMinutes: number;
 }
 
-interface GameUpdateInfo {
+export interface GameUpdateInfo {
   hasUpdate: boolean;
   version?: string;
   source?: string;

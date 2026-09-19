@@ -11,6 +11,7 @@ import {
   ignoreGameUpdate,
   unignoreGameUpdate,
   setGameStatus,
+  deduplicatePlaySessions,
 } from "../lib/db";
 import { parseDateSafe } from "../lib/versionDetector";
 import {
@@ -28,6 +29,7 @@ import {
 } from "../lib/gameLinker";
 import { HoldToUninstallButton } from "./HoldToUninstallButton";
 import { SourceLinkerModal } from "./library/SourceLinkerModal";
+import { ImageLightboxModal } from "./common/ImageLightboxModal";
 import { openInBrowser } from "../lib/openUrl";
 import {
   Modal,
@@ -212,6 +214,8 @@ export const GameDetailModalComponent: React.FC<GameDetailModalProps> = ({
   const [activeTab, setActiveTab] = useState<string | null>("overview");
   const [copiedLink, setCopiedLink] = useState<string | null>(null);
   const [isSourceLinkerOpen, setIsSourceLinkerOpen] = useState(false);
+  const [isLightboxOpen, setIsLightboxOpen] = useState(false);
+  const [selectedScreenshotIndex, setSelectedScreenshotIndex] = useState(0);
 
   // Linker states
   const [isLinking, setIsLinking] = useState(false);
@@ -1508,10 +1512,24 @@ export const GameDetailModalComponent: React.FC<GameDetailModalProps> = ({
                               border: isGif
                                 ? "1px solid var(--mantine-color-grape-6)"
                                 : "1px solid var(--mantine-color-default-border)",
+                              cursor: "pointer",
+                              transition:
+                                "transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease",
                             }}
                             bg="var(--mantine-color-body)"
+                            onClick={() => {
+                              setSelectedScreenshotIndex(i);
+                              setIsLightboxOpen(true);
+                            }}
                           >
-                            <Image src={img} h={120} fit="cover" />
+                            <Image
+                              src={img}
+                              h={120}
+                              fit="cover"
+                              style={{
+                                transition: "transform 200ms ease",
+                              }}
+                            />
                             {isGif && (
                               <Badge
                                 size="xs"
@@ -1601,7 +1619,7 @@ export const GameDetailModalComponent: React.FC<GameDetailModalProps> = ({
                 {(() => {
                   const sessions =
                     currentGame.playSessions && currentGame.playSessions.length > 0
-                      ? currentGame.playSessions
+                      ? deduplicatePlaySessions(currentGame.playSessions)
                       : currentGame.lastPlayed &&
                           ((currentGame.playtimeMinutes !== undefined && currentGame.playtimeMinutes > 0) ||
                             (currentGame.hoursPlayed !== undefined && currentGame.hoursPlayed > 0))
@@ -1684,6 +1702,15 @@ export const GameDetailModalComponent: React.FC<GameDetailModalProps> = ({
           setCurrentGame(updated);
           if (onGameUpdated) onGameUpdated(updated);
         }}
+      />
+
+      {/* In-App Screenshot Lightbox Modal */}
+      <ImageLightboxModal
+        opened={isLightboxOpen}
+        onClose={() => setIsLightboxOpen(false)}
+        images={sortedScreenshots}
+        initialIndex={selectedScreenshotIndex}
+        title={cleanGameTitle(currentGame.title)}
       />
     </>
   );
