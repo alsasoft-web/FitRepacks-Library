@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2.0.0",
   "productName": "FitRepacks Library",
-  "version": "1.0.14",
+  "version": "1.0.15",
   "identifier": "com.fitrepacks.library",
   "build": {
     "beforeDevCommand": "npm run dev",

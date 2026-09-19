@@ -1229,6 +1229,17 @@ export function deleteGameFromStorage(id: string): Game[] {
   return updated;
 }
 
+function autoMarkRepackAsReadForGame(game?: Game): void {
+  if (!game) return;
+  const rawId = game.id.startsWith("repack-")
+    ? game.id.replace("repack-", "")
+    : game.id;
+  const date = game.fitgirlUploadDate || game.steamripUploadDate;
+  if (rawId) {
+    markPostAsRead(rawId, date);
+  }
+}
+
 export function toggleFavoriteGame(id: string): Game[] {
   const games = getStoredGames();
   const target = games.find((g) => g.id === id);
@@ -1236,6 +1247,10 @@ export function toggleFavoriteGame(id: string): Game[] {
 
   const nextFavorite = !target.isFavorite;
   const updatedGame = { ...target, isFavorite: nextFavorite };
+
+  if (nextFavorite) {
+    autoMarkRepackAsReadForGame(target);
+  }
 
   if (!nextFavorite) {
     const keepable =
@@ -1265,6 +1280,7 @@ export function toggleCompletedGame(id: string): Game[] {
   let nextTags = target.tags || [];
 
   if (nextCompleted) {
+    autoMarkRepackAsReadForGame(target);
     nextTags = Array.from(
       new Set([
         ...nextTags.filter((t) => t.toLowerCase() !== "wishlist"),
@@ -1312,6 +1328,7 @@ export function toggleWishlistGame(id: string): Game[] {
   let nextInstalled = target.isInstalled;
 
   if (nextWishlist) {
+    autoMarkRepackAsReadForGame(target);
     nextCompleted = false;
     nextInstalled = false;
     nextTags = nextTags.filter(
@@ -1376,13 +1393,16 @@ export function setGameStatus(
   if (status === "installed") {
     nextInstalled = true;
     nextTags.push("Installed");
+    autoMarkRepackAsReadForGame(target);
   } else if (status === "wishlist") {
     nextWishlisted = true;
     nextTags.push("Wishlist");
+    autoMarkRepackAsReadForGame(target);
   } else if (status === "completed") {
     nextCompleted = true;
     nextCompletedAt = nextCompletedAt || now;
     nextTags.push("Completed");
+    autoMarkRepackAsReadForGame(target);
   }
 
   const updatedGame: Game = {
@@ -1581,6 +1601,9 @@ export function toggleWishlistRepack(id: string, post?: RepackPost): boolean {
     } else {
       setGameStatus(game.id, nextWishlisted ? "wishlist" : "none");
     }
+    if (nextWishlisted) {
+      markPostAsRead(id, post?.date || game.fitgirlUploadDate || game.steamripUploadDate);
+    }
     if (typeof window !== "undefined") {
       window.dispatchEvent(new Event("fitrepacks-games-updated"));
     }
@@ -1588,6 +1611,7 @@ export function toggleWishlistRepack(id: string, post?: RepackPost): boolean {
   }
   if (post) {
     setRepackStatus(id, post, "wishlist");
+    markPostAsRead(id, post.date);
     return true;
   }
   return false;
@@ -1616,6 +1640,9 @@ export function toggleCompletedRepack(id: string, post?: RepackPost): boolean {
     } else {
       setGameStatus(game.id, nextCompleted ? "completed" : "none");
     }
+    if (nextCompleted) {
+      markPostAsRead(id, post?.date || game.fitgirlUploadDate || game.steamripUploadDate);
+    }
     if (typeof window !== "undefined") {
       window.dispatchEvent(new Event("fitrepacks-games-updated"));
     }
@@ -1623,6 +1650,7 @@ export function toggleCompletedRepack(id: string, post?: RepackPost): boolean {
   }
   if (post) {
     setRepackStatus(id, post, "completed");
+    markPostAsRead(id, post.date);
     return true;
   }
   return false;
@@ -1692,13 +1720,18 @@ export function toggleFavoriteRepack(id: string, post?: RepackPost): boolean {
   const game = getGameForRepack(id, post);
   if (game) {
     const updated = toggleFavoriteGame(game.id);
-    return updated.find((g) => g.id === game.id)?.isFavorite ?? false;
+    const isFav = updated.find((g) => g.id === game.id)?.isFavorite ?? false;
+    if (isFav) {
+      markPostAsRead(id, post?.date || game.fitgirlUploadDate || game.steamripUploadDate);
+    }
+    return isFav;
   }
   if (post) {
     const base = repackToGame(post);
     base.isFavorite = true;
     base.isWishlisted = false;
     addGameToStorage(base);
+    markPostAsRead(id, post.date);
     if (typeof window !== "undefined") {
       window.dispatchEvent(new Event("fitrepacks-games-updated"));
     }
@@ -1739,6 +1772,9 @@ export function setRepackStatus(
       base.tags = Array.from(new Set([...(base.tags || []), "Wishlist"]));
     }
     addGameToStorage(base);
+  }
+  if (status !== "none") {
+    markPostAsRead(id, post?.date || existing?.fitgirlUploadDate || existing?.steamripUploadDate);
   }
   if (typeof window !== "undefined") {
     window.dispatchEvent(new Event("fitrepacks-games-updated"));
@@ -2326,6 +2362,44 @@ if (typeof window !== "undefined") {
   syncReadPostsFromSQLite().catch(() => {});
 }
 
+export function markPostAsRead(id: string, date?: string): boolean {
+  if (!id) return false;
+  const compositeId = buildPostCompositeId(id, date);
+  if (!compositeId) return false;
+
+  let changed = false;
+  if (!cachedReadPostIds.includes(compositeId)) {
+    cachedReadPostIds = [...cachedReadPostIds, compositeId];
+    changed = true;
+    if (isTauri()) {
+      const now = new Date().toISOString();
+      getDatabase()
+        .then((db) =>
+          db.execute(
+            "INSERT OR IGNORE INTO read_posts (post_id, read_at) VALUES ($1, $2)",
+            [compositeId, now],
+          ),
+        )
+        .catch((err) =>
+          console.error("Error inserting read post via plugin-sql:", err),
+        );
+    }
+  }
+
+  if (changed) {
+    invalidateRepacksCache();
+  }
+
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new CustomEvent("fitrepacks-post-read-updated", {
+        detail: { id, date, compositeId, isRead: true },
+      }),
+    );
+  }
+  return true;
+}
+
 export function togglePostReadState(id: string, date?: string): boolean {
   const compositeId = buildPostCompositeId(id, date);
   const index = cachedReadPostIds.indexOf(compositeId);
@@ -2366,6 +2440,15 @@ export function togglePostReadState(id: string, date?: string): boolean {
   }
 
   invalidateRepacksCache();
+
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new CustomEvent("fitrepacks-post-read-updated", {
+        detail: { id, date, compositeId, isRead },
+      }),
+    );
+  }
+
   return isRead;
 }
 

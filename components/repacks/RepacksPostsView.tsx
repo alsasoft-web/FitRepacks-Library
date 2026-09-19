@@ -73,6 +73,7 @@ import { RepackPost } from "../../lib/repackTypes";
 import {
   loadRepacksPaginated,
   togglePostReadState,
+  markPostAsRead,
   markPostsAsReadBatch,
   markAllRepacksAsRead,
   getRepackDatasetStats,
@@ -1884,6 +1885,41 @@ export const RepacksPostsView: React.FC<RepacksPostsViewProps> = ({
 
   useEffect(() => {
     refreshGlobalStats();
+  }, [refreshGlobalStats]);
+
+  useEffect(() => {
+    const handlePostReadUpdated = (e: Event) => {
+      const customEvent = e as CustomEvent<{
+        id: string;
+        date?: string;
+        compositeId?: string;
+        isRead?: boolean;
+      }>;
+      const { id, isRead = true } = customEvent.detail || {};
+      if (id) {
+        setPosts((prev) =>
+          prev.map((p) => (p.id === id ? { ...p, isRead } : p)),
+        );
+        setSelectedPost((prev) => {
+          if (prev && prev.id === id) {
+            return { ...prev, isRead };
+          }
+          return prev;
+        });
+        refreshGlobalStats();
+      }
+    };
+
+    window.addEventListener(
+      "fitrepacks-post-read-updated",
+      handlePostReadUpdated,
+    );
+    return () => {
+      window.removeEventListener(
+        "fitrepacks-post-read-updated",
+        handlePostReadUpdated,
+      );
+    };
   }, [refreshGlobalStats]);
 
   const handleMarkAllRead = async () => {
