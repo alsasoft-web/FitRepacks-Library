@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { Game, ActiveTab, SortOption, ViewMode } from "../lib/types";
 import {
   getStoredGames,
@@ -11,6 +11,7 @@ import {
   deleteGameFromStorage,
   toggleFavoriteGame,
   toggleCompletedGame,
+  setGameStatus,
   updateGamePlaytime,
   getAppSetting,
   saveAppSetting,
@@ -21,7 +22,6 @@ import {
   togglePinnedGame,
   syncRecentGamesToTrayAndTaskbar,
 } from "../lib/db";
-import { cacheAllLibraryImages } from "../lib/imageCache";
 import { toggleThemeWithRipple } from "../lib/themeRipple";
 import { Sidebar } from "../components/layout/Sidebar";
 import { GameCard } from "../components/library/GameCard";
@@ -36,8 +36,9 @@ import { RepacksPostsView } from "../components/repacks/RepacksPostsView";
 import { TorrentDownloadModal } from "../components/repacks/TorrentDownloadModal";
 import { DownloadsView } from "../components/DownloadsView";
 import { SettingsModal } from "../components/SettingsModal";
-import { WebviewModal } from "../components/common/WebviewModal";
 import { UserMenu } from "../components/auth/UserMenu";
+import { MapsBrowserModal, MapViewerModal } from "../components/maps";
+import { ProcessBoosterModal } from "../components/ProcessBoosterModal";
 import { useAppUpdater } from "../lib/updater";
 import {
   useDownloadQueueStore,
@@ -106,12 +107,313 @@ import {
   Layers,
   Trash2,
   Globe,
+  Map as MapIcon,
+  Zap,
 } from "lucide-react";
+
+// Memoized Header Live Download Progress (prevents Home from re-rendering every 1s during downloads)
+const HeaderDownloadProgress: React.FC<{
+  onOpenDownloads: () => void;
+}> = React.memo(({ onOpenDownloads }) => {
+  const magnetDownloads = useDownloadQueueStore(
+    (state) => state.magnetDownloads,
+  );
+  const queuedGames = useDownloadQueueStore((state) => state.queuedGames);
+  const aggregateStats = useDownloadQueueStore((state) => state.aggregateStats);
+
+  const incompleteTorrents = useMemo(
+    () => magnetDownloads.filter((t) => t.status !== "completed"),
+    [magnetDownloads],
+  );
+  const activeDownloadingTorrents = useMemo(
+    () => incompleteTorrents.filter((t) => t.status === "downloading"),
+    [incompleteTorrents],
+  );
+  const isAllPaused =
+    incompleteTorrents.length > 0 && activeDownloadingTorrents.length === 0;
+  const hasDownloads =
+    incompleteTorrents.length > 0 ||
+    aggregateStats.activeCount > 0 ||
+    queuedGames.some((g) => g.status !== "completed");
+
+  const totalDownloadProgress =
+    incompleteTorrents.length > 0
+      ? incompleteTorrents.reduce(
+          (acc, curr) => acc + (curr.progress || 0),
+          0,
+        ) / incompleteTorrents.length
+      : 0;
+
+  if (!hasDownloads) return null;
+
+  return (
+    <Paper
+      px="xs"
+      py={4}
+      radius="xl"
+      bg="var(--mantine-color-default)"
+      style={{
+        border: isAllPaused
+          ? "1px solid var(--mantine-color-yellow-7)"
+          : "1px solid var(--mantine-color-teal-7)",
+        boxShadow: isAllPaused
+          ? "0 0 10px rgba(250, 176, 5, 0.15)"
+          : "0 0 10px rgba(32, 201, 151, 0.2)",
+        transition: "all 0.2s ease",
+      }}
+    >
+      <Group gap={6}>
+        <Tooltip
+          label={
+            isAllPaused ? "Resume all downloads" : "Pause all downloads"
+          }
+        >
+          <ActionIcon
+            size={24}
+            variant="subtle"
+            color={isAllPaused ? "yellow" : "teal"}
+            radius="xl"
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleAllDownloadsPause();
+            }}
+            style={{ cursor: "pointer" }}
+          >
+            {isAllPaused ? (
+              <Play size={13} fill="currentColor" />
+            ) : (
+              <Pause size={13} fill="currentColor" />
+            )}
+          </ActionIcon>
+        </Tooltip>
+
+        <Tooltip
+          label={
+            isAllPaused
+              ? `Downloads Paused (${incompleteTorrents.length} items) • Click to open Downloads Manager`
+              : `Downloading (${activeDownloadingTorrents.length || aggregateStats.activeCount} active) • Click to open Downloads Manager`
+          }
+        >
+          <Group
+            gap="xs"
+            onClick={onOpenDownloads}
+            style={{ cursor: "pointer" }}
+          >
+            <Stack gap={2} style={{ width: 100 }}>
+              <Group justify="space-between" align="center" gap={2}>
+                <Text
+                  size="11px"
+                  fw={700}
+                  c={isAllPaused ? "yellow.4" : "teal.4"}
+                  ff="monospace"
+                >
+                  {isAllPaused
+                    ? "Paused"
+                    : `↓ ${aggregateStats.totalDownSpeed || "0 B/s"}`}
+                </Text>
+                <Text size="10px" c="dimmed">
+                  {totalDownloadProgress.toFixed(0)}%
+                </Text>
+              </Group>
+              <Progress
+                value={totalDownloadProgress}
+                color={isAllPaused ? "yellow" : "teal"}
+                size={3}
+                radius="xl"
+                animated={!isAllPaused}
+              />
+            </Stack>
+          </Group>
+        </Tooltip>
+      </Group>
+    </Paper>
+  );
+});
+
+// Memoized Active Session Banner (handles its own timer without re-rendering parent page)
+const ActiveSessionBanner: React.FC<{
+  activeGame: Game | null;
+  onStop: () => void;
+}> = React.memo(({ activeGame, onStop }) => {
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  useEffect(() => {
+    if (!activeGame) {
+      setElapsedSeconds(0);
+      return;
+    }
+    const startTime = Date.now();
+    const interval = setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - startTime) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [activeGame]);
+
+  if (!activeGame) return null;
+
+  return (
+    <Alert
+      color="teal"
+      variant="filled"
+      radius={0}
+      p="xs"
+      icon={<Play size={16} />}
+      style={{
+        boxShadow: "0 4px 12px rgba(18, 184, 134, 0.2)",
+        borderBottom: "1px solid var(--mantine-color-teal-6)",
+      }}
+    >
+      <Group justify="space-between">
+        <Box>
+          <Text size="xs" fw={700}>
+            Playing: {activeGame.title}
+          </Text>
+          <Text size="xs">
+            Session: {Math.floor(elapsedSeconds / 3600)}h{" "}
+            {Math.floor((elapsedSeconds % 3600) / 60)}m{" "}
+            {elapsedSeconds % 60}s
+          </Text>
+        </Box>
+        <Button
+          size="xs"
+          color="red"
+          variant="white"
+          onClick={onStop}
+        >
+          Stop Game
+        </Button>
+      </Group>
+    </Alert>
+  );
+});
+
+// Hook for Windows Taskbar & System Tray Progress Sync (runs outside React component renders)
+function useTaskbarProgressSync() {
+  const lastTaskbarProgressRef = useRef<{
+    status: ProgressBarStatus;
+    progress: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
+      return;
+    }
+
+    const unsub = useDownloadQueueStore.subscribe((state) => {
+      const magnetDownloads = state.magnetDownloads;
+      const queuedGames = state.queuedGames;
+
+      const incomplete = magnetDownloads.filter((t) => t.status !== "completed");
+      const incompleteQueued = queuedGames.filter(
+        (g) => g.status !== "completed",
+      );
+
+      if (incomplete.length === 0 && incompleteQueued.length === 0) {
+        if (lastTaskbarProgressRef.current?.status !== ProgressBarStatus.None) {
+          lastTaskbarProgressRef.current = {
+            status: ProgressBarStatus.None,
+            progress: 0,
+          };
+          getCurrentWindow()
+            .setProgressBar({ status: ProgressBarStatus.None })
+            .catch(() => {});
+          invoke("update_tray_downloads", { downloads: [] }).catch(() => {});
+        }
+        return;
+      }
+
+      const hasActiveTorrents = incomplete.some(
+        (t) => t.status === "downloading" || t.status === "checking",
+      );
+      const hasActiveQueued = incompleteQueued.some(
+        (g) => g.status === "downloading",
+      );
+      const isPaused = !hasActiveTorrents && !hasActiveQueued;
+      const isError =
+        incomplete.length > 0 &&
+        incomplete.every((t) => t.status === "error") &&
+        (incompleteQueued.length === 0 ||
+          incompleteQueued.every((g) => g.status === "error"));
+
+      let status = ProgressBarStatus.Normal;
+      if (isError) {
+        status = ProgressBarStatus.Error;
+      } else if (isPaused) {
+        status = ProgressBarStatus.Paused;
+      } else if (
+        incomplete.length > 0 &&
+        incomplete.every((t) => t.status === "checking")
+      ) {
+        status = ProgressBarStatus.Indeterminate;
+      }
+
+      let progressPercent = 0;
+      if (incomplete.length > 0) {
+        const total = incomplete.reduce(
+          (acc, curr) => acc + (curr.progress || 0),
+          0,
+        );
+        progressPercent = total / incomplete.length;
+      } else if (incompleteQueued.length > 0) {
+        const total = incompleteQueued.reduce((acc, g) => {
+          const gProg =
+            g.files.reduce((facc, f) => facc + (f.progressPercent || 0), 0) /
+            (g.files.length || 1);
+          return acc + gProg;
+        }, 0);
+        progressPercent = total / incompleteQueued.length;
+      }
+
+      const targetProgress = Math.min(
+        100,
+        Math.max(0, Math.round(progressPercent)),
+      );
+      const prev = lastTaskbarProgressRef.current;
+
+      if (!prev || prev.status !== status || prev.progress !== targetProgress) {
+        lastTaskbarProgressRef.current = { status, progress: targetProgress };
+        getCurrentWindow()
+          .setProgressBar({
+            status,
+            progress: targetProgress,
+          })
+          .catch(() => {});
+      }
+
+      const trayDownloadsPayload = [
+        ...incomplete.map((d) => ({
+          id: d.id,
+          title: d.title,
+          progress: d.progress || 0,
+          speed: d.speed || "0.0 B/s",
+          status: d.status,
+        })),
+        ...incompleteQueued.map((g) => ({
+          id: g.id,
+          title: g.title,
+          progress:
+            g.files.reduce((acc, f) => acc + (f.progressPercent || 0), 0) /
+            (g.files.length || 1),
+          speed: "Downloading",
+          status: g.status,
+        })),
+      ].slice(0, 5);
+
+      invoke("update_tray_downloads", { downloads: trayDownloadsPayload }).catch(
+        () => {},
+      );
+    });
+
+    return () => {
+      unsub();
+    };
+  }, []);
+}
 
 export default function Home() {
   const { colorScheme, setColorScheme, toggleColorScheme } =
     useMantineColorScheme();
-  const computedColorScheme = useComputedColorScheme("light", {
+  const computedColorScheme = useComputedColorScheme("dark", {
     getInitialValueInEffect: true,
   });
   const isDark = computedColorScheme === "dark";
@@ -125,6 +427,9 @@ export default function Home() {
   const [games, setGames] = useState<Game[]>([]);
   const [pinnedGameIds, setPinnedGameIds] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<ActiveTab>("library");
+  const [visitedTabs, setVisitedTabs] = useState<Set<ActiveTab>>(
+    () => new Set(["library"]),
+  );
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<
     "all" | "favorites" | "installed" | "completed" | "wishlist"
@@ -134,11 +439,19 @@ export default function Home() {
   const [selectedListGameId, setSelectedListGameId] = useState<string | null>(
     null,
   );
-  const [isWebviewModalOpen, setIsWebviewModalOpen] = useState(false);
+  const [isMapsBrowserOpen, setIsMapsBrowserOpen] = useState(false);
+  const [isBoosterOpen, setIsBoosterOpen] = useState(false);
+  const [activeMapViewer, setActiveMapViewer] = useState<{
+    gameSlug: string;
+    mapSlug: string;
+    gameTitle: string;
+  } | null>(null);
 
-  // Restore all UI settings from localStorage
+  // Restore all UI settings from localStorage once on mount
   useEffect(() => {
     if (typeof window === "undefined") return;
+    if (hasLoadedInitialSettings.current) return;
+    hasLoadedInitialSettings.current = true;
 
     const savedMode = localStorage.getItem("fitrepacks_view_mode");
     if (savedMode === "grid" || savedMode === "list") {
@@ -191,6 +504,12 @@ export default function Home() {
       ].includes(savedTab)
     ) {
       setActiveTab(savedTab as any);
+      setVisitedTabs((prev) => {
+        if (prev.has(savedTab as any)) return prev;
+        const next = new Set(prev);
+        next.add(savedTab as any);
+        return next;
+      });
     }
 
     const savedTheme = localStorage.getItem("fitrepacks_color_scheme");
@@ -199,22 +518,22 @@ export default function Home() {
     }
   }, [setColorScheme]);
 
-  const handleViewModeChange = (newMode: string) => {
+  const handleViewModeChange = useCallback((newMode: string) => {
     const mode = newMode as ViewMode;
     setViewMode(mode);
     if (typeof window !== "undefined") {
       localStorage.setItem("fitrepacks_view_mode", mode);
     }
-  };
+  }, []);
 
-  const handleSelectGame = (id: string) => {
+  const handleSelectGame = useCallback((id: string) => {
     setSelectedListGameId(id);
     if (typeof window !== "undefined") {
       localStorage.setItem("fitrepacks_selected_list_game_id", id);
     }
-  };
+  }, []);
 
-  const handleCategoryFilterChange = (val: string | null) => {
+  const handleCategoryFilterChange = useCallback((val: string | null) => {
     if (!val) return;
     const filter = val as
       | "all"
@@ -226,23 +545,29 @@ export default function Home() {
     if (typeof window !== "undefined") {
       localStorage.setItem("fitrepacks_category_filter", filter);
     }
-  };
+  }, []);
 
-  const handleSortOptionChange = (val: string | null) => {
+  const handleSortOptionChange = useCallback((val: string | null) => {
     if (!val) return;
     const sort = val as SortOption;
     setSortOption(sort);
     if (typeof window !== "undefined") {
       localStorage.setItem("fitrepacks_sort_option", sort);
     }
-  };
+  }, []);
 
-  const handleTabChange = (tab: ActiveTab) => {
+  const handleTabChange = useCallback((tab: ActiveTab) => {
     setActiveTab(tab);
+    setVisitedTabs((prev) => {
+      if (prev.has(tab)) return prev;
+      const next = new Set(prev);
+      next.add(tab);
+      return next;
+    });
     if (typeof window !== "undefined") {
       localStorage.setItem("fitrepacks_active_tab", tab);
     }
-  };
+  }, []);
 
   const handleToggleTheme = (event: React.MouseEvent<HTMLElement>) => {
     const nextScheme = isDark ? "light" : "dark";
@@ -263,27 +588,42 @@ export default function Home() {
   const [isIgdbSearchOpen, setIsIgdbSearchOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
+  const handleOpenDetails = useCallback((game: Game) => {
+    setSelectedGame(game);
+  }, []);
+
+  const handleOpenEditModal = useCallback((game: Game) => {
+    setEditingGame(game);
+  }, []);
+
   // Global App Updater Store
-  const {
-    status: updaterStatus,
-    updateDetails,
-    checkForUpdates,
-  } = useAppUpdater();
+  const updaterStatus = useAppUpdater((state) => state.status);
+  const updateDetails = useAppUpdater((state) => state.updateDetails);
 
-  // Check for application updates on startup and whenever window gains focus
+  // Synchronize overall download progress with Windows Taskbar app icon and Tray Menu
+  useTaskbarProgressSync();
+
+  // Check for application updates on startup and whenever window gains focus (throttled)
   useEffect(() => {
-    // Initial silent check on startup
-    checkForUpdates(true);
-
     let unlistenTauriFocus: (() => void) | undefined;
+    let lastFocusCheck = 0;
+
+    const triggerCheck = (silent = true) => {
+      const now = Date.now();
+      if (now - lastFocusCheck < 60000) return;
+      lastFocusCheck = now;
+      useAppUpdater.getState().checkForUpdates(silent);
+    };
+
+    triggerCheck(true);
 
     const handleFocus = () => {
-      checkForUpdates(true);
+      triggerCheck(true);
     };
 
     const handleVisibility = () => {
       if (document.visibilityState === "visible") {
-        checkForUpdates(true);
+        triggerCheck(true);
       }
     };
 
@@ -295,7 +635,7 @@ export default function Home() {
         .then(({ getCurrentWindow }) => {
           return getCurrentWindow().onFocusChanged(({ payload: focused }) => {
             if (focused) {
-              checkForUpdates(true);
+              triggerCheck(true);
             }
           });
         })
@@ -312,32 +652,7 @@ export default function Home() {
         unlistenTauriFocus();
       }
     };
-  }, [checkForUpdates]);
-
-  // Download Queue Store for Header Live Progress & Global Polling
-  const { magnetDownloads, queuedGames, aggregateStats, syncFromLiveStats } =
-    useDownloadQueueStore();
-
-  const incompleteTorrents = magnetDownloads.filter(
-    (t) => t.status !== "completed",
-  );
-  const activeDownloadingTorrents = incompleteTorrents.filter(
-    (t) => t.status === "downloading",
-  );
-  const isAllPaused =
-    incompleteTorrents.length > 0 && activeDownloadingTorrents.length === 0;
-  const hasDownloads =
-    incompleteTorrents.length > 0 ||
-    aggregateStats.activeCount > 0 ||
-    queuedGames.some((g) => g.status !== "completed");
-
-  const totalDownloadProgress =
-    incompleteTorrents.length > 0
-      ? incompleteTorrents.reduce(
-          (acc, curr) => acc + (curr.progress || 0),
-          0,
-        ) / incompleteTorrents.length
-      : 0;
+  }, []);
 
   // Persistent App-Wide Real-Time Stats Polling from Native Rust BitTorrent Engine
   useEffect(() => {
@@ -350,9 +665,18 @@ export default function Home() {
     const pollStats = async () => {
       if (!isMounted) return;
       try {
+        const store = useDownloadQueueStore.getState();
+        const hasActiveOrIncomplete =
+          store.magnetDownloads.some((t) => t.status !== "completed") ||
+          store.queuedGames.some((g) => g.status !== "completed");
+
+        if (!hasActiveOrIncomplete && store.aggregateStats.activeCount === 0) {
+          return;
+        }
+
         const stats = await invoke<any>("get_all_torrent_stats");
         if (isMounted && stats) {
-          syncFromLiveStats(stats);
+          store.syncFromLiveStats(stats);
         }
       } catch {
         // ignore
@@ -366,114 +690,7 @@ export default function Home() {
       isMounted = false;
       clearInterval(intervalId);
     };
-  }, [syncFromLiveStats]);
-
-  // Track last sent taskbar progress to prevent redundant IPC calls and visual flickering
-  const lastTaskbarProgressRef = useRef<{
-    status: ProgressBarStatus;
-    progress: number;
-  } | null>(null);
-
-  // Synchronize overall download progress with Windows Taskbar app icon and Tray Menu
-  useEffect(() => {
-    if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
-      return;
-    }
-
-    const incomplete = magnetDownloads.filter((t) => t.status !== "completed");
-    const incompleteQueued = queuedGames.filter((g) => g.status !== "completed");
-
-    if (incomplete.length === 0 && incompleteQueued.length === 0) {
-      if (lastTaskbarProgressRef.current?.status !== ProgressBarStatus.None) {
-        lastTaskbarProgressRef.current = {
-          status: ProgressBarStatus.None,
-          progress: 0,
-        };
-        getCurrentWindow()
-          .setProgressBar({ status: ProgressBarStatus.None })
-          .catch(() => {});
-        invoke("update_tray_downloads", { downloads: [] }).catch(() => {});
-      }
-      return;
-    }
-
-    const hasActiveTorrents = incomplete.some(
-      (t) => t.status === "downloading" || t.status === "checking",
-    );
-    const hasActiveQueued = incompleteQueued.some(
-      (g) => g.status === "downloading",
-    );
-    const isPaused = !hasActiveTorrents && !hasActiveQueued;
-    const isError =
-      incomplete.length > 0 &&
-      incomplete.every((t) => t.status === "error") &&
-      (incompleteQueued.length === 0 || incompleteQueued.every((g) => g.status === "error"));
-
-    let status = ProgressBarStatus.Normal;
-    if (isError) {
-      status = ProgressBarStatus.Error;
-    } else if (isPaused) {
-      status = ProgressBarStatus.Paused;
-    } else if (
-      incomplete.length > 0 &&
-      incomplete.every((t) => t.status === "checking")
-    ) {
-      status = ProgressBarStatus.Indeterminate;
-    }
-
-    // Compute aggregate progress percentage across active downloads
-    let progressPercent = 0;
-    if (incomplete.length > 0) {
-      const total = incomplete.reduce(
-        (acc, curr) => acc + (curr.progress || 0),
-        0,
-      );
-      progressPercent = total / incomplete.length;
-    } else if (incompleteQueued.length > 0) {
-      const total = incompleteQueued.reduce((acc, g) => {
-        const gProg =
-          g.files.reduce((facc, f) => facc + (f.progressPercent || 0), 0) /
-          (g.files.length || 1);
-        return acc + gProg;
-      }, 0);
-      progressPercent = total / incompleteQueued.length;
-    }
-
-    const targetProgress = Math.min(100, Math.max(0, Math.round(progressPercent)));
-    const prev = lastTaskbarProgressRef.current;
-
-    if (!prev || prev.status !== status || prev.progress !== targetProgress) {
-      lastTaskbarProgressRef.current = { status, progress: targetProgress };
-      getCurrentWindow()
-        .setProgressBar({
-          status,
-          progress: targetProgress,
-        })
-        .catch(() => {});
-    }
-
-    // Sync download items to system tray context menu
-    const trayDownloadsPayload = [
-      ...incomplete.map((d) => ({
-        id: d.id,
-        title: d.title,
-        progress: d.progress || 0,
-        speed: d.speed || "0.0 B/s",
-        status: d.status,
-      })),
-      ...incompleteQueued.map((g) => ({
-        id: g.id,
-        title: g.title,
-        progress:
-          g.files.reduce((acc, f) => acc + (f.progressPercent || 0), 0) /
-          (g.files.length || 1),
-        speed: "Downloading",
-        status: g.status,
-      })),
-    ].slice(0, 5);
-
-    invoke("update_tray_downloads", { downloads: trayDownloadsPayload }).catch(() => {});
-  }, [magnetDownloads, queuedGames]);
+  }, []);
 
   // Torrent download modal state
   const [torrentModalData, setTorrentModalData] = useState<{
@@ -485,9 +702,7 @@ export default function Home() {
 
   // Active game execution monitor state
   const [activeGame, setActiveGame] = useState<Game | null>(null);
-  const [activeTimerSeconds, setActiveTimerSeconds] = useState(0);
   const activeGameRef = useRef<Game | null>(null);
-  const activeTimerSecondsRef = useRef<number>(0);
   const sessionStartTimeRef = useRef<number | null>(null);
   const isStoppingSessionRef = useRef<boolean>(false);
   const [isDevMode, setIsDevMode] = useState<boolean>(false);
@@ -519,7 +734,7 @@ export default function Home() {
 
     const handleGamesUpdated = () => {
       const stored = getStoredGames();
-      setGames(stored);
+      setGames([...stored]);
       setSelectedGame((prev) =>
         prev ? stored.find((g) => g.id === prev.id) || null : null,
       );
@@ -570,7 +785,7 @@ export default function Home() {
     }
   }, [games]);
 
-  // Realtime PocketBase repacks subscription & Windows notification listener
+  // Realtime AlsaBase repacks subscription & Windows notification listener
   useEffect(() => {
     let cleanupFn: (() => void) | null = null;
     initRepackSubscription().then((cleanup) => {
@@ -587,13 +802,6 @@ export default function Home() {
     };
   }, []);
 
-  // Background offline image caching effect
-  useEffect(() => {
-    if (games && games.length > 0) {
-      cacheAllLibraryImages(games);
-    }
-  }, [games]);
-
   const stopActiveSession = useCallback(() => {
     const game = activeGameRef.current;
     if (!game || isStoppingSessionRef.current) {
@@ -601,12 +809,11 @@ export default function Home() {
     }
     isStoppingSessionRef.current = true;
 
-    let elapsedSecs = activeTimerSecondsRef.current;
+    let elapsedSecs = 0;
     if (sessionStartTimeRef.current) {
-      const wallClockSecs = Math.floor(
+      elapsedSecs = Math.floor(
         (Date.now() - sessionStartTimeRef.current) / 1000,
       );
-      elapsedSecs = Math.max(elapsedSecs, wallClockSecs);
     }
 
     if (elapsedSecs >= 5) {
@@ -615,13 +822,11 @@ export default function Home() {
       setGames(updated);
     }
     setActiveGame(null);
-    setActiveTimerSeconds(0);
     activeGameRef.current = null;
-    activeTimerSecondsRef.current = 0;
     sessionStartTimeRef.current = null;
   }, []);
 
-  // Active Game Execution Timer effect
+  // Active Game Execution Timer effect (checks process without ticking Home state)
   useEffect(() => {
     activeGameRef.current = activeGame;
     let interval: NodeJS.Timeout | null = null;
@@ -632,38 +837,31 @@ export default function Home() {
       sessionStartTimeRef.current = Date.now();
 
       interval = setInterval(async () => {
-        setActiveTimerSeconds((prev) => {
-          const nextVal = prev + 1;
-          activeTimerSecondsRef.current = nextVal;
-          // Verify if game process is still active in Tauri backend (allow 15s startup grace window)
-          if (
-            nextVal > 15 &&
-            typeof window !== "undefined" &&
-            "__TAURI_INTERNALS__" in window &&
-            !isChecking &&
-            !isStoppingSessionRef.current
-          ) {
-            isChecking = true;
-            invoke<boolean>("is_game_running", {
-              gameId: activeGame.id,
-              exePath: activeGame.exePath,
+        if (
+          sessionStartTimeRef.current &&
+          Date.now() - sessionStartTimeRef.current > 15000 &&
+          typeof window !== "undefined" &&
+          "__TAURI_INTERNALS__" in window &&
+          !isChecking &&
+          !isStoppingSessionRef.current
+        ) {
+          isChecking = true;
+          invoke<boolean>("is_game_running", {
+            gameId: activeGame.id,
+            exePath: activeGame.exePath,
+          })
+            .then((stillRunning) => {
+              isChecking = false;
+              if (!stillRunning && !isStoppingSessionRef.current) {
+                stopActiveSession();
+              }
             })
-              .then((stillRunning) => {
-                isChecking = false;
-                if (!stillRunning && !isStoppingSessionRef.current) {
-                  stopActiveSession();
-                }
-              })
-              .catch(() => {
-                isChecking = false;
-              });
-          }
-          return nextVal;
-        });
-      }, 1000);
+            .catch(() => {
+              isChecking = false;
+            });
+        }
+      }, 2500);
     } else {
-      setActiveTimerSeconds(0);
-      activeTimerSecondsRef.current = 0;
       sessionStartTimeRef.current = null;
     }
     return () => {
@@ -737,7 +935,6 @@ export default function Home() {
       }
 
       setActiveGame(game);
-      setActiveTimerSeconds(0);
 
       // Update lastPlayed timestamp immediately on launch so it reflects in recent lists
       const now = new Date().toISOString();
@@ -775,7 +972,6 @@ export default function Home() {
         console.error("Failed launching game:", err);
         alert(`Failed to launch game executable:\n${err?.message || err}`);
         setActiveGame(null);
-        setActiveTimerSeconds(0);
       }
     },
     [activeGame, stopActiveSession, games],
@@ -930,6 +1126,14 @@ export default function Home() {
     setGames(updated);
   }, []);
 
+  const handleStatusChange = useCallback(
+    (id: string, status: "installed" | "wishlist" | "completed" | "none") => {
+      const updated = setGameStatus(id, status);
+      setGames([...updated]);
+    },
+    [],
+  );
+
   const handleTogglePin = useCallback((id: string) => {
     if (
       typeof document !== "undefined" &&
@@ -1076,6 +1280,157 @@ export default function Home() {
         return 0;
       });
   }, [games, searchQuery, categoryFilter, sortOption, pinnedGameIds]);
+
+  const categoryCounts = useMemo(() => {
+    let installed = 0;
+    let completed = 0;
+    let wishlist = 0;
+    let favorites = 0;
+    for (let i = 0; i < games.length; i++) {
+      const g = games[i];
+      if (g.isInstalled) installed++;
+      if (g.isCompleted) completed++;
+      if (g.isWishlisted) wishlist++;
+      if (g.isFavorite) favorites++;
+    }
+    return {
+      all: games.length,
+      installed,
+      completed,
+      wishlist,
+      favorites,
+    };
+  }, [games]);
+
+  const categoryControlData = useMemo(
+    () => [
+      {
+        label: (
+          <Center style={{ gap: 6 }}>
+            <Box component="span" fw={600}>
+              All
+            </Box>
+            <Box
+              component="span"
+              style={{
+                fontSize: "11px",
+                fontWeight: 700,
+                opacity: 0.85,
+                backgroundColor: "rgba(0, 0, 0, 0.25)",
+                padding: "2px 6px",
+                borderRadius: "10px",
+                lineHeight: 1,
+              }}
+            >
+              {categoryCounts.all}
+            </Box>
+          </Center>
+        ),
+        value: "all",
+      },
+      {
+        label: (
+          <Center style={{ gap: 6 }}>
+            <HardDrive size={13} color="#60a5fa" />
+            <Box component="span" fw={600}>
+              Installed
+            </Box>
+            <Box
+              component="span"
+              style={{
+                fontSize: "11px",
+                fontWeight: 700,
+                opacity: 0.85,
+                backgroundColor: "rgba(0, 0, 0, 0.25)",
+                padding: "2px 6px",
+                borderRadius: "10px",
+                lineHeight: 1,
+              }}
+            >
+              {categoryCounts.installed}
+            </Box>
+          </Center>
+        ),
+        value: "installed",
+      },
+      {
+        label: (
+          <Center style={{ gap: 6 }}>
+            <CheckCircle2 size={13} color="#34d399" />
+            <Box component="span" fw={600}>
+              Completed
+            </Box>
+            <Box
+              component="span"
+              style={{
+                fontSize: "11px",
+                fontWeight: 700,
+                opacity: 0.85,
+                backgroundColor: "rgba(0, 0, 0, 0.25)",
+                padding: "2px 6px",
+                borderRadius: "10px",
+                lineHeight: 1,
+              }}
+            >
+              {categoryCounts.completed}
+            </Box>
+          </Center>
+        ),
+        value: "completed",
+      },
+      {
+        label: (
+          <Center style={{ gap: 6 }}>
+            <Bookmark size={13} color="#fb923c" />
+            <Box component="span" fw={600}>
+              Wishlist
+            </Box>
+            <Box
+              component="span"
+              style={{
+                fontSize: "11px",
+                fontWeight: 700,
+                opacity: 0.85,
+                backgroundColor: "rgba(0, 0, 0, 0.25)",
+                padding: "2px 6px",
+                borderRadius: "10px",
+                lineHeight: 1,
+              }}
+            >
+              {categoryCounts.wishlist}
+            </Box>
+          </Center>
+        ),
+        value: "wishlist",
+      },
+      {
+        label: (
+          <Center style={{ gap: 6 }}>
+            <Star size={13} color="#facc15" />
+            <Box component="span" fw={600}>
+              Favorites
+            </Box>
+            <Box
+              component="span"
+              style={{
+                fontSize: "11px",
+                fontWeight: 700,
+                opacity: 0.85,
+                backgroundColor: "rgba(0, 0, 0, 0.25)",
+                padding: "2px 6px",
+                borderRadius: "10px",
+                lineHeight: 1,
+              }}
+            >
+              {categoryCounts.favorites}
+            </Box>
+          </Center>
+        ),
+        value: "favorites",
+      },
+    ],
+    [categoryCounts],
+  );
 
   const searchPlaceholder =
     activeTab === "library"
@@ -1250,90 +1605,7 @@ export default function Home() {
             style={{ height: "100%" }}
             data-tauri-drag-region
           >
-            {hasDownloads && (
-              <Paper
-                px="xs"
-                py={4}
-                radius="xl"
-                bg="var(--mantine-color-default)"
-                style={{
-                  border: isAllPaused
-                    ? "1px solid var(--mantine-color-yellow-7)"
-                    : "1px solid var(--mantine-color-teal-7)",
-                  boxShadow: isAllPaused
-                    ? "0 0 10px rgba(250, 176, 5, 0.15)"
-                    : "0 0 10px rgba(32, 201, 151, 0.2)",
-                  transition: "all 0.2s ease",
-                }}
-              >
-                <Group gap={6}>
-                  <Tooltip
-                    label={
-                      isAllPaused
-                        ? "Resume all downloads"
-                        : "Pause all downloads"
-                    }
-                  >
-                    <ActionIcon
-                      size={24}
-                      variant="subtle"
-                      color={isAllPaused ? "yellow" : "teal"}
-                      radius="xl"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleAllDownloadsPause();
-                      }}
-                      style={{ cursor: "pointer" }}
-                    >
-                      {isAllPaused ? (
-                        <Play size={13} fill="currentColor" />
-                      ) : (
-                        <Pause size={13} fill="currentColor" />
-                      )}
-                    </ActionIcon>
-                  </Tooltip>
-
-                  <Tooltip
-                    label={
-                      isAllPaused
-                        ? `Downloads Paused (${incompleteTorrents.length} items) • Click to open Downloads Manager`
-                        : `Downloading (${activeDownloadingTorrents.length || aggregateStats.activeCount} active) • Click to open Downloads Manager`
-                    }
-                  >
-                    <Group
-                      gap="xs"
-                      onClick={() => handleTabChange("downloads")}
-                      style={{ cursor: "pointer" }}
-                    >
-                      <Stack gap={2} style={{ width: 100 }}>
-                        <Group justify="space-between" align="center" gap={2}>
-                          <Text
-                            size="11px"
-                            fw={700}
-                            c={isAllPaused ? "yellow.4" : "teal.4"}
-                            ff="monospace"
-                          >
-                            {isAllPaused
-                              ? "Paused"
-                              : `↓ ${aggregateStats.totalDownSpeed || "0 B/s"}`}
-                          </Text>
-                          <Text size="10px" c="dimmed">
-                            {totalDownloadProgress.toFixed(0)}%
-                          </Text>
-                        </Group>
-                        <Progress
-                          value={totalDownloadProgress}
-                          color={isAllPaused ? "yellow" : "teal"}
-                          size={3}
-                          radius="xl"
-                          animated={!isAllPaused}
-                        />
-                      </Stack>
-                    </Group>
-                  </Tooltip>
-                </Group>
-              </Paper>
-            )}
+            <HeaderDownloadProgress onOpenDownloads={() => handleTabChange("downloads")} />
 
             <Tooltip
               label={isDark ? "Switch to Light Mode" : "Switch to Dark Mode"}
@@ -1358,15 +1630,27 @@ export default function Home() {
               </ActionIcon>
             </Tooltip>
 
-            <Tooltip label="Test Webview Modal (with JS Injection)">
+            <Tooltip label="Interactive Game Maps Browser">
               <ActionIcon
                 variant="light"
-                color="blue"
-                onClick={() => setIsWebviewModalOpen(true)}
+                color="teal"
+                onClick={() => setIsMapsBrowserOpen(true)}
                 size="sm"
                 radius="md"
               >
-                <Globe size={16} />
+                <MapIcon size={16} />
+              </ActionIcon>
+            </Tooltip>
+
+            <Tooltip label="Game Booster & Resource Cleaner">
+              <ActionIcon
+                variant="light"
+                color="yellow"
+                onClick={() => setIsBoosterOpen(true)}
+                size="sm"
+                radius="md"
+              >
+                <Zap size={16} />
               </ActionIcon>
             </Tooltip>
 
@@ -1470,7 +1754,7 @@ export default function Home() {
           setActiveTab={handleTabChange}
           gameCount={games.length}
           activeGameTitle={activeGame?.title}
-          activeGameMinutes={Math.floor(activeTimerSeconds / 60)}
+          activeGameMinutes={0}
           viewMode={viewMode}
           onViewModeChange={handleViewModeChange}
           categoryFilter={categoryFilter}
@@ -1496,44 +1780,16 @@ export default function Home() {
           height: "calc(100vh - var(--app-shell-header-height, 56px))",
         }}
       >
-        {/* Active Session Alert Banner */}
-        {activeGame && (
-          <Alert
-            color="teal"
-            variant="filled"
-            radius={0}
-            p="xs"
-            icon={<Play size={16} />}
-            style={{
-              boxShadow: "0 4px 12px rgba(18, 184, 134, 0.2)",
-              borderBottom: "1px solid var(--mantine-color-teal-6)",
-            }}
-          >
-            <Group justify="space-between">
-              <Box>
-                <Text size="xs" fw={700}>
-                  Playing: {activeGame.title}
-                </Text>
-                <Text size="xs">
-                  Session: {Math.floor(activeTimerSeconds / 3600)}h{" "}
-                  {Math.floor((activeTimerSeconds % 3600) / 60)}m{" "}
-                  {activeTimerSeconds % 60}s
-                </Text>
-              </Box>
-              <Button
-                size="xs"
-                color="red"
-                variant="white"
-                onClick={stopActiveSession}
-              >
-                Stop Game
-              </Button>
-            </Group>
-          </Alert>
-        )}
+        {/* Active Session Alert Banner (isolated timer) */}
+        <ActiveSessionBanner
+          activeGame={activeGame}
+          onStop={stopActiveSession}
+        />
 
         {/* Main Content Body with Zero-Delay Persistent Tabs */}
         <Box
+          className="tab-content-fade"
+          key={`tab-library-${viewMode}`}
           style={{
             display: activeTab === "library" ? "block" : "none",
             height: "100%",
@@ -1554,7 +1810,7 @@ export default function Home() {
                   <GameDetailView
                     game={activeListGame}
                     onLaunch={handleLaunchGame}
-                    onEdit={setEditingGame}
+                    onEdit={handleOpenEditModal}
                     onUninstall={handleUninstallGame}
                     onRemoveFromWishlist={handleRemoveFromWishlist}
                     isPlaying={activeGame?.id === activeListGame.id}
@@ -1593,141 +1849,7 @@ export default function Home() {
                     <SegmentedControl
                       value={categoryFilter}
                       onChange={handleCategoryFilterChange}
-                      data={[
-                        {
-                          label: (
-                            <Center style={{ gap: 6 }}>
-                              <Box component="span" fw={600}>
-                                All
-                              </Box>
-                              <Box
-                                component="span"
-                                style={{
-                                  fontSize: "11px",
-                                  fontWeight: 700,
-                                  opacity: 0.85,
-                                  backgroundColor: "rgba(0, 0, 0, 0.25)",
-                                  padding: "2px 6px",
-                                  borderRadius: "10px",
-                                  lineHeight: 1,
-                                }}
-                              >
-                                {games.length}
-                              </Box>
-                            </Center>
-                          ),
-                          value: "all",
-                        },
-                        {
-                          label: (
-                            <Center style={{ gap: 6 }}>
-                              <HardDrive size={13} color="#60a5fa" />
-                              <Box component="span" fw={600}>
-                                Installed
-                              </Box>
-                              <Box
-                                component="span"
-                                style={{
-                                  fontSize: "11px",
-                                  fontWeight: 700,
-                                  opacity: 0.85,
-                                  backgroundColor: "rgba(0, 0, 0, 0.25)",
-                                  padding: "2px 6px",
-                                  borderRadius: "10px",
-                                  lineHeight: 1,
-                                }}
-                              >
-                                {
-                                  games.filter((g) => Boolean(g.isInstalled))
-                                    .length
-                                }
-                              </Box>
-                            </Center>
-                          ),
-                          value: "installed",
-                        },
-                        {
-                          label: (
-                            <Center style={{ gap: 6 }}>
-                              <CheckCircle2 size={13} color="#34d399" />
-                              <Box component="span" fw={600}>
-                                Completed
-                              </Box>
-                              <Box
-                                component="span"
-                                style={{
-                                  fontSize: "11px",
-                                  fontWeight: 700,
-                                  opacity: 0.85,
-                                  backgroundColor: "rgba(0, 0, 0, 0.25)",
-                                  padding: "2px 6px",
-                                  borderRadius: "10px",
-                                  lineHeight: 1,
-                                }}
-                              >
-                                {
-                                  games.filter((g) => Boolean(g.isCompleted))
-                                    .length
-                                }
-                              </Box>
-                            </Center>
-                          ),
-                          value: "completed",
-                        },
-                        {
-                          label: (
-                            <Center style={{ gap: 6 }}>
-                              <Bookmark size={13} color="#fb923c" />
-                              <Box component="span" fw={600}>
-                                Wishlist
-                              </Box>
-                              <Box
-                                component="span"
-                                style={{
-                                  fontSize: "11px",
-                                  fontWeight: 700,
-                                  opacity: 0.85,
-                                  backgroundColor: "rgba(0, 0, 0, 0.25)",
-                                  padding: "2px 6px",
-                                  borderRadius: "10px",
-                                  lineHeight: 1,
-                                }}
-                              >
-                                {games.filter((g) => g.isWishlisted).length}
-                              </Box>
-                            </Center>
-                          ),
-                          value: "wishlist",
-                        },
-                        {
-                          label: (
-                            <Center style={{ gap: 6 }}>
-                              <Star size={13} color="#facc15" />
-                              <Box component="span" fw={600}>
-                                Favorites
-                              </Box>
-                              <Box
-                                component="span"
-                                style={{
-                                  fontSize: "11px",
-                                  fontWeight: 700,
-                                  opacity: 0.85,
-                                  backgroundColor: "rgba(0, 0, 0, 0.25)",
-                                  padding: "2px 6px",
-                                  borderRadius: "10px",
-                                  lineHeight: 1,
-                                }}
-                              >
-                                {
-                                  games.filter((g) => Boolean(g.isFavorite))
-                                    .length
-                                }
-                              </Box>
-                            </Center>
-                          ),
-                          value: "favorites",
-                        },
-                      ]}
+                      data={categoryControlData}
                       radius="md"
                       color="blue"
                       size="sm"
@@ -1811,6 +1933,7 @@ export default function Home() {
                 {/* Game Grid */}
                 {filteredGames.length > 0 ? (
                   <SimpleGrid
+                    className="library-grid-container"
                     cols={{ base: 2, sm: 3, md: 4, lg: 5, xl: 6 }}
                     spacing="md"
                   >
@@ -1823,10 +1946,11 @@ export default function Home() {
                         isPinned={pinnedGameIds.includes(game.id)}
                         onTogglePin={handleTogglePin}
                         onLaunch={handleLaunchGame}
-                        onOpenDetails={setSelectedGame}
-                        onEdit={setEditingGame}
+                        onOpenDetails={handleOpenDetails}
+                        onEdit={handleOpenEditModal}
                         onToggleFavorite={handleToggleFavorite}
                         onToggleCompleted={handleToggleCompleted}
+                        onStatusChange={handleStatusChange}
                         onDelete={handleRemoveFromList}
                       />
                     ))}
@@ -1861,49 +1985,65 @@ export default function Home() {
           )}
         </Box>
 
-        <Box
-          p="lg"
-          style={{ display: activeTab === "analytics" ? "block" : "none" }}
-        >
-          <PlaytimeStats games={games} searchQuery={searchQuery} />
-        </Box>
+        {visitedTabs.has("analytics") && (
+          <Box
+            className="tab-content-fade"
+            key="tab-analytics"
+            p="lg"
+            style={{ display: activeTab === "analytics" ? "block" : "none" }}
+          >
+            <PlaytimeStats games={games} searchQuery={searchQuery} />
+          </Box>
+        )}
 
-        <Box
-          p="lg"
-          style={{ display: activeTab === "repacks" ? "block" : "none" }}
-        >
-          <RepacksPostsView
-            activeGameTitle={activeGame?.title}
-            externalSearchQuery={searchQuery}
-            onSearchChange={setSearchQuery}
-            dataSource="fitgirl"
-            onOpenTorrentDownload={(magnetUrl, title, coverUrl, repackSize) =>
-              setTorrentModalData({ magnetUrl, title, coverUrl, repackSize })
-            }
-          />
-        </Box>
+        {visitedTabs.has("repacks") && (
+          <Box
+            className="tab-content-fade"
+            key="tab-repacks"
+            p="lg"
+            style={{ display: activeTab === "repacks" ? "block" : "none" }}
+          >
+            <RepacksPostsView
+              activeGameTitle={activeGame?.title}
+              externalSearchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
+              dataSource="fitgirl"
+              onOpenTorrentDownload={(magnetUrl, title, coverUrl, repackSize) =>
+                setTorrentModalData({ magnetUrl, title, coverUrl, repackSize })
+              }
+            />
+          </Box>
+        )}
 
-        <Box
-          p="lg"
-          style={{ display: activeTab === "downloads" ? "block" : "none" }}
-        >
-          <DownloadsView />
-        </Box>
+        {visitedTabs.has("downloads") && (
+          <Box
+            className="tab-content-fade"
+            key="tab-downloads"
+            p="lg"
+            style={{ display: activeTab === "downloads" ? "block" : "none" }}
+          >
+            <DownloadsView />
+          </Box>
+        )}
 
-        <Box
-          p="lg"
-          style={{ display: activeTab === "steamrip" ? "block" : "none" }}
-        >
-          <RepacksPostsView
-            activeGameTitle={activeGame?.title}
-            externalSearchQuery={searchQuery}
-            onSearchChange={setSearchQuery}
-            dataSource="steamrip"
-            onOpenTorrentDownload={(magnetUrl, title, coverUrl, repackSize) =>
-              setTorrentModalData({ magnetUrl, title, coverUrl, repackSize })
-            }
-          />
-        </Box>
+        {visitedTabs.has("steamrip") && (
+          <Box
+            className="tab-content-fade"
+            key="tab-steamrip"
+            p="lg"
+            style={{ display: activeTab === "steamrip" ? "block" : "none" }}
+          >
+            <RepacksPostsView
+              activeGameTitle={activeGame?.title}
+              externalSearchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
+              dataSource="steamrip"
+              onOpenTorrentDownload={(magnetUrl, title, coverUrl, repackSize) =>
+                setTorrentModalData({ magnetUrl, title, coverUrl, repackSize })
+              }
+            />
+          </Box>
+        )}
       </AppShell.Main>
 
       {/* Modals */}
@@ -1913,13 +2053,11 @@ export default function Home() {
           game={selectedGame}
           onClose={() => setSelectedGame(null)}
           onLaunch={handleLaunchGame}
-          onEdit={setEditingGame}
+          onEdit={handleOpenEditModal}
           onUninstall={handleUninstallGame}
           onRemoveFromWishlist={handleRemoveFromWishlist}
           isPlaying={activeGame?.id === selectedGame.id}
-          activeTimerSeconds={
-            activeGame?.id === selectedGame.id ? activeTimerSeconds : 0
-          }
+          activeTimerSeconds={0}
           isAnyGameRunning={activeGame !== null}
           onOpenTorrentDownload={(data) => setTorrentModalData(data)}
           onGameUpdated={(updated) => {
@@ -1989,15 +2127,21 @@ export default function Home() {
             </Text>
 
             <Alert color="blue" variant="light" radius="md">
-              This only removes the game entry from your FitRepacks library list. It will{" "}
-              <Text span fw={700}>not delete or uninstall</Text> any game files or save data from your disk.
+              This only removes the game entry from your FitRepacks library
+              list. It will{" "}
+              <Text span fw={700}>
+                not delete or uninstall
+              </Text>{" "}
+              any game files or save data from your disk.
             </Alert>
 
             <Group
               justify="flex-end"
               gap="xs"
               pt="xs"
-              style={{ borderTop: "1px solid var(--mantine-color-default-border)" }}
+              style={{
+                borderTop: "1px solid var(--mantine-color-default-border)",
+              }}
             >
               <Button
                 variant="subtle"
@@ -2060,12 +2204,33 @@ export default function Home() {
         />
       )}
 
-      <WebviewModal
-        opened={isWebviewModalOpen}
-        onClose={() => setIsWebviewModalOpen(false)}
-        url="https://fitgirl-repacks.site"
-        title="Webview Modal (Tauri Native)"
-      />
+      {isMapsBrowserOpen && (
+        <MapsBrowserModal
+          opened={isMapsBrowserOpen}
+          onClose={() => setIsMapsBrowserOpen(false)}
+          onSelectMap={(gameSlug, mapSlug, gameTitle) => {
+            setIsMapsBrowserOpen(false);
+            setActiveMapViewer({ gameSlug, mapSlug, gameTitle });
+          }}
+        />
+      )}
+
+      {activeMapViewer && (
+        <MapViewerModal
+          opened={Boolean(activeMapViewer)}
+          onClose={() => setActiveMapViewer(null)}
+          gameSlug={activeMapViewer.gameSlug}
+          mapSlug={activeMapViewer.mapSlug}
+          gameTitle={activeMapViewer.gameTitle}
+        />
+      )}
+
+      {isBoosterOpen && (
+        <ProcessBoosterModal
+          opened={isBoosterOpen}
+          onClose={() => setIsBoosterOpen(false)}
+        />
+      )}
     </AppShell>
   );
 }

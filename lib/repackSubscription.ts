@@ -1,4 +1,4 @@
-import { pb } from "./pocketbase";
+import { ab } from "./alsabase";
 import {
   getNotificationSettings,
   getRepackNotificationsEnabled,
@@ -151,16 +151,10 @@ function findMatchingLibraryGame(
       }
     }
 
-    // Normalized title match
+    // Normalized title match (exact)
     const normGameTitle = normalizeGameTitle(g.title);
-    if (normGameTitle && normRecordTitle) {
-      if (
-        normGameTitle === normRecordTitle ||
-        normRecordTitle.startsWith(normGameTitle) ||
-        normGameTitle.startsWith(normRecordTitle)
-      ) {
-        return g;
-      }
+    if (normGameTitle && normRecordTitle && normGameTitle === normRecordTitle) {
+      return g;
     }
   }
 
@@ -233,11 +227,11 @@ async function flushNotificationBatch(): Promise<void> {
 
         const notificationTitle = isUpdate
           ? item.source === "steamrip"
-            ? `🔄 SteamRIP Game Updated: ${item.title}`
-            : `🔄 FitGirl Repack Updated: ${item.title}`
+            ? `SteamRIP Game Updated: ${item.title}`
+            : `FitGirl Repack Updated: ${item.title}`
           : item.source === "steamrip"
-            ? `🕹️ New SteamRIP Game: ${item.title}`
-            : `🎮 New FitGirl Repack: ${item.title}`;
+            ? `New SteamRIP Game: ${item.title}`
+            : `New FitGirl Repack: ${item.title}`;
 
         const bodyText = isUpdate
           ? `${item.title}${size} has been updated on ${sourceName}!`
@@ -287,9 +281,14 @@ function isRepackSubscriptionActive(): boolean {
 }
 
 /**
- * Handle new game/repack created or updated event from PocketBase (FitGirl or SteamRIP)
+ * Handle new game/repack created or updated event from AlsaBase (FitGirl or SteamRIP)
  */
-async function handleRepackEvent(e: { action: string; record: any }) {
+async function handleRepackEvent(
+  e: { action: string; record: any },
+  forcedSource?: "fitgirl" | "steamrip",
+) {
+  console.log("[handleRepackEvent] Event received:", e);
+
   if (!e || (e.action !== "create" && e.action !== "update") || !e.record)
     return;
 
@@ -301,8 +300,49 @@ async function handleRepackEvent(e: { action: string; record: any }) {
   }
 
   const source =
+    forcedSource ||
     record.source ||
     (record.collectionName === "steamrip" ? "steamrip" : "fitgirl");
+
+  const isTestNotification =
+    record.is_test === true ||
+    title.toLowerCase().startsWith("[test]") ||
+    title.toLowerCase().includes("[dev test]");
+
+  const isDev =
+    process.env.NODE_ENV === "development" ||
+    (typeof window !== "undefined" &&
+      (window.location.hostname === "localhost" ||
+        window.location.hostname === "127.0.0.1" ||
+        window.location.port === "3000" ||
+        window.location.port === "1420"));
+
+  console.log("[handleRepackEvent] Context:", {
+    title,
+    source,
+    isTestNotification,
+    isDev,
+    nodeEnv: process.env.NODE_ENV,
+  });
+
+  // In production mode, completely ignore test posts
+  if (isTestNotification && !isDev) {
+    console.log(
+      "[handleRepackEvent] Ignored test notification in production mode",
+    );
+    return;
+  }
+
+  // In development mode, immediately show a test notification
+  if (isTestNotification) {
+    const sourceName = source === "steamrip" ? "SteamRIP" : "FitGirl Repacks";
+    console.log("[handleRepackEvent] Triggering test notification for:", title);
+    await sendDesktopNotification({
+      title: `[DEV TEST] ${sourceName} Test Insert`,
+      body: `${title} (${record.repack_size || "N/A"}) was successfully inserted!`,
+    });
+    return;
+  }
 
   // 1. Notify UI components that a repack/game was published or updated immediately
   if (typeof window !== "undefined") {
@@ -470,8 +510,8 @@ async function handleRepackEvent(e: { action: string; record: any }) {
     return;
   }
 
-  // 5. Skip notifications for historical entries (> 7 days)
-  if (record.post_date) {
+  // 5. For updates only, skip notifications for historical entries (> 7 days)
+  if (e.action === "update" && record.post_date) {
     const postTime = new Date(record.post_date).getTime();
     if (!isNaN(postTime)) {
       const postAgeMs = Date.now() - postTime;
@@ -488,9 +528,12 @@ async function handleRepackEvent(e: { action: string; record: any }) {
     return;
   }
 
-  // 7. Skip if release signature is unchanged
+  // 7. Skip if release signature is unchanged (for updates)
   const gameKey = `${source}_${record.id || record.repack_id}`;
-  if (!isGameReleaseUpdate(record, gameKey, e.action)) {
+  if (
+    e.action === "update" &&
+    !isGameReleaseUpdate(record, gameKey, e.action)
+  ) {
     return;
   }
 
@@ -523,7 +566,7 @@ async function handleRepackEvent(e: { action: string; record: any }) {
 }
 
 /**
- * Initialize PocketBase realtime subscriptions for both 'repacks' and 'steamrip' collections
+ * Initialize AlsaBase realtime subscriptions for both 'repacks' and 'steamrip' collections
  */
 export async function initRepackSubscription(): Promise<() => void> {
   if (typeof window === "undefined") return () => {};
@@ -533,11 +576,11 @@ export async function initRepackSubscription(): Promise<() => void> {
   subscribePromise = (async () => {
     try {
       // Clean up any existing listeners first
-      await pb
+      await ab
         .collection("repacks")
         .unsubscribe("*")
         .catch(() => {});
-      await pb
+      await ab
         .collection("steamrip")
         .unsubscribe("*")
         .catch(() => {});
@@ -547,14 +590,18 @@ export async function initRepackSubscription(): Promise<() => void> {
         requestNotificationPermission().catch(() => {});
       }
 
-      await pb.collection("repacks").subscribe("*", handleRepackEvent);
-      await pb.collection("steamrip").subscribe("*", handleRepackEvent);
+      await ab
+        .collection("repacks")
+        .subscribe("*", (e) => handleRepackEvent(e, "fitgirl"));
+      await ab
+        .collection("steamrip")
+        .subscribe("*", (e) => handleRepackEvent(e, "steamrip"));
       isSubscribed = true;
       console.log(
-        "[PocketBase] Successfully subscribed to 'repacks' and 'steamrip' collections realtime events.",
+        "[AlsaBase] Successfully subscribed to 'repacks' and 'steamrip' collections realtime events.",
       );
     } catch (err) {
-      console.error("[PocketBase] Failed to subscribe to collections:", err);
+      console.error("[AlsaBase] Failed to subscribe to collections:", err);
     } finally {
       subscribePromise = null;
     }
@@ -566,7 +613,7 @@ export async function initRepackSubscription(): Promise<() => void> {
 }
 
 /**
- * Unsubscribe from PocketBase realtime events
+ * Unsubscribe from AlsaBase realtime events
  */
 export async function unsubscribeRepackSubscription(): Promise<void> {
   try {
@@ -577,20 +624,20 @@ export async function unsubscribeRepackSubscription(): Promise<void> {
       batchStartTime = null;
     }
 
-    await pb
+    await ab
       .collection("repacks")
       .unsubscribe("*")
       .catch(() => {});
-    await pb
+    await ab
       .collection("steamrip")
       .unsubscribe("*")
       .catch(() => {});
     isSubscribed = false;
     subscribePromise = null;
     console.log(
-      "[PocketBase] Unsubscribed from 'repacks' and 'steamrip' collections.",
+      "[AlsaBase] Unsubscribed from 'repacks' and 'steamrip' collections.",
     );
   } catch (err) {
-    console.error("[PocketBase] Failed to unsubscribe:", err);
+    console.error("[AlsaBase] Failed to unsubscribe:", err);
   }
 }

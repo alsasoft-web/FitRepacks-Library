@@ -6,7 +6,7 @@ A lightweight, open-source desktop library manager and launcher for PC games and
 
 ## Overview
 
-FitRepacks Library brings your local game installs and release catalogs together under one dashboard. It stores your library locally using SQLite, runs with a minimal memory footprint via Rust, and offers optional sync through PocketBase.
+FitRepacks Library brings your local game installs and release catalogs together under one dashboard. It stores your library locally using SQLite, runs with a minimal memory footprint via Rust, and offers optional sync through AlsaBase.
 
 ## Screenshots
 
@@ -30,7 +30,7 @@ Track total hours, completion status, favorite titles, and genre breakdowns over
 - Playtime Tracking: Automatic session timing and stats tracking for every game launched through the client.
 - Built-in Download Tracking: Monitor downloads and torrent tasks directly within the app.
 - System Tray Integration: Background minimizes to tray with quick-launch shortcuts and active download summaries.
-- Local-First Architecture: All data is saved to a local SQLite database by default. Optional PocketBase integration allows cross-device synchronization.
+- Local-First Architecture: All data is saved to a local SQLite database by default. Optional AlsaBase integration allows cross-device synchronization.
 
 ## Tech Stack
 
@@ -80,14 +80,14 @@ Edit `.env` with your API credentials:
 NEXT_PUBLIC_IGDB_CLIENT_ID=your_twitch_client_id
 NEXT_PUBLIC_IGDB_CLIENT_SECRET=your_twitch_client_secret
 NEXT_PUBLIC_STEAM_API_KEY=your_steam_web_api_key
-NEXT_PUBLIC_POCKETBASE_URL=https://your-pocketbase-instance.com
+NEXT_PUBLIC_ALSABASE_URL=https://your-alsabase-instance.com
 ```
 
 Notes on API keys:
 
 - IGDB: Register an application on the Twitch Developer Console to obtain a Client ID and Client Secret.
 - Steam API: Obtain an API key from the Steam Community Developer portal.
-- PocketBase: Optional. Leave empty if you only want local SQLite storage.
+- AlsaBase: Optional. Leave empty if you only want local SQLite storage.
 
 ### 4. Run the development server
 
@@ -131,7 +131,7 @@ FitRepacks Library/
 ├── assets/               # Screenshots and documentation media
 ├── components/           # UI components
 │   ├── analytics/        # Playtime and telemetry charts
-│   ├── auth/             # PocketBase authentication views
+│   ├── auth/             # AlsaBase authentication views
 │   ├── common/           # Shared buttons, modals, and inputs
 │   ├── layout/           # App navigation and custom window titlebar
 │   ├── library/          # Game cards, grid views, and edit dialogs

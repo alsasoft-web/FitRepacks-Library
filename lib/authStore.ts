@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import { pb } from "./pocketbase";
-import type { RecordModel } from "pocketbase";
+import { ab } from "./alsabase";
+import type { RecordModel } from "alsabase";
 
 export interface UserProfile {
   id: string;
@@ -21,6 +21,7 @@ interface AuthState {
 
   // Actions
   initialize: () => void;
+  refreshProfile: () => Promise<void>;
   login: (identity: string, password: string) => Promise<boolean>;
   register: (
     username: string,
@@ -31,8 +32,8 @@ interface AuthState {
     avatarFile?: File | null
   ) => Promise<boolean>;
   logout: () => void;
-  updateAvatar: (file: File) => Promise<boolean>;
-  updateProfile: (data: { name?: string; username?: string }) => Promise<boolean>;
+  updateAvatar: (fileOrUrl: File | string) => Promise<boolean>;
+  updateProfile: (data: { name?: string; username?: string; avatar?: string }) => Promise<boolean>;
   clearError: () => void;
   getAvatarUrl: (user?: UserProfile | null) => string;
 }
@@ -50,15 +51,15 @@ function formatUser(model: RecordModel | null): UserProfile | null {
     email: model.email || "",
     name: model.name || "",
     avatar: model.avatar || "",
-    created: model.created,
-    updated: model.updated,
+    created: model.created || (model as any).created_at,
+    updated: model.updated || (model as any).updated_at,
   };
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
-  user: typeof window !== "undefined" && pb.authStore.record ? formatUser(pb.authStore.record as RecordModel) : null,
-  token: typeof window !== "undefined" ? pb.authStore.token : null,
-  isAuthenticated: typeof window !== "undefined" ? pb.authStore.isValid : false,
+  user: typeof window !== "undefined" && ab.authStore.model ? formatUser(ab.authStore.model as RecordModel) : null,
+  token: typeof window !== "undefined" ? ab.authStore.token : null,
+  isAuthenticated: typeof window !== "undefined" ? ab.authStore.isValid : false,
   isLoading: false,
   error: null,
 
@@ -66,29 +67,76 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (typeof window === "undefined") return;
 
     // Synchronize initial state
+    const currentModel = ab.authStore.model as RecordModel | null;
     set({
-      user: pb.authStore.record ? formatUser(pb.authStore.record as RecordModel) : null,
-      token: pb.authStore.token || null,
-      isAuthenticated: pb.authStore.isValid,
+      user: currentModel ? formatUser(currentModel) : null,
+      token: ab.authStore.token || null,
+      isAuthenticated: ab.authStore.isValid,
     });
 
+    // If authenticated, fetch the actual collection fields (name, avatar, etc.) to ensure complete profile data
+    if (ab.authStore.isValid && currentModel?.id) {
+      ab.collection("users")
+        .getOne(currentModel.id)
+        .then((fetched) => {
+          if (fetched) {
+            const merged = { ...currentModel, ...fetched };
+            if (ab.authStore.token) {
+              ab.authStore.save(ab.authStore.token, merged);
+            }
+            set({
+              user: formatUser(merged),
+            });
+          }
+        })
+        .catch(() => {});
+    }
+
     // Listen to changes in authStore (e.g. token refresh, logout, update)
-    pb.authStore.onChange((token, model) => {
+    ab.authStore.onChange((token, model) => {
       set({
         token: token || null,
         user: model ? formatUser(model as RecordModel) : null,
-        isAuthenticated: !!token && pb.authStore.isValid,
+        isAuthenticated: !!token && ab.authStore.isValid,
       });
     });
+  },
+
+  refreshProfile: async () => {
+    const currentUser = get().user;
+    if (!currentUser?.id || !ab.authStore.isValid) return;
+    try {
+      const fetched = await ab.collection("users").getOne(currentUser.id);
+      if (fetched) {
+        const merged = { ...(ab.authStore.model || {}), ...fetched };
+        if (ab.authStore.token) {
+          ab.authStore.save(ab.authStore.token, merged);
+        }
+        set({ user: formatUser(merged) });
+      }
+    } catch (_) {}
   },
 
   login: async (identity: string, password: string) => {
     set({ isLoading: true, error: null });
     try {
       const cleanIdentity = identity.trim();
-      const authData = await pb.collection("users").authWithPassword(cleanIdentity, password);
+      const authData = await ab.collection("users").authWithPassword(cleanIdentity, password);
+
+      // Fetch full collection record with name, avatar, and other fields
+      let fullRecord = authData.record;
+      try {
+        const fetched = await ab.collection("users").getOne(authData.record.id);
+        if (fetched) {
+          fullRecord = { ...authData.record, ...fetched };
+          if (authData.token) {
+            ab.authStore.save(authData.token, fullRecord);
+          }
+        }
+      } catch (_) {}
+
       set({
-        user: formatUser(authData.record),
+        user: formatUser(fullRecord),
         token: authData.token,
         isAuthenticated: true,
         isLoading: false,
@@ -141,12 +189,25 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         };
       }
 
-      await pb.collection("users").create(createPayload);
+      await ab.collection("users").create(createPayload);
 
       // Auto login after successful registration
-      const authData = await pb.collection("users").authWithPassword(cleanUsername, password);
+      const authData = await ab.collection("users").authWithPassword(cleanUsername, password);
+
+      // Fetch full collection record with all fields
+      let fullRecord = authData.record;
+      try {
+        const fetched = await ab.collection("users").getOne(authData.record.id);
+        if (fetched) {
+          fullRecord = { ...authData.record, ...fetched };
+          if (authData.token) {
+            ab.authStore.save(authData.token, fullRecord);
+          }
+        }
+      } catch (_) {}
+
       set({
-        user: formatUser(authData.record),
+        user: formatUser(fullRecord),
         token: authData.token,
         isAuthenticated: true,
         isLoading: false,
@@ -179,7 +240,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: () => {
-    pb.authStore.clear();
+    ab.authStore.clear();
     set({
       user: null,
       token: null,
@@ -188,18 +249,35 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     });
   },
 
-  updateAvatar: async (file: File) => {
+  updateAvatar: async (fileOrUrl: File | string) => {
     const currentUser = get().user;
     if (!currentUser) return false;
 
     set({ isLoading: true, error: null });
     try {
-      const formData = new FormData();
-      formData.append("avatar", file);
+      let payload: FormData | Record<string, string>;
+      if (typeof fileOrUrl === "string") {
+        payload = { avatar: fileOrUrl };
+      } else {
+        const formData = new FormData();
+        formData.append("avatar", fileOrUrl);
+        payload = formData;
+      }
 
-      const updatedRecord = await pb.collection("users").update(currentUser.id, formData);
+      const updatedRecord = await ab.collection("users").update(currentUser.id, payload);
+      let fullRecord = updatedRecord;
+      try {
+        const fetched = await ab.collection("users").getOne(currentUser.id);
+        if (fetched) {
+          fullRecord = { ...updatedRecord, ...fetched };
+        }
+      } catch (_) {}
+
+      if (ab.authStore.token) {
+        ab.authStore.save(ab.authStore.token, fullRecord);
+      }
       set({
-        user: formatUser(updatedRecord),
+        user: formatUser(fullRecord),
         isLoading: false,
       });
       return true;
@@ -210,7 +288,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
-  updateProfile: async (data: { name?: string; username?: string }) => {
+  updateProfile: async (data: { name?: string; username?: string; avatar?: string }) => {
     const currentUser = get().user;
     if (!currentUser) return false;
 
@@ -219,10 +297,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const payload: Record<string, string> = {};
       if (data.name !== undefined) payload.name = data.name.trim();
       if (data.username !== undefined) payload.username = data.username.trim();
+      if (data.avatar !== undefined) payload.avatar = data.avatar;
 
-      const updatedRecord = await pb.collection("users").update(currentUser.id, payload);
+      const updatedRecord = await ab.collection("users").update(currentUser.id, payload);
+      let fullRecord = updatedRecord;
+      try {
+        const fetched = await ab.collection("users").getOne(currentUser.id);
+        if (fetched) {
+          fullRecord = { ...updatedRecord, ...fetched };
+        }
+      } catch (_) {}
+
+      if (ab.authStore.token) {
+        ab.authStore.save(ab.authStore.token, fullRecord);
+      }
       set({
-        user: formatUser(updatedRecord),
+        user: formatUser(fullRecord),
         isLoading: false,
       });
       return true;
@@ -247,14 +337,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         return targetUser.avatar;
       }
       try {
-        // Construct PB record format for getURL
-        const pbRecord = {
+        const abRecord = {
           id: targetUser.id,
           collectionId: "users",
           collectionName: "users",
           avatar: targetUser.avatar,
         };
-        return pb.files.getURL(pbRecord as any, targetUser.avatar);
+        return ab.files.getUrl(abRecord, targetUser.avatar);
       } catch {
         // Fallback
       }

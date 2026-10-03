@@ -2,10 +2,7 @@
 
 import React from "react";
 import { Game } from "../../lib/types";
-import { CachedImage } from "../common/CachedImage";
-import {
-  cleanGameTitle,
-} from "../../lib/gameLinker";
+import { cleanGameTitle } from "../../lib/gameLinker";
 import {
   isGameUpToDateByDate,
   detectGameExeLastModified,
@@ -14,8 +11,8 @@ import {
 } from "../../lib/db";
 import { parseDateSafe } from "../../lib/versionDetector";
 import { openInBrowser } from "../../lib/openUrl";
-import { useMapGenieMap, MAPGENIE_FMG_INJECTED_SCRIPT } from "../../lib/mapgenie";
-import { WebviewModal } from "../common/WebviewModal";
+import { useGameMap } from "../../lib/gameMaps";
+import { MapViewerModal } from "../maps";
 import {
   Card,
   Badge,
@@ -24,6 +21,7 @@ import {
   ActionIcon,
   Stack,
   Box,
+  Image,
   Tooltip,
   Menu,
 } from "@mantine/core";
@@ -86,7 +84,7 @@ export const GameCard = React.memo<GameCardProps>(
     const { ref: hoverRef, hovered } = useHover<HTMLDivElement>();
     const isOtherGameRunning = isAnyGameRunning && !isPlaying;
     const [isMapOpen, setIsMapOpen] = React.useState(false);
-    const mapGenieMap = useMapGenieMap(game.title);
+    const { map: gameMap } = useGameMap(game.title);
 
     const handleQuickStatus = (
       status: "installed" | "wishlist" | "completed" | "none",
@@ -137,7 +135,9 @@ export const GameCard = React.memo<GameCardProps>(
 
     const effectiveLastMod = game.installedLastModified || localLastModified;
     const effectiveIgnoredDate =
-      localIgnoredDate !== undefined ? localIgnoredDate : game.ignoredUpdateDate;
+      localIgnoredDate !== undefined
+        ? localIgnoredDate
+        : game.ignoredUpdateDate;
 
     const handleIgnoreUpdate = (postDate?: string) => {
       const dateToSet = postDate || new Date().toISOString();
@@ -180,16 +180,16 @@ export const GameCard = React.memo<GameCardProps>(
 
       const isFitgirlOutdated = Boolean(
         effectiveLastMod &&
-          fitgirlDate &&
-          !isIgnored(fitgirlDate) &&
-          !isGameUpToDateByDate(effectiveLastMod, fitgirlDate, 10),
+        fitgirlDate &&
+        !isIgnored(fitgirlDate) &&
+        !isGameUpToDateByDate(effectiveLastMod, fitgirlDate, 10),
       );
 
       const isSteamripOutdated = Boolean(
         effectiveLastMod &&
-          steamripDate &&
-          !isIgnored(steamripDate) &&
-          !isGameUpToDateByDate(effectiveLastMod, steamripDate, 10),
+        steamripDate &&
+        !isIgnored(steamripDate) &&
+        !isGameUpToDateByDate(effectiveLastMod, steamripDate, 10),
       );
 
       const isGenericUpdateOutdated = (() => {
@@ -292,12 +292,14 @@ export const GameCard = React.memo<GameCardProps>(
               transition: "transform 350ms cubic-bezier(0.16, 1, 0.3, 1)",
             }}
           >
-            <CachedImage
+            <Image
               src={game.coverUrl}
-              height={240}
+              h={240}
               alt={game.title}
               fallbackSrc={`https://placehold.co/600x800/0f172a/3b82f6?text=${encodeURIComponent(game.title)}`}
               fit="cover"
+              loading="lazy"
+              decoding="async"
             />
           </Box>
 
@@ -643,7 +645,7 @@ export const GameCard = React.memo<GameCardProps>(
           )}
 
           {/* Bottom-Right Interactive Map Button Overlay on Cover */}
-          {mapGenieMap && (
+          {gameMap && (
             <Box
               pos="absolute"
               bottom={8}
@@ -651,11 +653,7 @@ export const GameCard = React.memo<GameCardProps>(
               style={{ zIndex: 3 }}
               onClick={(e) => e.stopPropagation()}
             >
-              <Tooltip
-                label="Open Interactive Map (MapGenie)"
-                position="left"
-                withArrow
-              >
+              <Tooltip label="Open Interactive Map" position="left" withArrow>
                 <ActionIcon
                   variant="filled"
                   radius="xl"
@@ -817,24 +815,25 @@ export const GameCard = React.memo<GameCardProps>(
           </Group>
         </Stack>
 
-        {/* MapGenie Webview Modal directly from Card */}
-        {mapGenieMap && (
+        {/* Interactive Map Viewer Modal directly from Card */}
+        {gameMap && isMapOpen && (
           <Box
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
             onMouseUp={(e) => e.stopPropagation()}
             onDoubleClick={(e) => e.stopPropagation()}
           >
-            <WebviewModal
+            <MapViewerModal
               opened={isMapOpen}
               onClose={() => setIsMapOpen(false)}
-              url={mapGenieMap.url}
-              title={`${game.title} - MapGenie Interactive Map`}
-              webviewLabel={`mapgenie-card-${mapGenieMap.slug}`}
-              initializationScript={MAPGENIE_FMG_INJECTED_SCRIPT}
-              injectedScript={MAPGENIE_FMG_INJECTED_SCRIPT}
-              fullScreen
-              readOnlyUrl
+              gameSlug={
+                gameMap.game_slug ||
+                (gameMap.slug.includes("--")
+                  ? gameMap.slug.split("--")[0]
+                  : gameMap.slug)
+              }
+              mapSlug={gameMap.map_slug}
+              gameTitle={game.title}
             />
           </Box>
         )}

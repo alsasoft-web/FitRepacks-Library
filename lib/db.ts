@@ -2,7 +2,7 @@ import Database from "@tauri-apps/plugin-sql";
 import { Game, PlaySession } from "./types";
 import { RepackPost } from "./repackTypes";
 import { extractGameVersion, cleanGameTitle } from "./gameLinker";
-import { pb } from "./pocketbase";
+import { ab } from "./alsabase";
 import {
   detectGameExeLastModified,
   isGameUpToDateByDate,
@@ -135,8 +135,35 @@ async function getDatabase(): Promise<Database> {
   return dbInitPromise;
 }
 
+const GAMES_STORAGE_CACHE_KEY = "fitrepacks_cached_games_v2";
+
+function getInitialCachedGames(): Game[] {
+  if (typeof window !== "undefined") {
+    try {
+      const saved = localStorage.getItem(GAMES_STORAGE_CACHE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.map(sanitizeGameRecord);
+        }
+      }
+    } catch (_) {}
+  }
+  return [];
+}
+
 // In-memory cache so synchronous getters work immediately for React renders
-let cachedGames: Game[] = [];
+let cachedGames: Game[] = getInitialCachedGames();
+
+function persistCachedGames(games: Game[]): void {
+  cachedGames = games;
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.setItem(GAMES_STORAGE_CACHE_KEY, JSON.stringify(games));
+    } catch (_) {}
+  }
+}
+
 let cachedWishlistIds: string[] = [];
 let cachedLastScanPath: string = "";
 let cachedDefaultDownloadDir: string = "C:\\Games\\Downloads";
@@ -269,9 +296,8 @@ async function loadGamesFromSQLite(): Promise<Game[]> {
         };
       });
       const sanitized = parsed.map(sanitizeGameRecord);
-      cachedGames = sanitized;
+      persistCachedGames(sanitized);
       isInitialized = true;
-      saveGamesToSQLite(sanitized);
       return sanitized;
     }
   } catch (err) {
@@ -398,7 +424,7 @@ async function upsertGameToSQLite(g: Game, db: Database): Promise<void> {
 
 /** Non-destructive queued save to SQLite database */
 function saveGamesToSQLite(games: Game[]): void {
-  cachedGames = games;
+  persistCachedGames(games);
   if (!isTauri()) return;
 
   sqliteWriteQueue = sqliteWriteQueue
@@ -415,6 +441,7 @@ function saveGamesToSQLite(games: Game[]): void {
 
 /** Delete a single game from SQLite */
 function deleteSingleGameFromSQLite(id: string): void {
+  persistCachedGames(cachedGames.filter((g) => g.id !== id));
   if (!isTauri()) return;
 
   sqliteWriteQueue = sqliteWriteQueue
@@ -427,9 +454,9 @@ function deleteSingleGameFromSQLite(id: string): void {
     });
 }
 
-/** Synchronous getter returns in-memory cached games */
+/** Synchronous getter returns in-memory cached games (cloned to guarantee React re-render triggers) */
 export function getStoredGames(): Game[] {
-  return cachedGames;
+  return [...cachedGames];
 }
 
 /**
@@ -521,6 +548,15 @@ export async function syncTauriLibraryData(): Promise<Game[]> {
                 ? parsed.applyFolderCoverIcon
                 : true,
           };
+          if (isTauri()) {
+            try {
+              const { invoke } = await import("@tauri-apps/api/core");
+              await invoke("set_torrent_speed_limits", {
+                downloadKbps: cachedTorrentSettings.downloadLimitKbps,
+                uploadKbps: cachedTorrentSettings.uploadLimitKbps,
+              });
+            } catch (_) {}
+          }
         } catch (_) {}
       }
 
@@ -803,14 +839,15 @@ export async function saveTorrentSettings(
   await saveAppSetting("torrent_settings", json);
 
   if (isTauri()) {
-    import("@tauri-apps/api/core")
-      .then(({ invoke }) => {
-        invoke("set_torrent_speed_limits", {
-          downloadKbps: settings.downloadLimitKbps,
-          uploadKbps: settings.uploadLimitKbps,
-        }).catch(() => {});
-      })
-      .catch(() => {});
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("set_torrent_speed_limits", {
+        downloadKbps: settings.downloadLimitKbps,
+        uploadKbps: settings.uploadLimitKbps,
+      });
+    } catch (err) {
+      console.warn("Failed to set torrent speed limits in backend:", err);
+    }
   }
 }
 
@@ -976,7 +1013,7 @@ export function findMatchingGameInLibrary(
     if (igdbMatch) return igdbMatch;
   }
 
-  // 4. Normalized title match
+  // 4. Exact normalized title match
   const normNew = normalizeGameTitle(game.title);
   if (normNew && normNew.length >= 2) {
     const exactTitleMatch = existingGames.find((g) => {
@@ -984,22 +1021,6 @@ export function findMatchingGameInLibrary(
       return normExisting === normNew;
     });
     if (exactTitleMatch) return exactTitleMatch;
-
-    if (normNew.length >= 5) {
-      const prefixMatch = existingGames.find((g) => {
-        const normExisting = normalizeGameTitle(g.title);
-        return (
-          normExisting &&
-          normExisting.length >= 5 &&
-          (normNew === normExisting ||
-            (normNew.length > 8 &&
-              normExisting.length > 8 &&
-              (normNew.startsWith(normExisting) ||
-                normExisting.startsWith(normNew))))
-        );
-      });
-      if (prefixMatch) return prefixMatch;
-    }
   }
 
   return null;
@@ -1278,7 +1299,7 @@ export function updateGameInStorage(game: Game): Game[] {
 
   const games = getStoredGames();
   const updated = games.map((g) => (g.id === game.id ? { ...g, ...game } : g));
-  cachedGames = updated;
+  persistCachedGames(updated);
   if (isTauri()) {
     sqliteWriteQueue = sqliteWriteQueue
       .then(async () => {
@@ -1298,7 +1319,7 @@ export function updateGameInStorage(game: Game): Game[] {
 export function deleteGameFromStorage(id: string): Game[] {
   const games = getStoredGames();
   const updated = games.filter((g) => g.id !== id);
-  cachedGames = updated;
+  persistCachedGames(updated);
   deleteSingleGameFromSQLite(id);
   if (typeof window !== "undefined") {
     window.dispatchEvent(new Event("fitrepacks-games-updated"));
@@ -1693,7 +1714,7 @@ function repackToGame(post: RepackPost): Game {
     repackUrl: post.url,
     linkedFitgirlUrl: source === "fitgirl" ? post.url : undefined,
     linkedSteamripUrl: source === "steamrip" ? post.url : undefined,
-    isWishlisted: true,
+    isWishlisted: false,
     tags: [source === "steamrip" ? "SteamRIP" : "FitGirl"],
   };
 }
@@ -1800,16 +1821,28 @@ export function getGameForRepack(
       return true;
     }
     if (postTitle && g.title) {
+      // Only match by title if the library game is repack-linked.
+      // This prevents IGDB-sourced library games (e.g. a Steam-owned game
+      // marked Completed) from leaking Wishlist/Completed onto repack posts.
+      const hasRepackLink = Boolean(
+        g.repackUrl || g.linkedFitgirlUrl || g.linkedSteamripUrl,
+      );
+      if (!hasRepackLink) return false;
+
       if (g.title.toLowerCase().trim() === postTitle) return true;
       const gClean = cleanGameTitle(g.title).toLowerCase().trim();
       const pClean = cleanGameTitle(post ? post.title : "")
         .toLowerCase()
         .trim();
-      if (gClean && pClean && gClean === pClean) return true;
-
-      const gNorm = normalizeGameTitle(g.title);
-      const pNorm = normalizeGameTitle(post ? post.title : "");
-      if (gNorm && pNorm && gNorm === pNorm) return true;
+      if (
+        gClean &&
+        pClean &&
+        gClean.length >= 3 &&
+        pClean.length >= 3 &&
+        gClean === pClean
+      ) {
+        return true;
+      }
     }
     return false;
   });
@@ -1899,7 +1932,7 @@ export function setRepackStatus(
 }
 
 /* ==========================================================================
-   REPACK POSTS, POCKETBASE & READ STATE MANAGEMENT
+   REPACK POSTS, ALSABASE & READ STATE MANAGEMENT
    ========================================================================== */
 
 export function isIgnoredRepackTitle(title: string): boolean {
@@ -2003,17 +2036,41 @@ function sanitizeStringArray(raw: any): string[] {
 
 function sanitizeMediaArray(raw: any): string[] {
   if (!raw) return [];
+
+  // Check if raw is a byte array (e.g. [91, 57, 49, ...])
   if (Array.isArray(raw)) {
+    const numberCount = raw.filter((x) => typeof x === "number").length;
+    if (numberCount > 0 && numberCount >= raw.length / 2) {
+      try {
+        let current = raw;
+        for (let iter = 0; iter < 5; iter++) {
+          const numbers = current.filter((x) => typeof x === "number");
+          if (numbers.length === 0) break;
+          const decoded = String.fromCharCode.apply(null, numbers);
+          const parsed = JSON.parse(decoded);
+          if (Array.isArray(parsed)) {
+            current = parsed;
+          } else {
+            break;
+          }
+        }
+        if (Array.isArray(current)) {
+          return sanitizeMediaArray(current);
+        }
+      } catch (_) {}
+    }
+
     return raw
       .map((item) => {
         if (typeof item === "string") return item.trim();
         if (typeof item === "object" && item !== null) {
-          return String(item.url || item.src || item.id || "").trim();
+          return String(item.url || item.src || item.id || item.video_id || "").trim();
         }
         return String(item || "").trim();
       })
       .filter((s) => Boolean(s));
   }
+
   if (typeof raw === "string") {
     try {
       const parsed = JSON.parse(raw);
@@ -2026,7 +2083,7 @@ function sanitizeMediaArray(raw: any): string[] {
   return [];
 }
 
-/** Map a PocketBase 'repacks' record to the frontend RepackPost model */
+/** Map an AlsaBase 'repacks' record to the frontend RepackPost model */
 function mapRecordToRepackPost(rec: any): RepackPost {
   const rawTitle = String(rec.title || "");
   const cleanTitle = rawTitle
@@ -2085,6 +2142,14 @@ function mapRecordToRepackPost(rec: any): RepackPost {
       typeof rec.popular_rank_year === "number"
         ? rec.popular_rank_year
         : undefined,
+    isHypervisor: Boolean(
+      rec.isHypervisor ||
+      rec.is_hypervisor ||
+      rec.ishypervisor ||
+      rec.ishypervisor === 1 ||
+      rec.ishypervisor === "1" ||
+      false,
+    ),
     source: String(rec.source || "fitgirl"),
   };
 }
@@ -2116,8 +2181,16 @@ const paginationCache = new Map<
 >();
 const CACHE_TTL_MS = 60 * 1000; // 60 seconds
 
+const matchingCandidatesCache = new Map<
+  string,
+  { data: any[]; timestamp: number }
+>();
+const CANDIDATES_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
 function invalidateRepacksCache(): void {
   paginationCache.clear();
+  matchingCandidatesCache.clear();
+  datasetStatsCache.clear();
 }
 
 export const ADULT_KEYWORDS = [
@@ -2146,7 +2219,82 @@ export function isAdultContent(
 }
 
 /**
- * Load paginated repacks on-demand directly from PocketBase (or local JSON fallback)
+ * Fetch all records across pages from AlsaBase safely without flooding
+ */
+export async function fetchAllCollectionRecords(
+  collectionName: string,
+  options: { filter?: string; sort?: string; fields?: string } = {},
+): Promise<any[]> {
+  try {
+    const batchSize = 200;
+    const first = await ab.collection(collectionName).getList(1, batchSize, {
+      ...options,
+      requestKey: null,
+      autoCancel: false,
+    });
+    const items = [...(first.items || [])];
+    const totalItems =
+      (first as any).total ?? (first as any).totalItems ?? items.length;
+    const totalPages = Math.ceil(totalItems / batchSize);
+
+    if (totalPages > 1) {
+      for (let p = 2; p <= totalPages; p++) {
+        const res = await ab.collection(collectionName).getList(p, batchSize, {
+          ...options,
+          requestKey: null,
+          autoCancel: false,
+        });
+        if (res?.items) {
+          items.push(...res.items);
+        }
+      }
+    }
+    return items;
+  } catch (err) {
+    console.warn(`fetchAllCollectionRecords failed for ${collectionName}:`, err);
+    return [];
+  }
+}
+/** Compute search relevance score to rank exact game title matches above incidental release notes */
+export function computeSearchRelevance(
+  title: string = "",
+  companies: string = "",
+  query: string,
+): number {
+  const cleanQ = query.toLowerCase().trim();
+  if (!cleanQ) return 0;
+  const tLower = title.toLowerCase();
+  const cLower = companies.toLowerCase();
+  const cleanT = tLower.replace(/[^a-z0-9\s]/g, " ");
+
+  let score = 0;
+  if (tLower.startsWith(cleanQ)) {
+    score += 1000;
+  } else if (new RegExp(`\\b${cleanQ.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(cleanT)) {
+    score += 500;
+  } else if (tLower.includes(cleanQ)) {
+    score += 200;
+  }
+
+  const tokens = cleanQ.split(/\s+/).filter(Boolean);
+  if (tokens.length > 1 && tokens.every((tok) => tLower.includes(tok))) {
+    score += 300;
+  }
+
+  // Penalty for release note suffixes (e.g. "+ Controller Fix" when not searching controller)
+  if (tLower.includes("controller fix") && !cleanQ.includes("controller")) {
+    score -= 150;
+  }
+
+  if (cLower.includes(cleanQ)) {
+    score += 50;
+  }
+
+  return score;
+}
+
+/**
+ * Load paginated repacks on-demand directly from AlsaBase (or local JSON fallback)
  */
 export async function loadRepacksPaginated(
   options: RepackPaginationOptions = {},
@@ -2180,16 +2328,20 @@ export async function loadRepacksPaginated(
   });
 
   const cached = paginationCache.get(cacheKey);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+  if (
+    cached &&
+    (!cleanSearch || cached.result.items.length > 0) &&
+    Date.now() - cached.timestamp < CACHE_TTL_MS
+  ) {
     // Re-check read state for cached items
-    const freshItems = cached.result.items.map((p) => {
-      const compositeId = buildPostCompositeId(p.id, p.date);
-      return { ...p, isRead: cachedReadPostIds.includes(compositeId) };
-    });
+    const freshItems = cached.result.items.map((p) => ({
+      ...p,
+      isRead: isPostReadInStorage(p.id, p.date, dataSource),
+    }));
     return { ...cached.result, items: freshItems };
   }
 
-  // PocketBase on-demand pagination for FitGirl and SteamRIP
+  // AlsaBase on-demand pagination for FitGirl and SteamRIP
   const collectionName = dataSource === "steamrip" ? "steamrip" : "repacks";
   try {
     const filterParts: string[] = [];
@@ -2202,13 +2354,16 @@ export async function loadRepacksPaginated(
         .map((t) => t.trim())
         .filter((t) => t.length > 0);
 
-      if (tokens.length > 0) {
-        const tokenClauses = tokens.map((token, idx) => {
+      if (tokens.length === 1) {
+        filterParams["search_0"] = tokens[0];
+        filterParts.push(`title ~ {:search_0} || companies ~ {:search_0}`);
+      } else if (tokens.length > 1) {
+        const titleClauses = tokens.map((token, idx) => {
           const key = `search_${idx}`;
           filterParams[key] = token;
-          return `(title ~ {:${key}} || companies ~ {:${key}} || genres ~ {:${key}})`;
+          return `title ~ {:${key}}`;
         });
-        filterParts.push(`(${tokenClauses.join(" && ")})`);
+        filterParts.push(titleClauses.join(" && "));
       }
     }
 
@@ -2237,7 +2392,7 @@ export async function loadRepacksPaginated(
         filterParams[key] = cat;
         return `genres ~ {:${key}}`;
       });
-      filterParts.push(`(${catClauses.join(" || ")})`);
+      filterParts.push(catClauses.join(" || "));
     }
 
     const userExcluded = getExcludedGenres();
@@ -2260,143 +2415,227 @@ export async function loadRepacksPaginated(
       sortExpr = "+title";
     }
 
-    const pbFilter =
+    // Read / Unread filter optimization - push directly to AlsaBase query
+    const allReadAt = allReadAtMap[dataSource];
+    if (readFilter === "unread") {
+      if (allReadAt) {
+        const markTime = parseDateSafe(allReadAt);
+        if (markTime) {
+          const isoDate = new Date(markTime).toISOString().replace("T", " ").slice(0, 19);
+          filterParts.push(`post_date > "${isoDate}"`);
+        }
+      }
+    } else if (readFilter === "read") {
+      if (allReadAt) {
+        const markTime = parseDateSafe(allReadAt);
+        if (markTime) {
+          const isoDate = new Date(markTime).toISOString().replace("T", " ").slice(0, 19);
+          filterParts.push(`post_date <= "${isoDate}"`);
+        }
+      }
+    }
+
+    const abFilter =
       filterParts.length > 0
-        ? pb.filter(filterParts.join(" && "), filterParams)
+        ? ab.filter(filterParts.join(" && "), filterParams)
         : undefined;
 
-    // For read/unread filters, fetch matching ID candidates to compute accurate total items and pages
-    if (readFilter === "unread" || readFilter === "read") {
-      const allMatching = await pb.collection(collectionName).getFullList({
-        filter: pbFilter,
-        sort: sortExpr,
-        fields: "id,repack_id,title,genres,post_date,created",
-        requestKey: null,
-      });
+    // Only route through candidate matching with relevance ranking when an active search query is typed
+    if (Boolean(cleanSearch)) {
+      const candCacheKey = `${collectionName}__${abFilter || "all"}__${sortExpr}`;
+      const cachedCand = matchingCandidatesCache.get(candCacheKey);
+      let allMatching: any[] = [];
 
-      let candidates = (allMatching || []).filter(
-        (p) => !isIgnoredRepackTitle(p.title),
-      );
+        if (
+          cachedCand &&
+          Date.now() - cachedCand.timestamp < CANDIDATES_CACHE_TTL_MS
+        ) {
+          allMatching = cachedCand.data;
+        } else {
+          allMatching = await fetchAllCollectionRecords(collectionName, {
+            filter: abFilter,
+            sort: sortExpr,
+            fields:
+              "id,repack_id,title,companies,genres,post_date,created,isHypervisor,is_hypervisor,ishypervisor",
+          });
+          matchingCandidatesCache.set(candCacheKey, {
+            data: allMatching,
+            timestamp: Date.now(),
+          });
+          if (matchingCandidatesCache.size > 20) {
+            const oldest = matchingCandidatesCache.keys().next().value;
+            if (oldest) matchingCandidatesCache.delete(oldest);
+          }
+        }
 
-      if (!isAdultSelected) {
-        candidates = candidates.filter(
-          (p) => !isAdultContent(p.genres, [], p.title),
+        let candidates = (allMatching || []).filter(
+          (p) => !isIgnoredRepackTitle(p.title),
         );
-      }
 
-      if (effectiveExcluded.length > 0) {
-        candidates = candidates.filter((p) => {
-          const postGenres = Array.isArray(p.genres)
-            ? p.genres
-            : [String(p.genres || "")];
-          return !effectiveExcluded.some((ex) =>
-            postGenres.some((pg) =>
-              pg.toLowerCase().includes(ex.toLowerCase()),
-            ),
+        if (!isAdultSelected) {
+          candidates = candidates.filter(
+            (p) => !isAdultContent(p.genres, [], p.title),
           );
+        }
+
+        if (effectiveExcluded.length > 0) {
+          candidates = candidates.filter((p) => {
+            const postGenres = Array.isArray(p.genres)
+              ? p.genres
+              : [String(p.genres || "")];
+            return !effectiveExcluded.some((ex) =>
+              postGenres.some((pg: string) =>
+                pg.toLowerCase().includes(ex.toLowerCase()),
+              ),
+            );
+          });
+        }
+
+        const filteredCandidates = candidates.filter((p) => {
+          if (readFilter === "unread" || readFilter === "read") {
+            const id = p.repack_id || p.id;
+            const date = String(p.post_date || (p.created ? p.created.split(" ")[0] : ""));
+            const isRead = isPostReadInStorage(id, date, dataSource);
+            return readFilter === "unread" ? !isRead : isRead;
+          }
+          return true;
         });
-      }
 
-      const readSet = new Set(cachedReadPostIds);
-      const filteredCandidates = candidates.filter((p) => {
-        const compositeId = buildPostCompositeId(
-          p.repack_id || p.id,
-          String(p.post_date || (p.created ? p.created.split(" ")[0] : "")),
+        if (cleanSearch) {
+          filteredCandidates.sort((a, b) => {
+            const scoreA = computeSearchRelevance(
+              a.title,
+              a.companies,
+              cleanSearch,
+            );
+            const scoreB = computeSearchRelevance(
+              b.title,
+              b.companies,
+              cleanSearch,
+            );
+            if (scoreB !== scoreA) {
+              return scoreB - scoreA;
+            }
+            const dateA = a.post_date ? new Date(a.post_date).getTime() : 0;
+            const dateB = b.post_date ? new Date(b.post_date).getTime() : 0;
+            return dateB - dateA;
+          });
+        }
+
+        const totalItems = filteredCandidates.length;
+        const totalPages = Math.max(1, Math.ceil(totalItems / perPage));
+        const validPage = Math.max(1, Math.min(page, totalPages));
+        const startIndex = (validPage - 1) * perPage;
+        const pageSlice = filteredCandidates.slice(
+          startIndex,
+          startIndex + perPage,
         );
-        const isRead = readSet.has(compositeId);
-        return readFilter === "unread" ? !isRead : isRead;
-      });
 
-      const totalItems = filteredCandidates.length;
-      const totalPages = Math.max(1, Math.ceil(totalItems / perPage));
-      const validPage = Math.max(1, Math.min(page, totalPages));
-      const startIndex = (validPage - 1) * perPage;
-      const pageSlice = filteredCandidates.slice(
-        startIndex,
-        startIndex + perPage,
-      );
+        if (pageSlice.length === 0) {
+          const emptyResult: PaginatedRepacksResult = {
+            items: [],
+            totalItems,
+            totalPages,
+            page: validPage,
+            perPage,
+          };
+          paginationCache.set(cacheKey, {
+            result: emptyResult,
+            timestamp: Date.now(),
+          });
+          return emptyResult;
+        }
 
-      if (pageSlice.length === 0) {
-        const emptyResult: PaginatedRepacksResult = {
-          items: [],
+        const idFilter = pageSlice
+          .map((_, idx) => `id = {:pid_${idx}}`)
+          .join(" || ");
+        const idParams: Record<string, string> = {};
+        pageSlice.forEach((item, idx) => {
+          idParams[`pid_${idx}`] = item.id;
+        });
+
+        const fullRes = await ab.collection(collectionName).getList(1, perPage, {
+          filter: ab.filter(idFilter, idParams),
+          sort: sortExpr,
+          requestKey: null,
+          autoCancel: false,
+        });
+
+        const mapped = (fullRes.items || []).map(mapRecordToRepackPost);
+        const ordered = pageSlice
+          .map((target) =>
+            mapped.find(
+              (p) =>
+                p.id === (target.repack_id || target.id) || p.id === target.id,
+            ),
+          )
+          .filter(Boolean) as RepackPost[];
+
+        const enriched = ordered.map((p) => {
+          return { ...p, isRead: isPostReadInStorage(p.id, p.date, dataSource) };
+        });
+
+        const finalResult: PaginatedRepacksResult = {
+          items: enriched,
           totalItems,
           totalPages,
           page: validPage,
           perPage,
         };
+
         paginationCache.set(cacheKey, {
-          result: emptyResult,
+          result: finalResult,
           timestamp: Date.now(),
         });
-        return emptyResult;
-      }
+        if (paginationCache.size > 150) {
+          const oldest = paginationCache.keys().next().value;
+          if (oldest) paginationCache.delete(oldest);
+        }
 
-      const idFilter = pageSlice
-        .map((_, idx) => `id = {:pid_${idx}}`)
-        .join(" || ");
-      const idParams: Record<string, string> = {};
-      pageSlice.forEach((item, idx) => {
-        idParams[`pid_${idx}`] = item.id;
-      });
-
-      const fullRes = await pb.collection(collectionName).getList(1, perPage, {
-        filter: pb.filter(idFilter, idParams),
-        sort: sortExpr,
-        requestKey: null,
-      });
-
-      const mapped = (fullRes.items || []).map(mapRecordToRepackPost);
-      const ordered = pageSlice
-        .map((target) =>
-          mapped.find(
-            (p) =>
-              p.id === (target.repack_id || target.id) || p.id === target.id,
-          ),
-        )
-        .filter(Boolean) as RepackPost[];
-
-      const enriched = ordered.map((p) => {
-        const compositeId = buildPostCompositeId(p.id, p.date);
-        return { ...p, isRead: readSet.has(compositeId) };
-      });
-
-      const finalResult: PaginatedRepacksResult = {
-        items: enriched,
-        totalItems,
-        totalPages,
-        page: validPage,
-        perPage,
-      };
-
-      paginationCache.set(cacheKey, {
-        result: finalResult,
-        timestamp: Date.now(),
-      });
-      if (paginationCache.size > 150) {
-        const oldest = paginationCache.keys().next().value;
-        if (oldest) paginationCache.delete(oldest);
-      }
-
-      return finalResult;
+        return finalResult;
     }
 
-    const res = await pb.collection(collectionName).getList(page, perPage, {
-      filter: pbFilter,
+    const res = await ab.collection(collectionName).getList(page, perPage, {
+      filter: abFilter,
       sort: sortExpr,
       requestKey: null,
+      autoCancel: false,
     });
 
     if (res && Array.isArray(res.items)) {
-      const mappedPosts = res.items
+      const mappedPosts: RepackPost[] = res.items
         .map(mapRecordToRepackPost)
-        .filter((p) => !isIgnoredRepackTitle(p.title));
+        .filter((p: RepackPost) => !isIgnoredRepackTitle(p.title));
 
-      // Enrich with SQLite read state strictly using repackid-date
-      let enriched = mappedPosts.map((p) => {
-        const compositeId = buildPostCompositeId(p.id, p.date);
-        const isRead = cachedReadPostIds.includes(compositeId);
+      // Enrich with SQLite read state
+      let enriched = mappedPosts.map((p: RepackPost) => {
+        const isRead = isPostReadInStorage(p.id, p.date, dataSource);
         return { ...p, isRead };
       });
+
+      if (readFilter === "unread") {
+        enriched = enriched.filter((p) => !p.isRead);
+      } else if (readFilter === "read") {
+        enriched = enriched.filter((p) => p.isRead);
+      }
+
+      if (
+        selectedCategories &&
+        selectedCategories.length > 0 &&
+        !selectedCategories.includes("All")
+      ) {
+        enriched = enriched.filter((p) => {
+          const postGenres = (p.genres || []).map((g) => g.toLowerCase());
+          const postTitle = (p.title || "").toLowerCase();
+          return selectedCategories.some((cat) => {
+            const cLower = cat.toLowerCase();
+            return (
+              postGenres.some((pg) => pg.includes(cLower) || cLower.includes(pg)) ||
+              postTitle.includes(cLower)
+            );
+          });
+        });
+      }
 
       if (!isAdultSelected) {
         enriched = enriched.filter(
@@ -2417,12 +2656,24 @@ export async function loadRepacksPaginated(
         });
       }
 
+      const perPageNum =
+        (res as any).limit ?? (res as any).perPage ?? perPage;
+      const totalItemsCount =
+        readFilter !== "all"
+          ? enriched.length
+          : (res as any).total ?? (res as any).totalItems ?? 0;
+      const totalPagesCount =
+        readFilter !== "all"
+          ? Math.max(1, Math.ceil(enriched.length / perPageNum))
+          : res.totalPages ?? 1;
+      const pageNum = res.page ?? 1;
+
       const finalResult: PaginatedRepacksResult = {
         items: enriched,
-        totalItems: res.totalItems,
-        totalPages: res.totalPages,
-        page: res.page,
-        perPage: res.perPage,
+        totalItems: totalItemsCount,
+        totalPages: totalPagesCount,
+        page: pageNum,
+        perPage: perPageNum,
       };
 
       // Cache the result
@@ -2438,7 +2689,7 @@ export async function loadRepacksPaginated(
       return finalResult;
     }
   } catch (pbErr) {
-    console.warn("PocketBase getList failed:", pbErr);
+    console.warn("AlsaBase getList failed:", pbErr);
   }
 
   return {
@@ -2451,26 +2702,198 @@ export async function loadRepacksPaginated(
 }
 
 let cachedReadPostIds: string[] = [];
+let cachedReadPostIdsSet: Set<string> = new Set();
+const explicitlyUnreadPostIdsSet: Set<string> = new Set();
+const allReadAtMap: Record<string, string> = {
+  fitgirl: "",
+  steamrip: "",
+};
 
 /**
- * Load read posts from SQLite read_posts table via @tauri-apps/plugin-sql
+ * Maps cleanId -> ISO timestamp of when the post was marked read.
+ * Used to detect if a post has been updated (new date) since it was read.
+ */
+const readPostTimestamps: Map<string, string> = new Map();
+
+function updateCachedReadPostIds(
+  list: string[],
+  timestamps?: Record<string, string>,
+): void {
+  cachedReadPostIds = list;
+  cachedReadPostIdsSet = new Set(list);
+  if (timestamps) {
+    for (const [id, ts] of Object.entries(timestamps)) {
+      readPostTimestamps.set(id, ts);
+    }
+  }
+}
+
+function persistCachedReadPostsToLocalStorage(): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(
+      "fitrepacks_read_posts",
+      JSON.stringify(cachedReadPostIds),
+    );
+    localStorage.setItem(
+      "fitrepacks_explicitly_unread_posts",
+      JSON.stringify(Array.from(explicitlyUnreadPostIdsSet)),
+    );
+    localStorage.setItem(
+      "fitrepacks_all_read_at_fitgirl",
+      allReadAtMap.fitgirl || "",
+    );
+    localStorage.setItem(
+      "fitrepacks_all_read_at_steamrip",
+      allReadAtMap.steamrip || "",
+    );
+    // Persist per-post read timestamps so post-date changes invalidate stale reads
+    localStorage.setItem(
+      "fitrepacks_read_post_timestamps",
+      JSON.stringify(Object.fromEntries(readPostTimestamps)),
+    );
+  } catch (_) {}
+}
+
+/**
+ * Check if a post is marked as read in storage (supporting composite ID, plain ID, and global all-read timestamp).
+ * If the post has a date newer than when it was read, it is treated as unread (post was updated).
+ */
+export function isPostReadInStorage(
+  id: string,
+  date?: string,
+  dataSource: "fitgirl" | "steamrip" = "fitgirl",
+): boolean {
+  if (!id) return false;
+  const cleanId = String(id).trim();
+  const compositeId = buildPostCompositeId(cleanId, date);
+
+  if (
+    explicitlyUnreadPostIdsSet.has(compositeId) ||
+    explicitlyUnreadPostIdsSet.has(cleanId)
+  ) {
+    return false;
+  }
+
+  if (
+    cachedReadPostIdsSet.has(compositeId) ||
+    cachedReadPostIdsSet.has(cleanId)
+  ) {
+    // Check if the post has been updated since it was read
+    if (date) {
+      const readAt =
+        readPostTimestamps.get(compositeId) ||
+        readPostTimestamps.get(cleanId);
+      if (readAt) {
+        const postTime = parseDateSafe(date);
+        const readTime = parseDateSafe(readAt);
+        // If the post date is more than 24h after the read timestamp, it was updated
+        if (postTime && readTime && postTime > readTime + 86400000) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  const allReadAt = allReadAtMap[dataSource];
+  if (allReadAt) {
+    if (!date) return true;
+    const postTime = parseDateSafe(date);
+    const markTime = parseDateSafe(allReadAt);
+    if (!postTime || !markTime) return true;
+    // Allow 24h margin for timezone differences
+    if (postTime <= markTime + 86400000) {
+      // Check if the post has been updated after the global mark-all-read
+      // If post date is newer than allReadAt, it should appear as unread
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Load read posts from SQLite read_posts & app_settings table via @tauri-apps/plugin-sql
  */
 async function syncReadPostsFromSQLite(): Promise<string[]> {
+  if (typeof window !== "undefined") {
+    try {
+      const rawRead = localStorage.getItem("fitrepacks_read_posts");
+      if (rawRead) {
+        const parsed = JSON.parse(rawRead);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          updateCachedReadPostIds(parsed);
+        }
+      }
+      const rawUnread = localStorage.getItem(
+        "fitrepacks_explicitly_unread_posts",
+      );
+      if (rawUnread) {
+        const parsed = JSON.parse(rawUnread);
+        if (Array.isArray(parsed)) {
+          explicitlyUnreadPostIdsSet.clear();
+          parsed.forEach((id) => explicitlyUnreadPostIdsSet.add(id));
+        }
+      }
+      const fgAll = localStorage.getItem("fitrepacks_all_read_at_fitgirl");
+      if (fgAll) allReadAtMap.fitgirl = fgAll;
+      const srAll = localStorage.getItem("fitrepacks_all_read_at_steamrip");
+      if (srAll) allReadAtMap.steamrip = srAll;
+      // Load per-post read timestamps
+      const rawTimestamps = localStorage.getItem(
+        "fitrepacks_read_post_timestamps",
+      );
+      if (rawTimestamps) {
+        const parsed = JSON.parse(rawTimestamps);
+        if (parsed && typeof parsed === "object") {
+          for (const [id, ts] of Object.entries(parsed)) {
+            if (typeof ts === "string") readPostTimestamps.set(id, ts);
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
   if (isTauri()) {
     try {
       const db = await getDatabase();
-      const rows = await db.select<{ post_id: string }[]>(
-        "SELECT post_id FROM read_posts",
+      // Load post_id AND read_at so we can detect posts updated after being read
+      const rows = await db.select<{ post_id: string; read_at: string }[]>(
+        "SELECT post_id, read_at FROM read_posts",
       );
-      if (Array.isArray(rows)) {
+      if (Array.isArray(rows) && rows.length > 0) {
         const list = rows.map((r) => r.post_id);
-        cachedReadPostIds = list;
-        return list;
+        const timestamps: Record<string, string> = {};
+        for (const r of rows) {
+          if (r.read_at) timestamps[r.post_id] = r.read_at;
+        }
+        updateCachedReadPostIds(list, timestamps);
       }
+
+      const fgAllSetting = await getAppSetting("all_read_at_fitgirl");
+      if (fgAllSetting) allReadAtMap.fitgirl = fgAllSetting;
+
+      const srAllSetting = await getAppSetting("all_read_at_steamrip");
+      if (srAllSetting) allReadAtMap.steamrip = srAllSetting;
+
+      const unreadSetting = await getAppSetting("explicitly_unread_posts");
+      if (unreadSetting) {
+        try {
+          const parsed = JSON.parse(unreadSetting);
+          if (Array.isArray(parsed)) {
+            explicitlyUnreadPostIdsSet.clear();
+            parsed.forEach((id) => explicitlyUnreadPostIdsSet.add(id));
+          }
+        } catch (_) {}
+      }
+
+      persistCachedReadPostsToLocalStorage();
     } catch (err) {
       console.error("Error reading read_posts via plugin-sql:", err);
     }
   }
+
   return cachedReadPostIds;
 }
 
@@ -2479,75 +2902,124 @@ if (typeof window !== "undefined") {
   syncReadPostsFromSQLite().catch(() => {});
 }
 
-export function markPostAsRead(id: string, date?: string): boolean {
+export function markPostAsRead(
+  id: string,
+  date?: string,
+  dataSource: "fitgirl" | "steamrip" = "fitgirl",
+): boolean {
   if (!id) return false;
-  const compositeId = buildPostCompositeId(id, date);
+  const cleanId = String(id).trim();
+  const compositeId = buildPostCompositeId(cleanId, date);
   if (!compositeId) return false;
 
+  explicitlyUnreadPostIdsSet.delete(compositeId);
+  explicitlyUnreadPostIdsSet.delete(cleanId);
+
+  const now = new Date().toISOString();
+  // Record when this post was read so future date changes invalidate the read state
+  readPostTimestamps.set(compositeId, now);
+  readPostTimestamps.set(cleanId, now);
+
   let changed = false;
-  if (!cachedReadPostIds.includes(compositeId)) {
+  if (!cachedReadPostIdsSet.has(compositeId)) {
     cachedReadPostIds = [...cachedReadPostIds, compositeId];
+    cachedReadPostIdsSet.add(compositeId);
     changed = true;
-    if (isTauri()) {
-      const now = new Date().toISOString();
-      getDatabase()
-        .then((db) =>
-          db.execute(
-            "INSERT OR IGNORE INTO read_posts (post_id, read_at) VALUES ($1, $2)",
-            [compositeId, now],
-          ),
-        )
-        .catch((err) =>
-          console.error("Error inserting read post via plugin-sql:", err),
-        );
-    }
+  }
+  if (!cachedReadPostIdsSet.has(cleanId)) {
+    cachedReadPostIds = [...cachedReadPostIds, cleanId];
+    cachedReadPostIdsSet.add(cleanId);
+    changed = true;
   }
 
-  if (changed) {
-    invalidateRepacksCache();
+  persistCachedReadPostsToLocalStorage();
+  invalidateRepacksCache();
+
+  if (isTauri()) {
+    saveAppSetting(
+      "explicitly_unread_posts",
+      JSON.stringify(Array.from(explicitlyUnreadPostIdsSet)),
+    ).catch(() => {});
+    getDatabase()
+      .then((db) =>
+        db.execute(
+          "INSERT OR REPLACE INTO read_posts (post_id, read_at) VALUES ($1, $2), ($3, $4)",
+          [compositeId, now, cleanId, now],
+        ),
+      )
+      .catch((err) =>
+        console.error("Error inserting read post via plugin-sql:", err),
+      );
   }
 
   if (typeof window !== "undefined") {
     window.dispatchEvent(
       new CustomEvent("fitrepacks-post-read-updated", {
-        detail: { id, date, compositeId, isRead: true },
+        detail: { id: cleanId, date, compositeId, isRead: true },
       }),
     );
   }
   return true;
 }
 
-export function togglePostReadState(id: string, date?: string): boolean {
-  const compositeId = buildPostCompositeId(id, date);
-  const index = cachedReadPostIds.indexOf(compositeId);
+export function togglePostReadState(
+  id: string,
+  date?: string,
+  dataSource: "fitgirl" | "steamrip" = "fitgirl",
+): boolean {
+  const cleanId = String(id).trim();
+  const compositeId = buildPostCompositeId(cleanId, date);
+  const isCurrentlyRead = isPostReadInStorage(cleanId, date, dataSource);
   let isRead: boolean;
 
-  if (index >= 0) {
+  if (isCurrentlyRead) {
     cachedReadPostIds = cachedReadPostIds.filter(
-      (item) => item !== compositeId,
+      (item) => item !== compositeId && item !== cleanId,
     );
+    cachedReadPostIdsSet.delete(compositeId);
+    cachedReadPostIdsSet.delete(cleanId);
+    explicitlyUnreadPostIdsSet.add(compositeId);
+    explicitlyUnreadPostIdsSet.add(cleanId);
     isRead = false;
+    persistCachedReadPostsToLocalStorage();
     if (isTauri()) {
+      saveAppSetting(
+        "explicitly_unread_posts",
+        JSON.stringify(Array.from(explicitlyUnreadPostIdsSet)),
+      ).catch(() => {});
       getDatabase()
         .then((db) =>
-          db.execute("DELETE FROM read_posts WHERE post_id = $1", [
-            compositeId,
-          ]),
+          db.execute(
+            "DELETE FROM read_posts WHERE post_id = $1 OR post_id = $2",
+            [compositeId, cleanId],
+          ),
         )
         .catch((err) =>
           console.error("Error deleting read post via plugin-sql:", err),
         );
     }
   } else {
-    cachedReadPostIds = [...cachedReadPostIds, compositeId];
+    explicitlyUnreadPostIdsSet.delete(compositeId);
+    explicitlyUnreadPostIdsSet.delete(cleanId);
+    const now = new Date().toISOString();
+    // Record when this post was read so future date changes invalidate the read state
+    readPostTimestamps.set(compositeId, now);
+    readPostTimestamps.set(cleanId, now);
+    cachedReadPostIds = [...cachedReadPostIds, compositeId, cleanId];
+    cachedReadPostIdsSet.add(compositeId);
+    cachedReadPostIdsSet.add(cleanId);
     isRead = true;
+    persistCachedReadPostsToLocalStorage();
     if (isTauri()) {
-      const now = new Date().toISOString();
+      saveAppSetting(
+        "explicitly_unread_posts",
+        JSON.stringify(Array.from(explicitlyUnreadPostIdsSet)),
+      ).catch(() => {});
       getDatabase()
         .then((db) =>
           db.execute(
-            "INSERT OR IGNORE INTO read_posts (post_id, read_at) VALUES ($1, $2)",
-            [compositeId, now],
+            "INSERT OR REPLACE INTO read_posts (post_id, read_at) VALUES ($1, $2), ($3, $4)",
+            [compositeId, now, cleanId, now],
           ),
         )
         .catch((err) =>
@@ -2561,7 +3033,7 @@ export function togglePostReadState(id: string, date?: string): boolean {
   if (typeof window !== "undefined") {
     window.dispatchEvent(
       new CustomEvent("fitrepacks-post-read-updated", {
-        detail: { id, date, compositeId, isRead },
+        detail: { id: cleanId, date, compositeId, isRead },
       }),
     );
   }
@@ -2569,60 +3041,95 @@ export function togglePostReadState(id: string, date?: string): boolean {
   return isRead;
 }
 
-export function markPostsAsReadBatch(
+export async function markPostsAsReadBatch(
   posts: { id: string; date?: string }[],
-): void {
+): Promise<void> {
   if (!posts || posts.length === 0) return;
   const newIds: string[] = [];
+  const now = new Date().toISOString();
   for (const p of posts) {
-    const compositeId = buildPostCompositeId(p.id, p.date);
-    if (compositeId && !cachedReadPostIds.includes(compositeId)) {
+    const cleanId = String(p.id).trim();
+    const compositeId = buildPostCompositeId(cleanId, p.date);
+    explicitlyUnreadPostIdsSet.delete(compositeId);
+    explicitlyUnreadPostIdsSet.delete(cleanId);
+    // Record when each post was read so future date changes invalidate the read state
+    readPostTimestamps.set(compositeId, now);
+    readPostTimestamps.set(cleanId, now);
+    if (compositeId && !cachedReadPostIdsSet.has(compositeId)) {
       cachedReadPostIds.push(compositeId);
+      cachedReadPostIdsSet.add(compositeId);
       newIds.push(compositeId);
+    }
+    if (cleanId && !cachedReadPostIdsSet.has(cleanId)) {
+      cachedReadPostIds.push(cleanId);
+      cachedReadPostIdsSet.add(cleanId);
+      newIds.push(cleanId);
     }
   }
 
-  if (newIds.length === 0) return;
+  persistCachedReadPostsToLocalStorage();
   invalidateRepacksCache();
 
-  if (isTauri()) {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new CustomEvent("fitrepacks-post-read-updated", {
+        detail: { all: true, isRead: true },
+      }),
+    );
+  }
+
+  if (isTauri() && newIds.length > 0) {
     const now = new Date().toISOString();
-    getDatabase()
-      .then(async (db) => {
-        for (const id of newIds) {
-          await db.execute(
-            "INSERT OR IGNORE INTO read_posts (post_id, read_at) VALUES ($1, $2)",
-            [id, now],
-          );
-        }
-      })
-      .catch((err) =>
-        console.error("Error saving read posts batch via plugin-sql:", err),
-      );
+    try {
+      const db = await getDatabase();
+      const chunkSize = 200;
+      for (let i = 0; i < newIds.length; i += chunkSize) {
+        const chunk = newIds.slice(i, i + chunkSize);
+        const placeholders = chunk
+          .map((_, idx) => `($${idx * 2 + 1}, $${idx * 2 + 2})`)
+          .join(", ");
+        const params: string[] = [];
+        chunk.forEach((id) => {
+          params.push(id, now);
+        });
+        await db.execute(
+          `INSERT OR IGNORE INTO read_posts (post_id, read_at) VALUES ${placeholders}`,
+          params,
+        );
+      }
+    } catch (err) {
+      console.error("Error saving read posts batch via plugin-sql:", err);
+    }
   }
 }
 
 /**
- * Mark all repacks in the entire dataset (PocketBase) as read
+ * Mark all repacks in the entire dataset as read
  */
 export async function markAllRepacksAsRead(
   dataSource: "fitgirl" | "steamrip" = "fitgirl",
 ): Promise<void> {
-  const collectionName = dataSource === "steamrip" ? "steamrip" : "repacks";
-  try {
-    const records = await pb.collection(collectionName).getFullList({
-      fields: "id,repack_id,post_date,created",
-      requestKey: null,
-    });
-    if (Array.isArray(records) && records.length > 0) {
-      const itemsToMark = records.map((r) => ({
-        id: r.repack_id || r.id,
-        date: String(r.post_date || (r.created ? r.created.split(" ")[0] : "")),
-      }));
-      markPostsAsReadBatch(itemsToMark);
-    }
-  } catch (pbErr) {
-    console.warn("PocketBase getFullList failed for mark all as read:", pbErr);
+  const now = new Date().toISOString();
+  allReadAtMap[dataSource] = now;
+  explicitlyUnreadPostIdsSet.clear();
+
+  datasetStatsCache.delete(dataSource === "steamrip" ? "steamrip" : "repacks");
+  matchingCandidatesCache.clear();
+  paginationCache.clear();
+  persistCachedReadPostsToLocalStorage();
+  invalidateRepacksCache();
+
+  if (isTauri()) {
+    saveAppSetting(`all_read_at_${dataSource}`, now).catch(() => {});
+    saveAppSetting("explicitly_unread_posts", "[]").catch(() => {});
+  }
+
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new CustomEvent("fitrepacks-post-read-updated", {
+        detail: { all: true, isRead: true },
+      }),
+    );
   }
 }
 
@@ -2634,59 +3141,131 @@ export interface RepackDatasetStats {
   topYearCount: number;
 }
 
+const datasetStatsCache = new Map<
+  string,
+  { stats: RepackDatasetStats; timestamp: number }
+>();
+const DATASET_STATS_CACHE_TTL_MS = 60 * 1000; // 60 seconds
+
 /**
- * Get total counts and read/unread metrics across the entire dataset via PocketBase
+ * Get total counts and read/unread metrics across the entire dataset via AlsaBase
  */
 export async function getRepackDatasetStats(
   dataSource: "fitgirl" | "steamrip" = "fitgirl",
 ): Promise<RepackDatasetStats> {
   const collectionName = dataSource === "steamrip" ? "steamrip" : "repacks";
-  if (cachedReadPostIds.length === 0 && isTauri()) {
+  if (cachedReadPostIds.length === 0) {
     await syncReadPostsFromSQLite();
+  }
+
+  const cached = datasetStatsCache.get(collectionName);
+  if (cached && Date.now() - cached.timestamp < DATASET_STATS_CACHE_TTL_MS) {
+    return cached.stats;
   }
 
   let totalCount = 0;
   let topMonthCount = 0;
   let topYearCount = 0;
-  let readCount = 0;
-  let unreadCount = 0;
 
   try {
-    const allRecords = await pb.collection(collectionName).getFullList({
-      fields:
-        "id,repack_id,post_date,created,popular_rank_month,popular_rank_year",
-      requestKey: null,
-    });
-    totalCount = allRecords.length;
-    topMonthCount = allRecords.filter(
-      (r) => (r.popular_rank_month || 0) > 0,
-    ).length;
-    topYearCount = allRecords.filter(
-      (r) => (r.popular_rank_year || 0) > 0,
-    ).length;
+    const [totalRes, topMonthRes, topYearRes] = await Promise.all([
+      ab.collection(collectionName).getList(1, 1, {
+        fields: "id",
+        requestKey: null,
+      }),
+      ab.collection(collectionName).getList(1, 1, {
+        filter: "popular_rank_month > 0",
+        fields: "id",
+        requestKey: null,
+      }),
+      ab.collection(collectionName).getList(1, 1, {
+        filter: "popular_rank_year > 0",
+        fields: "id",
+        requestKey: null,
+      }),
+    ]);
 
-    const readSet = new Set(cachedReadPostIds);
-    readCount = allRecords.filter((r) => {
-      const compositeId = buildPostCompositeId(
-        r.repack_id || r.id,
-        String(r.post_date || (r.created ? r.created.split(" ")[0] : "")),
+    totalCount =
+      (totalRes as any).total ?? (totalRes as any).totalItems ?? 0;
+    topMonthCount =
+      (topMonthRes as any).total ?? (topMonthRes as any).totalItems ?? 0;
+    topYearCount =
+      (topYearRes as any).total ?? (topYearRes as any).totalItems ?? 0;
+
+    let readCount = 0;
+    let unreadCount = 0;
+
+    const allReadAt = allReadAtMap[dataSource];
+    if (allReadAt) {
+      try {
+        const markTime = parseDateSafe(allReadAt);
+        if (markTime) {
+          const markDate = new Date(markTime);
+          const isoDate = markDate.toISOString().replace("T", " ").slice(0, 19);
+          const newerRes = await ab.collection(collectionName).getList(1, 100, {
+            filter: `post_date > "${isoDate}"`,
+            fields: "id,repack_id,post_date",
+            requestKey: null,
+          });
+          const newerItems = newerRes.items || [];
+          const actualNewerUnread = newerItems.filter((p) => {
+            const id = p.repack_id || p.id;
+            const date = String(p.post_date || "");
+            return !isPostReadInStorage(id, date, dataSource);
+          }).length;
+
+          const distinctExplicitlyUnread = Array.from(explicitlyUnreadPostIdsSet).filter(
+            (id) => !newerItems.some((n) => n.id === id || n.repack_id === id),
+          ).length;
+
+          unreadCount = Math.min(totalCount, actualNewerUnread + distinctExplicitlyUnread);
+          readCount = Math.max(0, totalCount - unreadCount);
+        } else {
+          const distinctExplicitlyUnread = new Set(
+            Array.from(explicitlyUnreadPostIdsSet).map((id) => id.split("_")[0]),
+          ).size;
+          unreadCount = Math.min(totalCount, distinctExplicitlyUnread);
+          readCount = Math.max(0, totalCount - unreadCount);
+        }
+      } catch (_) {
+        const distinctExplicitlyUnread = new Set(
+          Array.from(explicitlyUnreadPostIdsSet).map((id) => id.split("_")[0]),
+        ).size;
+        unreadCount = Math.min(totalCount, distinctExplicitlyUnread);
+        readCount = Math.max(0, totalCount - unreadCount);
+      }
+    } else {
+      const distinctReadIds = new Set(
+        cachedReadPostIds.map((id) => id.split("_")[0]),
       );
-      return readSet.has(compositeId);
-    }).length;
-    unreadCount = Math.max(0, totalCount - readCount);
-  } catch (err) {
-    console.warn("Could not fetch dataset stats from PocketBase:", err);
-    readCount = cachedReadPostIds.length;
-    unreadCount = Math.max(0, totalCount - readCount);
-  }
+      readCount = Math.min(totalCount, distinctReadIds.size);
+      unreadCount = Math.max(0, totalCount - readCount);
+    }
 
-  return {
-    totalCount,
-    unreadCount,
-    readCount,
-    topMonthCount,
-    topYearCount,
-  };
+    const stats: RepackDatasetStats = {
+      totalCount,
+      unreadCount,
+      readCount,
+      topMonthCount,
+      topYearCount,
+    };
+
+    datasetStatsCache.set(collectionName, {
+      stats,
+      timestamp: Date.now(),
+    });
+
+    return stats;
+  } catch (err) {
+    console.warn("Could not fetch dataset stats from AlsaBase:", err);
+    return {
+      totalCount,
+      unreadCount: 0,
+      readCount: 0,
+      topMonthCount,
+      topYearCount,
+    };
+  }
 }
 
 const PINNED_GAMES_KEY = "fitrepacks_pinned_game_ids";

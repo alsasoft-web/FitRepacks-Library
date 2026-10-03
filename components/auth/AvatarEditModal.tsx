@@ -112,18 +112,10 @@ export function AvatarEditModal({ opened, onClose }: AvatarEditModalProps) {
     if (selectedFile) {
       const ok = await updateAvatar(selectedFile);
       if (ok) hasChanges = true;
-    } else if (selectedPresetUrl) {
-      // If a preset was selected
-      try {
-        const response = await fetch(selectedPresetUrl);
-        const blob = await response.blob();
-        const file = new File([blob], `avatar_${Date.now()}.svg`, { type: "image/svg+xml" });
-        const ok = await updateAvatar(file);
-        if (ok) hasChanges = true;
-      } catch (err: any) {
-        setCustomError(err.message || "Failed to apply avatar preset.");
-        return;
-      }
+    } else if (selectedPresetUrl && selectedPresetUrl !== user.avatar) {
+      // If a preset was selected, save URL directly
+      const ok = await updateAvatar(selectedPresetUrl);
+      if (ok) hasChanges = true;
     }
 
     if (hasChanges) {

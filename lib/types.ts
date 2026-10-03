@@ -107,6 +107,7 @@ export interface Game {
   fitgirlUploadDate?: string;
   steamripUploadDate?: string;
   ignoredUpdateDate?: string;
+  isHypervisor?: boolean;
 }
 
 export interface ScannedExecutable {

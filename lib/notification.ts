@@ -71,25 +71,29 @@ export async function sendDesktopNotification(
   if (typeof window === "undefined") return false;
 
   const { title, body, icon } = payload;
+  console.log("[sendDesktopNotification] Sending notification:", { title, body });
 
   if (isTauri()) {
     try {
-      const { isPermissionGranted, requestPermission, sendNotification } =
-        await import("@tauri-apps/plugin-notification");
-      let granted = await isPermissionGranted();
-      if (!granted) {
-        const permission = await requestPermission();
-        granted = permission === "granted";
+      const plugin = await import("@tauri-apps/plugin-notification");
+      
+      try {
+        let isGranted = await plugin.isPermissionGranted();
+        if (!isGranted) {
+          const perm = await plugin.requestPermission();
+          console.log("[sendDesktopNotification] Permission request result:", perm);
+        }
+      } catch (pErr) {
+        console.warn("[sendDesktopNotification] Permission check:", pErr);
       }
 
-      if (granted) {
-        sendNotification({
-          title,
-          body,
-          icon,
-        });
-        return true;
-      }
+      plugin.sendNotification({
+        title,
+        body,
+        icon: icon || undefined,
+      });
+      console.log("[sendDesktopNotification] Tauri sendNotification succeeded.");
+      return true;
     } catch (err) {
       console.warn("Failed to send Tauri notification, trying web fallback:", err);
     }
@@ -103,6 +107,7 @@ export async function sendDesktopNotification(
           body,
           icon: icon || "/favicon.svg",
         });
+        console.log("[sendDesktopNotification] Web Notification sent.");
         return true;
       } else if (Notification.permission !== "denied") {
         const perm = await Notification.requestPermission();
@@ -111,6 +116,7 @@ export async function sendDesktopNotification(
             body,
             icon: icon || "/favicon.svg",
           });
+          console.log("[sendDesktopNotification] Web Notification sent after grant.");
           return true;
         }
       }

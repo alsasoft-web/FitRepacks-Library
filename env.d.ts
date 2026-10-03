@@ -4,7 +4,7 @@ declare global {
       NEXT_PUBLIC_IGDB_CLIENT_ID: string;
       NEXT_PUBLIC_IGDB_CLIENT_SECRET: string;
       NEXT_PUBLIC_STEAM_API_KEY: string;
-      NEXT_PUBLIC_POCKETBASE_URL: string;
+      NEXT_PUBLIC_ALSABASE_URL: string;
     }
   }
 }

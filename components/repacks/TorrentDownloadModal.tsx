@@ -40,6 +40,7 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   useDownloadQueueStore,
   QueuedFile,
+  isTorrentAlreadyInQueue,
 } from "../../lib/downloadQueueStore";
 import { formatRepackFolderName } from "../../lib/repackTypes";
 import {
@@ -318,9 +319,20 @@ export const TorrentDownloadModal: React.FC<TorrentDownloadModalProps> = ({
     return files;
   }, [files, fileFilter]);
 
+  const magnetDownloads = useDownloadQueueStore(
+    (state) => state.magnetDownloads,
+  );
   const addMagnetDownload = useDownloadQueueStore(
     (state) => state.addMagnetDownload,
   );
+
+  const existingDownload = useMemo(() => {
+    return isTorrentAlreadyInQueue(magnetDownloads, {
+      infoHash: magnetInfo.hash,
+      magnetUrl,
+      title: title || magnetInfo.name,
+    });
+  }, [magnetDownloads, magnetInfo.hash, magnetUrl, title, magnetInfo.name]);
 
   // Load default download directory from SQLite settings if available
   useEffect(() => {
@@ -539,6 +551,14 @@ export const TorrentDownloadModal: React.FC<TorrentDownloadModalProps> = ({
   }, [files]);
 
   const handleStartDownload = async () => {
+    if (existingDownload) {
+      onClose();
+      if (openDownloadsTab && onDownloadStarted) {
+        onDownloadStarted();
+      }
+      return;
+    }
+
     // Map selected files to indices if selective
     const selectedIndices: number[] = [];
     files.forEach((f, idx) => {
@@ -954,6 +974,36 @@ export const TorrentDownloadModal: React.FC<TorrentDownloadModalProps> = ({
           </Stack>
         </Paper> */}
 
+        {/* Existing Download Alert */}
+        {existingDownload && (
+          <Paper
+            p="xs"
+            radius="md"
+            bg="var(--mantine-color-blue-light)"
+            style={{ border: "1px solid var(--mantine-color-blue-outline)" }}
+          >
+            <Group justify="space-between" align="center" wrap="nowrap">
+              <Group gap="xs" wrap="nowrap">
+                <ThemeIcon size="sm" color="blue" variant="light">
+                  <CheckCircle2 size={14} />
+                </ThemeIcon>
+                <Text size="xs" fw={600} c="blue">
+                  This torrent is already in your downloads list (
+                  {existingDownload.status === "downloading"
+                    ? `Downloading - ${existingDownload.progress.toFixed(1)}%`
+                    : existingDownload.status === "completed"
+                      ? "Completed"
+                      : existingDownload.status}
+                  )
+                </Text>
+              </Group>
+              <Badge size="xs" color="blue" variant="filled">
+                ALREADY ADDED
+              </Badge>
+            </Group>
+          </Paper>
+        )}
+
         {/* Options */}
         <Checkbox
           checked={openDownloadsTab}
@@ -981,17 +1031,35 @@ export const TorrentDownloadModal: React.FC<TorrentDownloadModalProps> = ({
             >
               Cancel
             </Button>
-            <Button
-              variant="filled"
-              color="blue"
-              size="sm"
-              radius="md"
-              disabled={isResolving || selectedStats.count === 0}
-              leftSection={<DownloadCloud size={16} />}
-              onClick={handleStartDownload}
-            >
-              Start In-App Download ({selectedStats.size})
-            </Button>
+            {existingDownload ? (
+              <Button
+                variant="filled"
+                color="blue"
+                size="sm"
+                radius="md"
+                leftSection={<DownloadCloud size={16} />}
+                onClick={() => {
+                  onClose();
+                  if (onDownloadStarted) {
+                    onDownloadStarted();
+                  }
+                }}
+              >
+                View in Downloads
+              </Button>
+            ) : (
+              <Button
+                variant="filled"
+                color="blue"
+                size="sm"
+                radius="md"
+                disabled={isResolving || selectedStats.count === 0}
+                leftSection={<DownloadCloud size={16} />}
+                onClick={handleStartDownload}
+              >
+                Start In-App Download ({selectedStats.size})
+              </Button>
+            )}
           </Group>
         </Group>
       </Stack>

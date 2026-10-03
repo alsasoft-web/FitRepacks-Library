@@ -19,7 +19,7 @@ export default function RootLayout({ children }: { children: any }) {
   return (
     <html lang="en" {...mantineHtmlProps} suppressHydrationWarning>
       <head suppressHydrationWarning>
-        <ColorSchemeScript defaultColorScheme="light" />
+        <ColorSchemeScript defaultColorScheme="dark" />
         <link rel="shortcut icon" href="/favicon.svg" />
         <meta
           name="viewport"
@@ -27,7 +27,7 @@ export default function RootLayout({ children }: { children: any }) {
         />
       </head>
       <body className="antialiased selection:bg-blue-600 selection:text-white">
-        <MantineProvider theme={theme} defaultColorScheme="light">
+        <MantineProvider theme={theme} defaultColorScheme="dark">
           {children}
         </MantineProvider>
       </body>

@@ -15,6 +15,8 @@ use tauri::{
     Emitter, Manager,
 };
 
+pub mod tracker;
+
 pub struct AppState {}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -235,8 +237,8 @@ fn launch_game_exe(
         }
     }
 
-    let mut child = match spawn_result {
-        Ok(c) => c,
+    let child_proc: Option<std::process::Child> = match spawn_result {
+        Ok(c) => Some(c),
         Err(ref e)
             if e.raw_os_error() == Some(740)
                 || e.to_string().contains("740")
@@ -244,21 +246,49 @@ fn launch_game_exe(
                 || e.raw_os_error() == Some(32)
                 || e.to_string().contains("os error 32") =>
         {
-            let ps_cmd = format!(
-                "Start-Process -FilePath '{}' -WorkingDirectory '{}' -Verb RunAs",
-                exe_path.replace("'", "''"),
-                working_directory.to_string_lossy().replace("'", "''")
-            );
-            let mut fallback_cmd = Command::new("powershell");
-            fallback_cmd.args(["-NoProfile", "-Command", &ps_cmd]);
             #[cfg(target_os = "windows")]
             {
-                use std::os::windows::process::CommandExt;
-                fallback_cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+                use windows::core::{HSTRING, PCWSTR};
+                use windows::Win32::Foundation::HWND;
+                use windows::Win32::UI::Shell::ShellExecuteW;
+                use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+                let wide_file = HSTRING::from(&exe_path);
+                let wide_dir = HSTRING::from(working_directory.to_string_lossy().as_ref());
+                let wide_verb = HSTRING::from("runas");
+                let wide_args = if let Some(ref args) = runner_args {
+                    HSTRING::from(args.join(" "))
+                } else {
+                    HSTRING::new()
+                };
+
+                let hinstance = unsafe {
+                    ShellExecuteW(
+                        HWND::default(),
+                        PCWSTR(wide_verb.as_ptr()),
+                        PCWSTR(wide_file.as_ptr()),
+                        if wide_args.is_empty() {
+                            PCWSTR::null()
+                        } else {
+                            PCWSTR(wide_args.as_ptr())
+                        },
+                        PCWSTR(wide_dir.as_ptr()),
+                        SW_SHOWNORMAL,
+                    )
+                };
+
+                if (hinstance.0 as usize) <= 32 {
+                    return Err(format!(
+                        "Failed launching elevated installer/process {} (ShellExecute error code: {})",
+                        exe_path, hinstance.0 as usize
+                    ));
+                }
+                None
             }
-            fallback_cmd
-                .spawn()
-                .map_err(|err| format!("Failed launching process with elevation/fallback: {}", err))?
+            #[cfg(not(target_os = "windows"))]
+            {
+                return Err(format!("Process requires elevation: {}", e));
+            }
         }
         Err(err) => return Err(format!("Failed launching process {}: {}", exe_path, err)),
     };
@@ -300,9 +330,9 @@ fn launch_game_exe(
                     }
                 }
             }
-        } else {
+        } else if let Some(mut c) = child_proc {
             // Fallback: wait on direct child handle
-            let _ = child.wait();
+            let _ = c.wait();
         }
 
         let elapsed_secs = start_time.elapsed().as_secs();
@@ -725,6 +755,24 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 static TORRENT_SESSION: RwLock<Option<Arc<Session>>> = RwLock::const_new(None);
+static CONFIGURED_SPEED_LIMITS: std::sync::RwLock<(u64, u64)> = std::sync::RwLock::new((0, 0));
+
+fn kbps_to_bps(kbps: u64) -> Option<NonZeroU32> {
+    if kbps == 0 {
+        return None;
+    }
+    NonZeroU32::new((kbps.saturating_mul(1024)).min(u32::MAX as u64) as u32)
+}
+
+fn read_speed_limits() -> LimitsConfig {
+    let (down_kb, up_kb) = *CONFIGURED_SPEED_LIMITS
+        .read()
+        .unwrap_or_else(|e| e.into_inner());
+    LimitsConfig {
+        download_bps: kbps_to_bps(down_kb),
+        upload_bps: kbps_to_bps(up_kb),
+    }
+}
 
 async fn get_or_init_torrent_session(download_dir: &str) -> Result<Arc<Session>, String> {
     let mut lock = TORRENT_SESSION.write().await;
@@ -764,13 +812,19 @@ async fn get_or_init_torrent_session(download_dir: &str) -> Result<Arc<Session>,
             format!("Failed to create BitTorrent session: {:?}", e)
         })?;
 
-    println!("[FitRepacks BitTorrent] BitTorrent engine session started successfully.");
+    // Apply any configured speed limits to active session limiter
+    let (down_kb, up_kb) = *CONFIGURED_SPEED_LIMITS.read().unwrap_or_else(|e| e.into_inner());
+    let down_bps = kbps_to_bps(down_kb);
+    let up_bps = kbps_to_bps(up_kb);
+    session.ratelimits.set_download_bps(down_bps);
+    session.ratelimits.set_upload_bps(up_bps);
+
+    println!(
+        "[FitRepacks BitTorrent] BitTorrent engine session started successfully (Limits: down={:?} bps, up={:?} bps).",
+        down_bps, up_bps
+    );
     *lock = Some(Arc::clone(&session));
     Ok(session)
-}
-
-fn read_speed_limits() -> LimitsConfig {
-    LimitsConfig::default()
 }
 
 /// Update speed limits on the live session without restarting it.
@@ -779,21 +833,26 @@ async fn set_torrent_speed_limits(
     download_kbps: u64,
     upload_kbps: u64,
 ) -> Result<(), String> {
-    let kbps_to_bps = |kbps: u64| -> Option<NonZeroU32> {
-        if kbps == 0 { return None; }
-        NonZeroU32::new((kbps * 1024).min(u32::MAX as u64) as u32)
-    };
+    if let Ok(mut limits) = CONFIGURED_SPEED_LIMITS.write() {
+        *limits = (download_kbps, upload_kbps);
+    }
+
+    let down_bps = kbps_to_bps(download_kbps);
+    let up_bps = kbps_to_bps(upload_kbps);
 
     let lock = TORRENT_SESSION.read().await;
     if let Some(ref session) = *lock {
-        session.ratelimits.set_download_bps(kbps_to_bps(download_kbps));
-        session.ratelimits.set_upload_bps(kbps_to_bps(upload_kbps));
+        session.ratelimits.set_download_bps(down_bps);
+        session.ratelimits.set_upload_bps(up_bps);
         println!(
-            "[FitRepacks BitTorrent] Speed limits updated: download={}kbps upload={}kbps",
-            download_kbps, upload_kbps
+            "[FitRepacks BitTorrent] Speed limits updated on live session: download={:?} bps, upload={:?} bps",
+            down_bps, up_bps
         );
     } else {
-        println!("[FitRepacks BitTorrent] set_torrent_speed_limits: no active session yet; limits will apply on next session start.");
+        println!(
+            "[FitRepacks BitTorrent] Stored speed limits for upcoming session: download={} KB/s, upload={} KB/s",
+            download_kbps, upload_kbps
+        );
     }
     Ok(())
 }
@@ -1155,13 +1214,24 @@ fn register_windows_aumid() {
         let _ = SetCurrentProcessExplicitAppUserModelID(wide_id.as_ptr());
     }
 
-    // Ensure HKCU\Software\Classes\AppUserModelId registry key exists so Windows Toast displays app name
+    let current_exe = std::env::current_exe()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    // Ensure HKCU\Software\Classes\AppUserModelId registry key exists with DisplayName AND IconUri
+    // so Windows Taskbar and Windows Toast display the app icon and title properly instead of a blank page.
+    let script = format!(
+        "$a='com.fitrepacks.library'; $p=\"HKCU:\\Software\\Classes\\AppUserModelId\\$a\"; \
+         $exe='{}'; \
+         if (!(Test-Path $p)) {{ New-Item -Path $p -Force | Out-Null; }} \
+         Set-ItemProperty -Path $p -Name 'DisplayName' -Value 'FitRepacks Library' -Force | Out-Null; \
+         Set-ItemProperty -Path $p -Name 'ShowInSettings' -Value 1 -Type DWord -Force | Out-Null; \
+         if ($exe) {{ Set-ItemProperty -Path $p -Name 'IconUri' -Value $exe -Force | Out-Null; }}",
+        current_exe.replace("'", "''")
+    );
+
     let _ = std::process::Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-Command",
-            "$a='com.fitrepacks.library'; $p=\"HKCU:\\Software\\Classes\\AppUserModelId\\$a\"; if (!(Test-Path $p)) { New-Item -Path $p -Force | Out-Null; Set-ItemProperty -Path $p -Name 'DisplayName' -Value 'FitRepacks Library' | Out-Null; Set-ItemProperty -Path $p -Name 'ShowInSettings' -Value 1 -Type DWord | Out-Null; }"
-        ])
+        .args(["-NoProfile", "-Command", &script])
         .creation_flags(0x08000000) // CREATE_NO_WINDOW
         .spawn();
 }
@@ -1981,6 +2051,358 @@ fn handle_tray_menu_event(app: &tauri::AppHandle, id_str: &str) {
     }
 }
 
+#[command]
+fn get_live_player_position(
+    game_slug: String,
+    map_slug: Option<String>,
+    selected_pointer_id: Option<String>,
+) -> tracker::LivePlayerPosition {
+    tracker::get_live_player_position_for_game(
+        &game_slug,
+        map_slug.as_deref(),
+        selected_pointer_id.as_deref(),
+    )
+}
+
+#[command]
+fn is_live_tracking_supported(game_slug: String) -> bool {
+    tracker::get_registry().is_supported(&game_slug)
+}
+
+#[command]
+async fn fetch_mapgenie_games() -> Result<String, String> {
+    tokio::task::spawn_blocking(|| {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(35))
+            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
+            .gzip(true)
+            .brotli(true)
+            .deflate(true)
+            .build()
+            .map_err(|e| e.to_string())?;
+
+        let resp = client
+            .get("https://mapgenie.io/api/v1/games")
+            .header("Referer", "https://mapgenie.io/")
+            .header("Accept", "application/json")
+            .send()
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            return Err(format!("MapGenie API error: HTTP {}", resp.status()));
+        }
+
+        let bytes = resp.bytes().map_err(|e| e.to_string())?;
+        String::from_utf8(bytes.to_vec())
+            .or_else(|_| Ok(String::from_utf8_lossy(&bytes).to_string()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[command]
+async fn fetch_mapgenie_map(map_id: u64) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(35))
+            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
+            .gzip(true)
+            .brotli(true)
+            .deflate(true)
+            .build()
+            .map_err(|e| e.to_string())?;
+
+        let url = format!("https://mapgenie.io/api/v1/maps/{}/full", map_id);
+        let resp = client
+            .get(&url)
+            .header("Referer", "https://mapgenie.io/")
+            .header("Accept", "application/json")
+            .send()
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            return Err(format!("MapGenie Map API error: HTTP {}", resp.status()));
+        }
+
+        let bytes = resp.bytes().map_err(|e| e.to_string())?;
+        String::from_utf8(bytes.to_vec())
+            .or_else(|_| Ok(String::from_utf8_lossy(&bytes).to_string()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[command]
+async fn fetch_mapgenie_page(game_slug: String, map_slug: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(35))
+            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
+            .gzip(true)
+            .brotli(true)
+            .deflate(true)
+            .build()
+            .map_err(|e| e.to_string())?;
+
+        let url = format!("https://mapgenie.io/{}/maps/{}", game_slug, map_slug);
+        let resp = client
+            .get(&url)
+            .header("Referer", "https://mapgenie.io/")
+            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            .send()
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            return Err(format!("MapGenie page error: HTTP {}", resp.status()));
+        }
+
+        let bytes = resp.bytes().map_err(|e| e.to_string())?;
+        String::from_utf8(bytes.to_vec())
+            .or_else(|_| Ok(String::from_utf8_lossy(&bytes).to_string()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ResourceProcess {
+    pub pid: u32,
+    pub name: String,
+    pub memory_mb: u64,
+    pub is_safe_to_kill: bool,
+    pub is_recommended: bool,
+}
+
+#[cfg(target_os = "windows")]
+const SYSTEM_PROCESS_WHITELIST: &[&str] = &[
+    "system",
+    "system idle process",
+    "registry",
+    "smss.exe",
+    "csrss.exe",
+    "wininit.exe",
+    "services.exe",
+    "lsass.exe",
+    "svchost.exe",
+    "dwm.exe",
+    "explorer.exe",
+    "conhost.exe",
+    "winlogon.exe",
+    "audiodg.exe",
+    "fontdrvhost.exe",
+    "sihost.exe",
+    "taskhostw.exe",
+    "searchhost.exe",
+    "searchindexer.exe",
+    "startmenuexperiencehost.exe",
+    "ctfmon.exe",
+    "securityhealthservice.exe",
+    "securityhealthsystray.exe",
+    "msmpeng.exe",
+    "runtimebroker.exe",
+    "shellexperiencehost.exe",
+    "smartscreen.exe",
+    "spoolsv.exe",
+    "wudfhost.exe",
+    "dashost.exe",
+    "applicationframehost.exe",
+    "lockapp.exe",
+    "dllhost.exe",
+    "searchapp.exe",
+    "textinputhost.exe",
+];
+
+#[cfg(target_os = "windows")]
+fn get_own_process_tree_pids(current_pid: u32) -> std::collections::HashSet<u32> {
+    use std::collections::HashSet;
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+
+    let mut own_pids = HashSet::new();
+    own_pids.insert(current_pid);
+
+    unsafe {
+        if let Ok(snapshot) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) {
+            let mut entry = PROCESSENTRY32W {
+                dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+                ..Default::default()
+            };
+
+            let mut pairs = Vec::new();
+            if Process32FirstW(snapshot, &mut entry).is_ok() {
+                loop {
+                    pairs.push((entry.th32ProcessID, entry.th32ParentProcessID));
+                    if Process32NextW(snapshot, &mut entry).is_err() {
+                        break;
+                    }
+                }
+            }
+            let _ = CloseHandle(snapshot);
+
+            let mut added = true;
+            while added {
+                added = false;
+                for &(pid, parent_pid) in &pairs {
+                    if pid > 0 && own_pids.contains(&parent_pid) && !own_pids.contains(&pid) {
+                        own_pids.insert(pid);
+                        added = true;
+                    }
+                }
+            }
+        }
+    }
+
+    own_pids
+}
+
+#[command]
+fn get_resource_processes() -> Result<Vec<ResourceProcess>, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::Foundation::CloseHandle;
+        use windows::Win32::System::Diagnostics::ToolHelp::{
+            CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+            TH32CS_SNAPPROCESS,
+        };
+        use windows::Win32::System::ProcessStatus::{
+            K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
+        };
+        use windows::Win32::System::Threading::{
+            OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ,
+        };
+
+        let current_pid = std::process::id();
+        let own_pids = get_own_process_tree_pids(current_pid);
+        let mut processes = Vec::new();
+
+        unsafe {
+            let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0).map_err(|e| e.to_string())?;
+            let mut entry = PROCESSENTRY32W {
+                dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+                ..Default::default()
+            };
+
+            if Process32FirstW(snapshot, &mut entry).is_ok() {
+                loop {
+                    let null_pos = entry
+                        .szExeFile
+                        .iter()
+                        .position(|&c| c == 0)
+                        .unwrap_or(entry.szExeFile.len());
+                    let raw_name = String::from_utf16_lossy(&entry.szExeFile[..null_pos]);
+                    let clean_name = raw_name.to_lowercase();
+                    let pid = entry.th32ProcessID;
+
+                    if pid > 4
+                        && !own_pids.contains(&pid)
+                        && !SYSTEM_PROCESS_WHITELIST.contains(&clean_name.as_str())
+                        && !clean_name.starts_with("fitrepacks")
+                    {
+                        let mut mem_mb = 0;
+                        if let Ok(handle) =
+                            OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid)
+                        {
+                            let mut counters = PROCESS_MEMORY_COUNTERS::default();
+                            if K32GetProcessMemoryInfo(
+                                handle,
+                                &mut counters,
+                                std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
+                            )
+                            .as_bool()
+                            {
+                                mem_mb = (counters.WorkingSetSize / (1024 * 1024)) as u64;
+                            }
+                            let _ = CloseHandle(handle);
+                        }
+
+                        if mem_mb >= 25 {
+                            let is_recommended = matches!(
+                                clean_name.as_str(),
+                                "chrome.exe"
+                                    | "msedge.exe"
+                                    | "firefox.exe"
+                                    | "brave.exe"
+                                    | "opera.exe"
+                                    | "discord.exe"
+                                    | "spotify.exe"
+                                    | "slack.exe"
+                                    | "teams.exe"
+                                    | "whatsapp.exe"
+                                    | "telegram.exe"
+                                    | "qbittorrent.exe"
+                                    | "utorrent.exe"
+                                    | "epicgameslauncher.exe"
+                                    | "steamwebhelper.exe"
+                                    | "galaxyclient.exe"
+                                    | "battlenet.exe"
+                                    | "photoshop.exe"
+                            );
+
+                            processes.push(ResourceProcess {
+                                pid,
+                                name: raw_name,
+                                memory_mb: mem_mb,
+                                is_safe_to_kill: true,
+                                is_recommended,
+                            });
+                        }
+                    }
+
+                    if Process32NextW(snapshot, &mut entry).is_err() {
+                        break;
+                    }
+                }
+            }
+            let _ = CloseHandle(snapshot);
+        }
+
+        processes.sort_by(|a, b| b.memory_mb.cmp(&a.memory_mb));
+        Ok(processes)
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(Vec::new())
+    }
+}
+
+#[command]
+fn kill_processes(pids: Vec<u32>) -> Result<usize, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::Foundation::CloseHandle;
+        use windows::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+
+        let current_pid = std::process::id();
+        let own_pids = get_own_process_tree_pids(current_pid);
+        let mut killed_count = 0;
+
+        for pid in pids {
+            if pid <= 4 || own_pids.contains(&pid) {
+                continue;
+            }
+            unsafe {
+                if let Ok(handle) = OpenProcess(PROCESS_TERMINATE, false, pid) {
+                    if TerminateProcess(handle, 1).is_ok() {
+                        killed_count += 1;
+                    }
+                    let _ = CloseHandle(handle);
+                }
+            }
+        }
+        Ok(killed_count)
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = pids;
+        Ok(0)
+    }
+}
+
 fn main() {
     #[cfg(target_os = "windows")]
     {
@@ -2056,11 +2478,27 @@ fn main() {
                     }
                 });
 
-            if let Some(icon) = app.default_window_icon() {
+            let icon_opt = app.default_window_icon().cloned().or_else(|| {
+                image::load_from_memory(include_bytes!("../icons/icon.png"))
+                    .ok()
+                    .map(|img| {
+                        let rgba = img.to_rgba8();
+                        let (width, height) = rgba.dimensions();
+                        tauri::image::Image::new_owned(rgba.into_raw(), width, height)
+                    })
+            });
+
+            if let Some(ref icon) = icon_opt {
                 tray_builder = tray_builder.icon(icon.clone());
             }
 
             tray_builder.build(app)?;
+
+            if let Some(window) = app.get_webview_window("main") {
+                if let Some(ref icon) = icon_opt {
+                    let _ = window.set_icon(icon.clone());
+                }
+            }
 
             Ok(())
         })
@@ -2102,7 +2540,14 @@ fn main() {
             navigate_webview,
             get_webview_url,
             close_webview,
-            set_webview_bounds
+            set_webview_bounds,
+            get_live_player_position,
+            is_live_tracking_supported,
+            fetch_mapgenie_games,
+            fetch_mapgenie_map,
+            fetch_mapgenie_page,
+            get_resource_processes,
+            kill_processes
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

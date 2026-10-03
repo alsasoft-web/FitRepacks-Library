@@ -2,7 +2,6 @@
 
 import React, { useMemo, useState } from "react";
 import { Game } from "../../lib/types";
-import { CachedImage } from "../common/CachedImage";
 import { deduplicatePlaySessions } from "../../lib/db";
 import {
   SimpleGrid,
@@ -17,6 +16,7 @@ import {
   SegmentedControl,
   ThemeIcon,
   RingProgress,
+  Image,
 } from "@mantine/core";
 import {
   Clock,
@@ -829,13 +829,15 @@ export const PlaytimeStats: React.FC<PlaytimeStatsProps> = ({
                       >
                         {idx + 1}
                       </Box>
-                      <CachedImage
+                      <Image
                         src={game.coverUrl}
                         h={32}
                         w={24}
                         radius="xs"
                         fit="cover"
                         fallbackSrc="https://placehold.co/30x40/141517/3b82f6?text=Cover"
+                        loading="lazy"
+                        decoding="async"
                       />
                       <Stack gap={0} style={{ minWidth: 0 }}>
                         <Text
@@ -914,13 +916,15 @@ export const PlaytimeStats: React.FC<PlaytimeStatsProps> = ({
                   >
                     <Group justify="space-between" wrap="nowrap">
                       <Group gap="sm" wrap="nowrap">
-                        <CachedImage
+                        <Image
                           src={session.coverUrl}
                           w={26}
                           h={34}
                           radius="xs"
                           fit="cover"
                           fallbackSrc="https://placehold.co/30x40/141517/3b82f6?text=Cover"
+                          loading="lazy"
+                          decoding="async"
                         />
                         <Stack gap={1}>
                           <Text

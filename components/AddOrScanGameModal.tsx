@@ -187,7 +187,7 @@ export const AddOrScanGameModal: React.FC<AddOrScanGameModalProps> = ({
       isInstalled: Boolean(cleanExe),
       source: "manual",
       dateAdded: new Date().toISOString(),
-      isWishlisted: !cleanExe,
+      isWishlisted: false,
       tags: cleanExe ? ["Manual"] : [],
     };
 

@@ -70,17 +70,52 @@ import {
 import { openInBrowser } from "../../lib/openUrl";
 import { ImageLightboxModal } from "../common/ImageLightboxModal";
 
-/** Extract a clean hoster display name from a URL */
-function getHosterName(url: string): string {
+/** Extract a clean hoster display name from a URL or link name */
+function getHosterName(url: string, name?: string): string {
+  if (name && name.trim()) {
+    const cleanName = name
+      .replace(/\[\s*Use\s*(?:JDownloader2?|IDM)[^\]]*\]/gi, "")
+      .replace(/\[\s*Direct\s*Link\s*\]/gi, "")
+      .replace(/\[.*\]/g, "")
+      .replace(/\(.*\)/g, "")
+      .trim();
+    if (
+      cleanName &&
+      !/^(download|link|mirror|click\s*here|here|part\s*\d+)$/i.test(cleanName) &&
+      cleanName.length < 30
+    ) {
+      return cleanName;
+    }
+  }
   try {
     const parsed = new URL(url);
-    let host = parsed.hostname.replace(/^www\./, "");
-    // Shorten very long subdomains
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+    if (host.includes("paste.fitgirl-repacks.site") || host.includes("pastefg.")) {
+      return "FitGirl Pastebin";
+    }
+    if (host.includes("datanodes.to")) return "DataNodes";
+    if (host.includes("fuckingfast.co")) return "FuckingFast";
+    if (host.includes("filekeeper.net")) return "Filekeeper";
+    if (host.includes("krakenfiles.com")) return "KrakenFiles";
+    if (host.includes("multiupload.")) return "MultiUpload";
+    if (host.includes("qiwi.")) return "Qiwi";
+    if (host.includes("pixeldrain.com")) return "Pixeldrain";
+    if (host.includes("1fichier.com")) return "1fichier";
+    if (host.includes("gofile.io")) return "GoFile";
+    if (host.includes("mega.nz") || host.includes("mega.co.nz")) return "Mega";
+    if (host.includes("drive.google.com")) return "Google Drive";
+    if (host.includes("onedrive.") || host.includes("1drv.ms")) return "OneDrive";
+    if (host.includes("mediafire.com")) return "MediaFire";
+    if (host.includes("send.cm")) return "Send.cm";
+    if (host.includes("rapidgator.net")) return "Rapidgator";
+    if (host.includes("1337x.")) return "1337x";
+    if (host.includes("rutor.")) return "RuTor";
+    if (host.includes("tapochek.")) return "Tapochek";
+    if (host.includes("torrentgalaxy.")) return "TorrentGalaxy";
     const parts = host.split(".");
-    if (parts.length > 2) host = parts.slice(-2).join(".");
+    if (parts.length > 2) return parts.slice(-2).join(".");
     return host;
   } catch {
-    // fallback: grab text before first /
     const m = url.match(/\/\/([^/]+)/);
     return m ? m[1].replace(/^www\./, "") : url.slice(0, 30);
   }
@@ -176,18 +211,33 @@ const HosterAccordion: React.FC<HosterAccordionProps> = ({
   );
 };
 
-// Helper to convert YouTube watch links to embed links
-const getYoutubeEmbedUrl = (url: string): string | null => {
-  if (!url) return null;
-  const match = url.match(
-    /(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|v\/))([\w-]{11})/,
+// Helper to convert YouTube watch links or raw IDs to embed links
+const getYoutubeEmbedUrl = (urlOrId: string): string | null => {
+  if (!urlOrId) return null;
+  const str = String(urlOrId).trim();
+  if (!str) return null;
+
+  // Direct 11-char YouTube ID (e.g. from FitGirl / IGDB scrapers)
+  if (/^[a-zA-Z0-9_-]{11}$/.test(str)) {
+    return `https://www.youtube.com/embed/${str}?autoplay=0&rel=0`;
+  }
+
+  // YouTube URLs (standard, shorts, embed, youtu.be, nocookie)
+  const match = str.match(
+    /(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:watch\?.*v=|embed\/|v\/|shorts\/))([a-zA-Z0-9_-]{11})/i,
   );
   if (match && match[1]) {
     return `https://www.youtube.com/embed/${match[1]}?autoplay=0&rel=0`;
   }
-  if (url.includes("youtube.com/embed/")) {
-    return url.split("?")[0];
+
+  if (
+    str.includes("youtube.com/embed/") ||
+    str.includes("youtube-nocookie.com/embed/")
+  ) {
+    const clean = str.split("?")[0];
+    return `${clean}?autoplay=0&rel=0`;
   }
+
   return null;
 };
 
@@ -887,7 +937,7 @@ export const RepackDetailModal: React.FC<RepackDetailModalProps> = ({
 
                         // Non-magnet group — group links by hoster with collapsible sections
                         const linksByHoster = group.links.reduce<Record<string, typeof group.links>>((acc, link) => {
-                          const hoster = getHosterName(link.url);
+                          const hoster = getHosterName(link.url, link.name);
                           if (!acc[hoster]) acc[hoster] = [];
                           acc[hoster].push(link);
                           return acc;
@@ -1200,31 +1250,29 @@ export const RepackDetailModal: React.FC<RepackDetailModalProps> = ({
                                   />
                                 </Box>
                               ) : (
-                                <Paper
-                                  p="lg"
-                                  bg="var(--mantine-color-body)"
+                                <Box
                                   style={{
-                                    textAlign: "center",
-                                    border: "1px solid var(--mantine-color-default-border)",
+                                    position: "relative",
+                                    paddingTop: "56.25%",
+                                    borderRadius: "8px",
+                                    overflow: "hidden",
+                                    backgroundColor: "#000000",
                                   }}
                                 >
-                                  <Text size="sm" c="dimmed" mb="xs">
-                                    External Video Trailer
-                                  </Text>
-                                  <Button
-                                    component="a"
-                                    href={currentVidUrl}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    size="xs"
-                                    color="blue"
-                                    radius="md"
-                                    leftSection={<Play size={14} />}
-                                    rightSection={<ExternalLink size={12} />}
-                                  >
-                                    Watch Video
-                                  </Button>
-                                </Paper>
+                                  <video
+                                    src={currentVidUrl}
+                                    controls
+                                    playsInline
+                                    style={{
+                                      position: "absolute",
+                                      top: 0,
+                                      left: 0,
+                                      width: "100%",
+                                      height: "100%",
+                                      objectFit: "contain",
+                                    }}
+                                  />
+                                </Box>
                               )}
                             </Paper>
                           );

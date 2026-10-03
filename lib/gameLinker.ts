@@ -17,7 +17,10 @@ export function getRiotpixels240pUrl(url: string | null | undefined): string {
   if (/\.gif(?:\?.*)?$/i.test(url)) return url;
   if (!url.includes("riotpixels.net")) return url;
 
-  let clean = url.trim().replace(/^http:\/\//i, "https://");
+  let clean = url
+    .trim()
+    .replace(/^http:\/\//i, "https://")
+    .replace(/riotpixels\.net\/data\.s\//gi, "riotpixels.net/data/");
 
   if (!clean.endsWith(".240p.jpg")) {
     if (/\.png\.jpg$/i.test(clean)) {
@@ -49,7 +52,10 @@ export function getRiotpixelsFullResUrl(url: string | null | undefined): string 
   if (/\.gif(?:\?.*)?$/i.test(url)) return url;
   if (!url.includes("riotpixels.net")) return url;
 
-  let clean = url.trim().replace(/^http:\/\//i, "https://");
+  let clean = url
+    .trim()
+    .replace(/^http:\/\//i, "https://")
+    .replace(/riotpixels\.net\/data\.s\//gi, "riotpixels.net/data/");
 
   if (/\.png\.240p\.jpg$/i.test(clean)) {
     return clean.replace(/\.png\.240p\.jpg$/i, ".png");
@@ -441,7 +447,9 @@ export function applyCandidateMatch(
   candidate: SourceCandidate,
 ): Game {
   const hasHypervisorTag = Boolean(
-    game.tags?.includes("Hypervisor") || game.genres?.includes("Hypervisor"),
+    candidate.rawItem?.isHypervisor ||
+    game.isHypervisor ||
+    game.tags?.includes("Hypervisor"),
   );
 
   if (candidate.source === "igdb") {
@@ -573,8 +581,8 @@ export async function linkGameToIgdb(
     if (matches && matches.length > 0) {
       const top = matches[0];
       const hasHypervisorTag = Boolean(
-        game.tags?.includes("Hypervisor") ||
-        game.genres?.includes("Hypervisor"),
+        game.isHypervisor ||
+        game.tags?.includes("Hypervisor"),
       );
       const mergedGenres = top.genres?.length ? top.genres : game.genres;
       const finalGenres =
@@ -665,8 +673,9 @@ export async function linkGameToFitGirl(
       }
 
       const hasHypervisorTag = Boolean(
-        game.tags?.includes("Hypervisor") ||
-        game.genres?.includes("Hypervisor"),
+        match.isHypervisor ||
+        game.isHypervisor ||
+        game.tags?.includes("Hypervisor"),
       );
       const mergedGenres = game.genres || match.genres;
       const finalGenres =
@@ -756,8 +765,9 @@ export async function linkGameToSteamRIP(
       }
 
       const hasHypervisorTag = Boolean(
-        game.tags?.includes("Hypervisor") ||
-        game.genres?.includes("Hypervisor"),
+        match.isHypervisor ||
+        game.isHypervisor ||
+        game.tags?.includes("Hypervisor"),
       );
       const mergedGenres = game.genres || match.genres;
       const finalGenres =
@@ -882,15 +892,39 @@ export function extractDirectDownloadLinks(
 }
 
 /**
- * Automatically sync library games with their latest repack posts from PocketBase (e.g. on app startup)
+ * Automatically sync library games with their latest repack posts from AlsaBase (e.g. on app startup)
  */
-export async function syncLibraryGamesWithLatestRepacks(): Promise<void> {
+export async function syncLibraryGamesWithLatestRepacks(force = false): Promise<void> {
   try {
+    if (typeof window === "undefined") return;
+
+    const lastSyncKey = "fitrepacks_last_library_repacks_sync";
+    const lastSync = localStorage.getItem(lastSyncKey);
+    const now = Date.now();
+    // Throttle automatic background library sync to once every 24 hours
+    if (!force && lastSync && now - parseInt(lastSync, 10) < 24 * 60 * 60 * 1000) {
+      return;
+    }
+
     const games = getStoredGames();
     if (!games || games.length === 0) return;
 
+    // Process only unlinked games or games without mirrors (max 10 at startup)
+    const candidateGames = games
+      .filter(
+        (g) =>
+          !g.mirrorGroups ||
+          g.mirrorGroups.length === 0 ||
+          (!g.linkedFitgirlUrl && !g.linkedSteamripUrl),
+      )
+      .slice(0, 10);
+
+    localStorage.setItem(lastSyncKey, String(now));
+
+    if (candidateGames.length === 0) return;
+
     let updatedCount = 0;
-    for (const g of games) {
+    for (const g of candidateGames) {
       const source = (g.source || "").toLowerCase();
       const isFitgirlLinked =
         Boolean(g.linkedFitgirlUrl) ||
@@ -901,7 +935,7 @@ export async function syncLibraryGamesWithLatestRepacks(): Promise<void> {
         source.includes("steamrip") ||
         g.tags?.includes("SteamRIP");
 
-      if (isFitgirlLinked) {
+      if (isFitgirlLinked || (!g.linkedFitgirlUrl && !g.linkedSteamripUrl)) {
         await linkGameToFitGirl(g).catch(() => {});
         updatedCount++;
       }

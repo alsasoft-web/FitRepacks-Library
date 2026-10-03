@@ -35,6 +35,7 @@ export interface RepackPost {
   topMonthlyRank?: number;
   source?: string;
   topYearlyRank?: number;
+  isHypervisor?: boolean;
 }
 
 /**

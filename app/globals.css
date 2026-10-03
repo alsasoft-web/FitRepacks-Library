@@ -1,5 +1,74 @@
 @import url("https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Fira+Code:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700;800&display=swap");
 
+[class^="icon-"],
+[class*=" icon-"] {
+  font-family: "icomoon" !important;
+  speak: never;
+  font-style: normal;
+  font-weight: normal;
+  font-variant: normal;
+  text-transform: none;
+  line-height: 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  display: inline-block;
+}
+
+.icon-outfit:before {
+  content: "\e900";
+}
+.icon-stunt_jump:before {
+  content: "\e901";
+}
+.icon-wanted_poster:before {
+  content: "\e902";
+}
+.icon-character:before {
+  content: "\e903";
+}
+.icon-comic:before {
+  content: "\e904";
+}
+.icon-easter_egg:before {
+  content: "\e905";
+}
+.icon-hidden_car:before {
+  content: "\e906";
+}
+.icon-miscellaneous:before {
+  content: "\e907";
+}
+.icon-mystery_fox:before {
+  content: "\e908";
+}
+.icon-point_of_interest:before {
+  content: "\e909";
+}
+.icon-post_card:before {
+  content: "\e90a";
+}
+.icon-pulp:before {
+  content: "\e90b";
+}
+.icon-story_mission:before {
+  content: "\e90c";
+}
+.icon-cigarette_card:before {
+  content: "\e90d";
+}
+.icon-gas_station:before {
+  content: "\e90e";
+}
+.icon-note:before {
+  content: "\e90f";
+}
+.icon-meds:before {
+  content: "\e910";
+}
+.icon-side_mission:before {
+  content: "\e911";
+}
+
 html,
 body {
   color: var(--mantine-color-text);
@@ -131,6 +200,14 @@ h3,
   background: var(--mantine-color-default-hover);
 }
 
+.sidebar-nav-btn {
+  color: var(--mantine-color-text);
+}
+
+.sidebar-nav-btn:hover {
+  background-color: var(--mantine-color-default-hover) !important;
+}
+
 /* Circular Ripple View Transition API CSS Rules */
 ::view-transition-old(root),
 ::view-transition-new(root) {
@@ -170,3 +247,25 @@ h3,
   background-color: #e81123 !important;
   color: #ffffff !important;
 }
+
+/* Page & Tab Smooth Fade Transitions */
+.tab-content-fade {
+  animation: tabFadeIn 160ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: opacity, transform;
+}
+
+@keyframes tabFadeIn {
+  from {
+    opacity: 0.82;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.library-grid-container {
+  contain: content;
+}
+

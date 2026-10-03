@@ -2,7 +2,6 @@
 
 import React from "react";
 import { Game, ActiveTab, ViewMode } from "../../lib/types";
-import { CachedImage } from "../common/CachedImage";
 import { toggleThemeWithRipple } from "../../lib/themeRipple";
 import {
   Stack,
@@ -42,7 +41,7 @@ import {
   Filter,
   Pin,
 } from "lucide-react";
-import { useOnlineStatus } from "../../lib/useOnlineStatus";
+import { useNetwork } from "@mantine/hooks";
 
 interface SidebarProps {
   activeTab: ActiveTab;
@@ -67,7 +66,7 @@ interface SidebarProps {
   onOpenSettings?: () => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({
+export const Sidebar: React.FC<SidebarProps> = React.memo(({
   activeTab,
   setActiveTab,
   gameCount,
@@ -88,7 +87,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   activeGameId,
   onOpenSettings,
 }) => {
-  const isOnline = useOnlineStatus();
+  const { online: isOnline = true } = useNetwork();
   const { colorScheme, toggleColorScheme } = useMantineColorScheme();
   const computedColorScheme = useComputedColorScheme("dark", {
     getInitialValueInEffect: true,
@@ -101,6 +100,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setMounted(true);
   }, []);
 
+  const categorySelectData = React.useMemo(() => {
+    let installed = 0;
+    let completed = 0;
+    let wishlist = 0;
+    let favorites = 0;
+    for (let i = 0; i < allGames.length; i++) {
+      const g = allGames[i];
+      if (g.isInstalled) installed++;
+      if (g.isCompleted) completed++;
+      if (g.isWishlisted) wishlist++;
+      if (g.isFavorite) favorites++;
+    }
+    return [
+      { label: `All (${allGames.length || gameCount})`, value: "all" },
+      { label: `Installed (${installed})`, value: "installed" },
+      { label: `Completed (${completed})`, value: "completed" },
+      { label: `Wishlist (${wishlist})`, value: "wishlist" },
+      { label: `Favorites (${favorites})`, value: "favorites" },
+    ];
+  }, [allGames, gameCount]);
+
   const navItems: {
     id: ActiveTab;
     label: string;
@@ -108,7 +128,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     badge?: string;
     badgeColor?: string;
     isLocked?: boolean;
-  }[] = [
+  }[] = React.useMemo(() => [
     {
       id: "library",
       label: "Library",
@@ -141,7 +161,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: "Downloads",
       icon: <Download size={20} />,
     },
-  ];
+  ], [gameCount, isOnline]);
 
   const showIntegratedList = viewMode === "list";
 
@@ -208,32 +228,38 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   setActiveTab(item.id);
                 }}
                 p="xs"
-                style={(theme) => ({
-                  borderRadius: theme.radius.md,
+                className={isActive ? undefined : "sidebar-nav-btn"}
+                style={{
+                  borderRadius: 8,
                   backgroundColor: isActive
-                    ? "var(--mantine-color-blue-9)"
+                    ? "var(--mantine-color-blue-filled)"
                     : "transparent",
                   border: isActive
-                    ? "1px solid var(--mantine-color-blue-7)"
+                    ? "1px solid var(--mantine-color-blue-filled)"
                     : "1px solid transparent",
                   opacity: item.isLocked ? 0.55 : 1,
                   cursor: item.isLocked ? "not-allowed" : "pointer",
                   transition: "all 150ms ease",
-                })}
+                  width: "100%",
+                }}
               >
-                <Group justify="space-between">
-                  <Group gap="sm">
+                <Group justify="space-between" wrap="nowrap">
+                  <Group gap="sm" wrap="nowrap">
                     <ThemeIcon
-                      variant={isActive ? "filled" : "subtle"}
-                      color={item.isLocked ? "red" : isActive ? "blue" : "dark.2"}
+                      variant={isActive ? "filled" : "transparent"}
+                      color={item.isLocked ? "red" : isActive ? "blue" : undefined}
                       size="sm"
+                      style={{
+                        backgroundColor: "transparent",
+                        color: isActive ? "#ffffff" : "var(--mantine-color-text)",
+                      }}
                     >
                       {item.icon}
                     </ThemeIcon>
                     <Text
                       size="sm"
                       fw={isActive ? 700 : 500}
-                      c={item.isLocked ? "dimmed" : isActive ? "white" : ""}
+                      c={item.isLocked ? "dimmed" : isActive ? "white" : "var(--mantine-color-text)"}
                     >
                       {item.label}
                     </Text>
@@ -241,8 +267,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   {item.badge && (
                     <Badge
                       size="xs"
-                      color={item.badgeColor || (isActive ? "blue" : "gray")}
-                      variant={item.isLocked ? "filled" : isActive ? "filled" : "light"}
+                      color={item.badgeColor || (isActive ? "white" : "gray")}
+                      variant={item.isLocked ? "filled" : isActive ? "outline" : "light"}
+                      style={isActive ? { color: "#ffffff", borderColor: "rgba(255, 255, 255, 0.4)" } : undefined}
                     >
                       {item.badge}
                     </Badge>
@@ -271,7 +298,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Integrated Game List in Sidebar for List View Mode */}
         {showIntegratedList && (
           <Stack gap={6} style={{ flex: 1, minHeight: 0, marginTop: 4 }}>
-            <Divider color="dark.5" my={2} />
+            <Divider color={isDark ? "dark.5" : "gray.3"} my={2} />
             <Group justify="space-between" align="center" px="xs">
               <Text size="xs" fw={700} c="dimmed" tt="uppercase">
                 Games ({games.length})
@@ -314,25 +341,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   size="xs"
                   value={categoryFilter || "all"}
                   onChange={onCategoryFilterChange}
-                  data={[
-                    { label: `All (${allGames.length || gameCount})`, value: "all" },
-                    {
-                      label: `Installed (${allGames.filter((g) => Boolean(g.isInstalled)).length})`,
-                      value: "installed",
-                    },
-                    {
-                      label: `Completed (${allGames.filter((g) => Boolean(g.isCompleted)).length})`,
-                      value: "completed",
-                    },
-                    {
-                      label: `Wishlist (${allGames.filter((g) => g.isWishlisted).length})`,
-                      value: "wishlist",
-                    },
-                    {
-                      label: `Favorites (${allGames.filter((g) => Boolean(g.isFavorite)).length})`,
-                      value: "favorites",
-                    },
-                  ]}
+                  data={categorySelectData}
                   radius="md"
                   leftSection={<Filter size={13} color="var(--mantine-color-dimmed)" />}
                   comboboxProps={{ shadow: "md", transitionProps: { transition: "pop", duration: 150 } }}
@@ -405,13 +414,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       }}
                     >
                       <Group gap="xs" wrap="nowrap">
-                        <CachedImage
+                        <Image
                           src={g.coverUrl}
                           w={28}
                           h={38}
                           radius="xs"
                           fit="cover"
                           fallbackSrc="https://placehold.co/30x40/141517/3b82f6?text=Cover"
+                          loading="lazy"
+                          decoding="async"
                         />
                         <Stack gap={1} style={{ flex: 1, minWidth: 0 }}>
                           <Group
@@ -525,22 +536,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
         )}
       </Stack>
 
-      {/* Footer Info & Theme Toggle */}
+      {/* Footer Info & Settings */}
       <Stack gap="xs" mt="xs">
-        <Divider color="dark.4" />
+        <Divider color="var(--mantine-color-default-border)" />
         <Group justify="space-between" align="center" p="xs">
           <Tooltip label="Settings & Download Path">
             <ActionIcon
               variant="subtle"
               color="gray"
-              size="sm"
+              size="md"
+              radius="md"
               onClick={onOpenSettings}
+              aria-label="Settings"
             >
-              <Settings size={16} color="#909296" />
+              <Settings size={18} />
             </ActionIcon>
           </Tooltip>
         </Group>
       </Stack>
     </Box>
   );
-};
+});

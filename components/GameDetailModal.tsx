@@ -27,7 +27,7 @@ import {
   isHighestVersion,
   compareReleaseSources,
 } from "../lib/gameLinker";
-import { HoldToUninstallButton } from "./HoldToUninstallButton";
+import { HoldToConfirmButton } from "./HoldToConfirmButton";
 import { SourceLinkerModal } from "./library/SourceLinkerModal";
 import { ImageLightboxModal } from "./common/ImageLightboxModal";
 import { openInBrowser } from "../lib/openUrl";
@@ -111,7 +111,9 @@ export function formatPlaytime(
   const recordedMinutes =
     game.playtimeMinutes !== undefined && game.playtimeMinutes > 0
       ? game.playtimeMinutes
-      : (game.hoursPlayed ? game.hoursPlayed * 60 : 0);
+      : game.hoursPlayed
+        ? game.hoursPlayed * 60
+        : 0;
   const recordedSeconds = Math.round(recordedMinutes * 60);
   const totalSeconds = recordedSeconds + (isPlaying ? currentTimerSeconds : 0);
 
@@ -235,7 +237,10 @@ export const GameDetailModalComponent: React.FC<GameDetailModalProps> = ({
     setActiveTab("overview");
 
     let isMounted = true;
-    if (game.exePath && (!game.installedVersion || !game.installedLastModified)) {
+    if (
+      game.exePath &&
+      (!game.installedVersion || !game.installedLastModified)
+    ) {
       (async () => {
         let ver = game.installedVersion;
         let lastModIso = game.installedLastModified;
@@ -384,12 +389,10 @@ export const GameDetailModalComponent: React.FC<GameDetailModalProps> = ({
         : 0;
 
     const isFitgirlHighest = Boolean(
-      fitgirlVer &&
-      (fgVsSr > 0 || (isLinkedFitgirl && !isLinkedSteamrip)),
+      fitgirlVer && (fgVsSr > 0 || (isLinkedFitgirl && !isLinkedSteamrip)),
     );
     const isSteamripHighest = Boolean(
-      steamripVer &&
-      (fgVsSr < 0 || (isLinkedSteamrip && !isLinkedFitgirl)),
+      steamripVer && (fgVsSr < 0 || (isLinkedSteamrip && !isLinkedFitgirl)),
     );
     const isInstalledHighest = Boolean(
       installedVer &&
@@ -407,11 +410,7 @@ export const GameDetailModalComponent: React.FC<GameDetailModalProps> = ({
       isSteamripHighest,
       isInstalledHighest,
     };
-  }, [
-    currentGame,
-    isLinkedFitgirl,
-    isLinkedSteamrip,
-  ]);
+  }, [currentGame, isLinkedFitgirl, isLinkedSteamrip]);
 
   const cleanedSummary = useMemo(
     () => cleanGameSummary(currentGame.summary),
@@ -728,9 +727,15 @@ export const GameDetailModalComponent: React.FC<GameDetailModalProps> = ({
                           : undefined,
                       }}
                     >
-                      {versionComparison.installedVer.toLowerCase().startsWith("build") ||
-                      versionComparison.installedVer.toLowerCase().startsWith("version") ||
-                      versionComparison.installedVer.toLowerCase().startsWith("v")
+                      {versionComparison.installedVer
+                        .toLowerCase()
+                        .startsWith("build") ||
+                      versionComparison.installedVer
+                        .toLowerCase()
+                        .startsWith("version") ||
+                      versionComparison.installedVer
+                        .toLowerCase()
+                        .startsWith("v")
                         ? versionComparison.installedVer
                         : `Installed: ${versionComparison.installedVer}`}
                     </Badge>
@@ -779,7 +784,11 @@ export const GameDetailModalComponent: React.FC<GameDetailModalProps> = ({
                   <Group gap={4}>
                     <Clock size={15} color="#38d9a9" />
                     <Text size="xs" fw={700} c="teal.3" ff="monospace">
-                      {formatPlaytime(currentGame, isPlaying, activeTimerSeconds)}
+                      {formatPlaytime(
+                        currentGame,
+                        isPlaying,
+                        activeTimerSeconds,
+                      )}
                     </Text>
                   </Group>
                   {currentGame.developer && (
@@ -800,7 +809,9 @@ export const GameDetailModalComponent: React.FC<GameDetailModalProps> = ({
                     <Badge
                       size="xs"
                       color="pink"
-                      variant={versionComparison.isFitgirlHighest ? "filled" : "dot"}
+                      variant={
+                        versionComparison.isFitgirlHighest ? "filled" : "dot"
+                      }
                       style={{
                         cursor: "pointer",
                         border: versionComparison.isFitgirlHighest
@@ -826,7 +837,9 @@ export const GameDetailModalComponent: React.FC<GameDetailModalProps> = ({
                     <Badge
                       size="xs"
                       color="cyan"
-                      variant={versionComparison.isSteamripHighest ? "filled" : "dot"}
+                      variant={
+                        versionComparison.isSteamripHighest ? "filled" : "dot"
+                      }
                       style={{
                         cursor: "pointer",
                         border: versionComparison.isSteamripHighest
@@ -859,7 +872,10 @@ export const GameDetailModalComponent: React.FC<GameDetailModalProps> = ({
             {primaryMagnet &&
               !currentGame.isInstalled &&
               (!currentGame.exePath || currentGame.exePath.trim() === "") && (
-                <Tooltip label="Download game files via Magnet Torrent" withArrow>
+                <Tooltip
+                  label="Download game files via Magnet Torrent"
+                  withArrow
+                >
                   <Button
                     size="sm"
                     color="grape"
@@ -1014,8 +1030,10 @@ export const GameDetailModalComponent: React.FC<GameDetailModalProps> = ({
             )}
 
             {onUninstall && currentGame.exePath && (
-              <HoldToUninstallButton
-                onUninstallConfirmed={() => {
+              <HoldToConfirmButton
+                label="HOLD TO UNINSTALL"
+                holdDurationMs={2000}
+                onConfirmed={() => {
                   onUninstall(currentGame.id);
                   onClose();
                 }}
@@ -1425,14 +1443,9 @@ export const GameDetailModalComponent: React.FC<GameDetailModalProps> = ({
                       <Stack gap="xs">
                         <Group gap="xs">
                           <DownloadCloud size={16} color="#38d9a9" />
-                          <Text
-                            size="xs"
-                            fw={700}
-                            c="dimmed"
-                            tt="uppercase"
-                          >
-                            Direct Mirrors & Filehosters (
-                            {directLinks.length}) · {hosters.length} Hosters
+                          <Text size="xs" fw={700} c="dimmed" tt="uppercase">
+                            Direct Mirrors & Filehosters ({directLinks.length})
+                            · {hosters.length} Hosters
                           </Text>
                         </Group>
 
@@ -1618,17 +1631,21 @@ export const GameDetailModalComponent: React.FC<GameDetailModalProps> = ({
                 </Text>
                 {(() => {
                   const sessions =
-                    currentGame.playSessions && currentGame.playSessions.length > 0
+                    currentGame.playSessions &&
+                    currentGame.playSessions.length > 0
                       ? deduplicatePlaySessions(currentGame.playSessions)
                       : currentGame.lastPlayed &&
-                          ((currentGame.playtimeMinutes !== undefined && currentGame.playtimeMinutes > 0) ||
-                            (currentGame.hoursPlayed !== undefined && currentGame.hoursPlayed > 0))
+                          ((currentGame.playtimeMinutes !== undefined &&
+                            currentGame.playtimeMinutes > 0) ||
+                            (currentGame.hoursPlayed !== undefined &&
+                              currentGame.hoursPlayed > 0))
                         ? [
                             {
                               id: "prev_session",
                               startTime: currentGame.lastPlayed,
                               durationMinutes:
-                                currentGame.playtimeMinutes !== undefined && currentGame.playtimeMinutes > 0
+                                currentGame.playtimeMinutes !== undefined &&
+                                currentGame.playtimeMinutes > 0
                                   ? currentGame.playtimeMinutes
                                   : (currentGame.hoursPlayed ?? 0) * 60,
                             },
@@ -1637,9 +1654,14 @@ export const GameDetailModalComponent: React.FC<GameDetailModalProps> = ({
 
                   if (sessions.length > 0) {
                     return (
-                      <Stack gap={6} style={{ maxHeight: 200, overflowY: "auto" }}>
+                      <Stack
+                        gap={6}
+                        style={{ maxHeight: 200, overflowY: "auto" }}
+                      >
                         {sessions.map((session, index) => {
-                          const sessionSecs = Math.round((session.durationMinutes || 0) * 60);
+                          const sessionSecs = Math.round(
+                            (session.durationMinutes || 0) * 60,
+                          );
                           const sessionDisplay =
                             sessionSecs < 3600
                               ? `${Math.floor(sessionSecs / 60)}m ${sessionSecs % 60}s`
@@ -1659,7 +1681,12 @@ export const GameDetailModalComponent: React.FC<GameDetailModalProps> = ({
                                 <Text size="xs" ff="monospace" c="dimmed">
                                   {new Date(session.startTime).toLocaleString()}
                                 </Text>
-                                <Text size="xs" ff="monospace" fw={700} c="teal.4">
+                                <Text
+                                  size="xs"
+                                  ff="monospace"
+                                  fw={700}
+                                  c="teal.4"
+                                >
                                   +{sessionDisplay}
                                 </Text>
                               </Group>

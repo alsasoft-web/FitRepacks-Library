@@ -22,15 +22,14 @@ import {
   isNewerVersion,
   compareReleaseSources,
 } from "../../lib/gameLinker";
-import { HoldToUninstallButton } from "../HoldToUninstallButton";
-import { CachedImage } from "../common/CachedImage";
+import { HoldToConfirmButton } from "../HoldToConfirmButton";
 import { SourceLinkerModal } from "./SourceLinkerModal";
 import { ImageLightboxModal } from "../common/ImageLightboxModal";
 import { openInBrowser } from "../../lib/openUrl";
 import { RepackUpdateLink } from "../../lib/repackTypes";
 import { isLinuxPlatform } from "../../lib/linuxRunner";
-import { useMapGenieMap, MAPGENIE_FMG_INJECTED_SCRIPT } from "../../lib/mapgenie";
-import { WebviewModal } from "../common/WebviewModal";
+import { useGameMap } from "../../lib/gameMaps";
+import { MapViewerModal } from "../maps";
 import {
   Title,
   Text,
@@ -52,6 +51,7 @@ import {
   Divider,
   ThemeIcon,
   Menu,
+  Image as MantineImage,
 } from "@mantine/core";
 import {
   Play,
@@ -366,7 +366,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
   const [isMapModalOpen, setIsMapModalOpen] = useState(false);
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
   const [selectedScreenshotIndex, setSelectedScreenshotIndex] = useState(0);
-  const mapGenieMap = useMapGenieMap(currentGame.title);
+  const { map: gameMap } = useGameMap(currentGame.title);
 
   const [isEditingExePath, setIsEditingExePath] = useState(false);
   const [exePathInput, setExePathInput] = useState(game.exePath || "");
@@ -634,7 +634,8 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
     if (currentGame.ignoredUpdateDate === postDate) return true;
     const ignTime = parseDateSafe(currentGame.ignoredUpdateDate);
     const postTime = parseDateSafe(postDate);
-    if (ignTime !== null && postTime !== null && ignTime >= postTime) return true;
+    if (ignTime !== null && postTime !== null && ignTime >= postTime)
+      return true;
     return false;
   };
 
@@ -698,24 +699,24 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
 
   const hasFitgirlUpdate = Boolean(
     currentGame.installedLastModified &&
-      currentGame.fitgirlUploadDate &&
-      !isIgnored(currentGame.fitgirlUploadDate) &&
-      !isGameUpToDateByDate(
-        currentGame.installedLastModified,
-        currentGame.fitgirlUploadDate,
-        10,
-      ),
+    currentGame.fitgirlUploadDate &&
+    !isIgnored(currentGame.fitgirlUploadDate) &&
+    !isGameUpToDateByDate(
+      currentGame.installedLastModified,
+      currentGame.fitgirlUploadDate,
+      10,
+    ),
   );
 
   const hasSteamripUpdate = Boolean(
     currentGame.installedLastModified &&
-      currentGame.steamripUploadDate &&
-      !isIgnored(currentGame.steamripUploadDate) &&
-      !isGameUpToDateByDate(
-        currentGame.installedLastModified,
-        currentGame.steamripUploadDate,
-        10,
-      ),
+    currentGame.steamripUploadDate &&
+    !isIgnored(currentGame.steamripUploadDate) &&
+    !isGameUpToDateByDate(
+      currentGame.installedLastModified,
+      currentGame.steamripUploadDate,
+      10,
+    ),
   );
 
   const displayInstalledVer = useMemo(() => {
@@ -745,13 +746,15 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
           overflow: "hidden",
         }}
       >
-        <CachedImage
+        <MantineImage
           src={bannerBackground}
           h="100%"
           w="100%"
           alt={currentGame.title}
           fit="cover"
           fallbackSrc={currentGame.coverUrl}
+          loading="lazy"
+          decoding="async"
           style={{
             transform: "scale(1.03)",
             filter: "brightness(0.65) saturate(1.1)",
@@ -819,11 +822,14 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
               background: "var(--mantine-color-dark-8)",
             }}
           >
-            <CachedImage
+            <MantineImage
               src={currentGame.coverUrl}
               h="100%"
               w="100%"
               fit="cover"
+              fallbackSrc="https://placehold.co/600x800/0f172a/3b82f6?text=No+Cover"
+              loading="lazy"
+              decoding="async"
             />
 
             {/* Poster Tag Overlay */}
@@ -832,7 +838,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                 pos="absolute"
                 bottom={8}
                 left={8}
-                right={mapGenieMap ? 38 : 8}
+                right={gameMap ? 38 : 8}
                 color="teal"
                 variant="filled"
                 size="xs"
@@ -845,7 +851,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                 pos="absolute"
                 bottom={8}
                 left={8}
-                right={mapGenieMap ? 38 : 8}
+                right={gameMap ? 38 : 8}
                 color="blue"
                 variant="filled"
                 size="xs"
@@ -858,7 +864,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                 pos="absolute"
                 bottom={8}
                 left={8}
-                right={mapGenieMap ? 38 : 8}
+                right={gameMap ? 38 : 8}
                 color="dark"
                 variant="filled"
                 size="xs"
@@ -868,8 +874,8 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
               </Badge>
             )}
 
-            {/* MapGenie Interactive Map Button Overlay on Hero Poster */}
-            {mapGenieMap && (
+            {/* Interactive Map Button Overlay on Hero Poster */}
+            {gameMap && (
               <Box
                 pos="absolute"
                 bottom={8}
@@ -877,11 +883,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                 style={{ zIndex: 4 }}
                 onClick={(e) => e.stopPropagation()}
               >
-                <Tooltip
-                  label="Open Interactive Map (MapGenie)"
-                  position="top"
-                  withArrow
-                >
+                <Tooltip label="Open Interactive Map" position="top" withArrow>
                   <ActionIcon
                     variant="filled"
                     radius="xl"
@@ -900,7 +902,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                       setIsMapModalOpen(true);
                     }}
                   >
-                    <MapPin size={12} strokeWidth={2.2} />
+                    <MapPin size={13} />
                   </ActionIcon>
                 </Tooltip>
               </Box>
@@ -972,14 +974,17 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                     size="sm"
                     leftSection={<Sparkles size={11} />}
                   >
-                    Update in FitGirl ({currentGame.fitgirlUploadDate || "Available"})
+                    Update in FitGirl (
+                    {currentGame.fitgirlUploadDate || "Available"})
                   </Badge>
                   <Tooltip label="Ignore this update">
                     <ActionIcon
                       size="xs"
                       variant="subtle"
                       color="gray"
-                      onClick={() => handleIgnoreUpdate(currentGame.fitgirlUploadDate)}
+                      onClick={() =>
+                        handleIgnoreUpdate(currentGame.fitgirlUploadDate)
+                      }
                     >
                       <EyeOff size={12} />
                     </ActionIcon>
@@ -995,14 +1000,17 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                     size="sm"
                     leftSection={<Sparkles size={11} />}
                   >
-                    Update in SteamRIP ({currentGame.steamripUploadDate || "Available"})
+                    Update in SteamRIP (
+                    {currentGame.steamripUploadDate || "Available"})
                   </Badge>
                   <Tooltip label="Ignore this update">
                     <ActionIcon
                       size="xs"
                       variant="subtle"
                       color="gray"
-                      onClick={() => handleIgnoreUpdate(currentGame.steamripUploadDate)}
+                      onClick={() =>
+                        handleIgnoreUpdate(currentGame.steamripUploadDate)
+                      }
                     >
                       <EyeOff size={12} />
                     </ActionIcon>
@@ -1010,20 +1018,22 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                 </Group>
               )}
 
-              {currentGame.ignoredUpdateDate && !hasFitgirlUpdate && !hasSteamripUpdate && (
-                <Tooltip label="Update checking is ignored for this release. Click to restore.">
-                  <Badge
-                    color="gray"
-                    variant="light"
-                    size="sm"
-                    leftSection={<RotateCcw size={11} />}
-                    style={{ cursor: "pointer" }}
-                    onClick={handleUnignoreUpdate}
-                  >
-                    Update Ignored (Restore)
-                  </Badge>
-                </Tooltip>
-              )}
+              {currentGame.ignoredUpdateDate &&
+                !hasFitgirlUpdate &&
+                !hasSteamripUpdate && (
+                  <Tooltip label="Update checking is ignored for this release. Click to restore.">
+                    <Badge
+                      color="gray"
+                      variant="light"
+                      size="sm"
+                      leftSection={<RotateCcw size={11} />}
+                      style={{ cursor: "pointer" }}
+                      onClick={handleUnignoreUpdate}
+                    >
+                      Update Ignored (Restore)
+                    </Badge>
+                  </Tooltip>
+                )}
             </Group>
 
             {/* Game Title */}
@@ -1134,7 +1144,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                   ↗
                 </Badge>
               )}
-              {mapGenieMap && (
+              {gameMap && (
                 <Badge
                   size="xs"
                   color="teal"
@@ -1146,7 +1156,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                   leftSection={<MapPin size={10} />}
                   onClick={() => setIsMapModalOpen(true)}
                 >
-                  MapGenie Map ↗
+                  Interactive Map ↗
                 </Badge>
               )}
             </Group>
@@ -1308,12 +1318,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
             {/* Secondary Controls Group */}
             <Group gap="xs" wrap="wrap">
               {/* Combined Status Dropdown Menu */}
-              <Menu
-                shadow="md"
-                width={180}
-                position="bottom-start"
-                radius="md"
-              >
+              <Menu shadow="md" width={180} position="bottom-start" radius="md">
                 <Menu.Target>
                   <Button
                     size="sm"
@@ -1402,7 +1407,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                 </Menu.Dropdown>
               </Menu>
 
-              {mapGenieMap && (
+              {gameMap && (
                 <Button
                   size="sm"
                   variant="light"
@@ -1444,8 +1449,10 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
               )}
 
               {currentGame.exePath && onUninstall && (
-                <HoldToUninstallButton
-                  onUninstallConfirmed={() => {
+                <HoldToConfirmButton
+                  label="HOLD TO UNINSTALL"
+                  holdDurationMs={2000}
+                  onConfirmed={() => {
                     onUninstall(currentGame.id);
                     if (onCloseModal) onCloseModal();
                   }}
@@ -1741,8 +1748,10 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                             >
                               Open Folder
                             </Button>
-                            <HoldToUninstallButton
-                              onUninstallConfirmed={() =>
+                            <HoldToConfirmButton
+                              label="HOLD TO UNINSTALL"
+                              holdDurationMs={2000}
+                              onConfirmed={() =>
                                 onUninstall && onUninstall(currentGame.id)
                               }
                             />
@@ -2408,11 +2417,14 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                                 setIsLightboxOpen(true);
                               }}
                             >
-                              <CachedImage
+                              <MantineImage
                                 src={img}
                                 h={140}
                                 w="100%"
                                 fit="cover"
+                                fallbackSrc="https://placehold.co/600x400/0f172a/3b82f6?text=Screenshot"
+                                loading="lazy"
+                                decoding="async"
                                 style={{
                                   transition: "transform 200ms ease",
                                 }}
@@ -2502,18 +2514,19 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
         }}
       />
 
-      {/* MapGenie Interactive Map Webview Modal */}
-      {mapGenieMap && (
-        <WebviewModal
+      {/* Interactive Map Viewer Modal */}
+      {gameMap && (
+        <MapViewerModal
           opened={isMapModalOpen}
           onClose={() => setIsMapModalOpen(false)}
-          url={mapGenieMap.url}
-          title={`${currentGame.title} - MapGenie Interactive Map`}
-          webviewLabel={`mapgenie-${mapGenieMap.slug}`}
-          initializationScript={MAPGENIE_FMG_INJECTED_SCRIPT}
-          injectedScript={MAPGENIE_FMG_INJECTED_SCRIPT}
-          fullScreen
-          readOnlyUrl
+          gameSlug={
+            gameMap.game_slug ||
+            (gameMap.slug.includes("--")
+              ? gameMap.slug.split("--")[0]
+              : gameMap.slug)
+          }
+          mapSlug={gameMap.map_slug}
+          gameTitle={currentGame.title}
         />
       )}
 

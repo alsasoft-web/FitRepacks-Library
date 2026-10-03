@@ -20,6 +20,7 @@ import {
   Modal,
   Alert,
   Divider,
+  SegmentedControl,
 } from "@mantine/core";
 import {
   Download,
@@ -50,12 +51,14 @@ import {
   useDownloadQueueStore,
   QueuedGame,
   MagnetDownloadItem,
+  isTorrentAlreadyInQueue,
 } from "../lib/downloadQueueStore";
 import { HoldToConfirmButton } from "./HoldToConfirmButton";
 
 export const DownloadsView: React.FC = () => {
   const [magnetInput, setMagnetInput] = useState<string>("");
   const [expandedGames, setExpandedGames] = useState<Record<string, boolean>>({});
+  const [activeFilesFilter, setActiveFilesFilter] = useState<Record<string, boolean>>({});
   const [deleteTarget, setDeleteTarget] = useState<MagnetDownloadItem | null>(null);
 
   const {
@@ -373,7 +376,16 @@ export const DownloadsView: React.FC = () => {
 
   const handleAddMagnet = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!magnetInput.trim()) return;
+    const cleanMagnet = magnetInput.trim();
+    if (!cleanMagnet) return;
+
+    const existing = isTorrentAlreadyInQueue(magnetDownloads, {
+      magnetUrl: cleanMagnet,
+    });
+    if (existing) {
+      setMagnetInput("");
+      return;
+    }
 
     let infoHash: string | undefined = undefined;
     const downloadDir = "C:\\Games\\Downloads";
@@ -381,7 +393,7 @@ export const DownloadsView: React.FC = () => {
     if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
       try {
         infoHash = await invoke<string>("start_torrent_download", {
-          magnetUrl: magnetInput.trim(),
+          magnetUrl: cleanMagnet,
           downloadDir,
           selectedFileIndices: null,
         });
@@ -391,12 +403,12 @@ export const DownloadsView: React.FC = () => {
     }
 
     addMagnetDownload({
-      title: magnetInput.startsWith("magnet:")
+      title: cleanMagnet.startsWith("magnet:")
         ? decodeURIComponent(
-            magnetInput.split("dn=")[1]?.split("&")[0] || "Direct Torrent Download",
+            cleanMagnet.split("dn=")[1]?.split("&")[0] || "Direct Torrent Download",
           ).replace(/\+/g, " ")
         : "Manual Torrent Download",
-      magnetUrl: magnetInput,
+      magnetUrl: cleanMagnet,
       size: "Dynamic",
       downloadDir,
       infoHash: infoHash && infoHash !== "list_only" ? infoHash : undefined,
@@ -755,14 +767,56 @@ export const DownloadsView: React.FC = () => {
                       mt="xs"
                     >
                       <Stack gap={6}>
-                        <Text size="xs" fw={700} c="dimmed" mb={4}>
-                          Selective Files Breakdown:
-                        </Text>
-                        {item.files.map((file) => {
-                          const filePct = file.progressPercent ?? (file.status === "completed" ? 100 : 0);
-                          return (
-                            <Paper
-                              key={file.id}
+                        <Group justify="space-between" align="center" mb={4} wrap="wrap" gap="xs">
+                          <Text size="xs" fw={700} c="dimmed">
+                            Selective Files Breakdown:
+                          </Text>
+
+                          <SegmentedControl
+                            size="xs"
+                            value={activeFilesFilter[item.id] ? "active" : "all"}
+                            onChange={(val) =>
+                              setActiveFilesFilter((prev) => ({
+                                ...prev,
+                                [item.id]: val === "active",
+                              }))
+                            }
+                            data={[
+                              {
+                                label: `All Files (${item.files.length})`,
+                                value: "all",
+                              },
+                              {
+                                label: `Active Only (${item.files.filter((f) => f.isSelected).length})`,
+                                value: "active",
+                              },
+                            ]}
+                            color="brandCyan"
+                            radius="md"
+                          />
+                        </Group>
+
+                        {(() => {
+                          const isOnlyActive = Boolean(activeFilesFilter[item.id]);
+                          const filteredFiles = item.files.filter(
+                            (file) => !isOnlyActive || file.isSelected,
+                          );
+
+                          if (filteredFiles.length === 0) {
+                            return (
+                              <Paper p="sm" bg="var(--mantine-color-body)" radius="xs">
+                                <Text size="xs" c="dimmed" ta="center">
+                                  No active files selected for download.
+                                </Text>
+                              </Paper>
+                            );
+                          }
+
+                          return filteredFiles.map((file) => {
+                            const filePct = file.progressPercent ?? (file.status === "completed" ? 100 : 0);
+                            return (
+                              <Paper
+                                key={file.id}
                               p="xs"
                               radius="xs"
                               bg={file.isSelected ? "var(--mantine-color-default)" : "var(--mantine-color-body)"}
@@ -885,8 +939,9 @@ export const DownloadsView: React.FC = () => {
                               </Stack>
                             </Paper>
                           );
-                        })}
-                      </Stack>
+                        });
+                      })()}
+                    </Stack>
                     </Paper>
                   )}
                 </Stack>

@@ -3,15 +3,37 @@ import { persist, createJSONStorage, StateStorage } from "zustand/middleware";
 
 import { getAppSetting, saveAppSetting } from "./db";
 
+let saveTimeout: ReturnType<typeof setTimeout> | null = null;
+let pendingSaveValue: string | null = null;
+let pendingSaveKey: string | null = null;
+
 const sqliteStorage: StateStorage = {
   getItem: async (name: string): Promise<string | null> => {
     return await getAppSetting(name);
   },
   setItem: async (name: string, value: string): Promise<void> => {
-    await saveAppSetting(name, value);
+    pendingSaveKey = name;
+    pendingSaveValue = value;
+    if (saveTimeout) clearTimeout(saveTimeout);
+    saveTimeout = setTimeout(async () => {
+      if (pendingSaveKey && pendingSaveValue !== null) {
+        const key = pendingSaveKey;
+        const val = pendingSaveValue;
+        pendingSaveKey = null;
+        pendingSaveValue = null;
+        try {
+          await saveAppSetting(key, val);
+        } catch (_) {}
+      }
+    }, 2000);
   },
   removeItem: async (name: string): Promise<void> => {
-    await saveAppSetting(name, "");
+    if (saveTimeout) clearTimeout(saveTimeout);
+    pendingSaveKey = null;
+    pendingSaveValue = null;
+    try {
+      await saveAppSetting(name, "");
+    } catch (_) {}
   },
 };
 
@@ -72,6 +94,35 @@ export interface MagnetDownloadItem {
   addedAt: string;
   files?: QueuedFile[];
   peers?: number;
+}
+
+export function extractHashFromMagnet(url?: string): string {
+  if (!url) return "";
+  const match = url.match(/xt=urn:btih:([a-zA-Z0-9]+)/i);
+  return match ? match[1].toLowerCase() : "";
+}
+
+export function isTorrentAlreadyInQueue(
+  downloads: MagnetDownloadItem[],
+  item: { infoHash?: string; magnetUrl?: string; title?: string },
+): MagnetDownloadItem | undefined {
+  const itemHash = (item.infoHash || extractHashFromMagnet(item.magnetUrl))?.toLowerCase().trim();
+  const itemTitle = item.title?.trim().toLowerCase();
+  const itemUrl = item.magnetUrl?.trim().toLowerCase();
+
+  return downloads.find((d) => {
+    const dHash = (d.infoHash || extractHashFromMagnet(d.magnetUrl))?.toLowerCase().trim();
+    if (itemHash && dHash && itemHash === dHash) {
+      return true;
+    }
+    if (itemUrl && d.magnetUrl && itemUrl === d.magnetUrl.trim().toLowerCase()) {
+      return true;
+    }
+    if (itemTitle && d.title && itemTitle === d.title.trim().toLowerCase()) {
+      return true;
+    }
+    return false;
+  });
 }
 
 interface LiveAggregateStats {
@@ -246,8 +297,21 @@ export const useDownloadQueueStore = create<DownloadQueueState>()(
         })),
 
       addMagnetDownload: (item) => {
-        const id = `dl-${Date.now()}`;
         const downloads = useDownloadQueueStore.getState().magnetDownloads;
+        const existing = isTorrentAlreadyInQueue(downloads, item);
+        if (existing) {
+          // Torrent is already in queue - do not duplicate
+          if (item.infoHash && !existing.infoHash) {
+            set((state) => ({
+              magnetDownloads: state.magnetDownloads.map((d) =>
+                d.id === existing.id ? { ...d, infoHash: item.infoHash } : d,
+              ),
+            }));
+          }
+          return existing.id;
+        }
+
+        const id = `dl-${Date.now()}`;
         const activeCount = downloads.filter(
           (d) => d.status === "downloading",
         ).length;
@@ -551,7 +615,31 @@ export async function resumeActiveDownloadsOnStartup(): Promise<void> {
     return;
 
   const state = useDownloadQueueStore.getState();
-  const activeDownloads = state.magnetDownloads.filter(
+
+  // Deduplicate any duplicate torrents loaded from storage
+  const seenHashes = new Set<string>();
+  const seenTitles = new Set<string>();
+  const dedupedDownloads = state.magnetDownloads.filter((dl) => {
+    const hash = (dl.infoHash || extractHashFromMagnet(dl.magnetUrl))?.toLowerCase().trim();
+    if (hash) {
+      if (seenHashes.has(hash)) return false;
+      seenHashes.add(hash);
+      return true;
+    }
+    const cleanTitle = dl.title?.trim().toLowerCase();
+    if (cleanTitle) {
+      if (seenTitles.has(cleanTitle)) return false;
+      seenTitles.add(cleanTitle);
+      return true;
+    }
+    return true;
+  });
+
+  if (dedupedDownloads.length !== state.magnetDownloads.length) {
+    useDownloadQueueStore.setState({ magnetDownloads: dedupedDownloads });
+  }
+
+  const activeDownloads = (dedupedDownloads || []).filter(
     (dl) => dl.status === "downloading" && dl.magnetUrl,
   );
 

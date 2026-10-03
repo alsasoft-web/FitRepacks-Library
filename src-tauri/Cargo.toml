@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "1.0.16"
+version = "1.1.0"
 description = "A Tauri App"
 authors = ["you"]
 license = ""
@@ -24,11 +24,11 @@ tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-fs = "2"
-tauri-plugin-http = "2"
+tauri-plugin-http = { version = "2", features = ["unsafe-headers"] }
 tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
-reqwest = { version = "0.12", features = ["blocking", "json"] }
+reqwest = { version = "0.12", features = ["blocking", "json", "gzip", "brotli", "deflate"] }
 base64 = "0.22"
 dirs = "5"
 dotenvy = "0.15"
@@ -49,6 +49,8 @@ windows = { version = "0.58", features = [
     "Win32_UI_WindowsAndMessaging",
     "Win32_Graphics_Gdi",
     "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_ProcessStatus",
     "Win32_System_Threading",
     "Win32_Foundation",
 ] }
