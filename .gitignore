@@ -17,8 +17,8 @@ DS4Windows
 mantine-llms.md
 pb_hooks
 scripts/
-maps/
-maps
+/maps/
+/maps/
 
 # Runtime data
 pids
@@ -142,4 +142,5 @@ dist
 .DS_Store
 src-tauri/updater.key
 src-tauri/target/
-maps/
+/maps/
+!components/maps/
