@@ -364,6 +364,8 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
                     { label: "Release (Oldest)", value: "release-asc" },
                     { label: "Date Added (Newest)", value: "added-desc" },
                     { label: "Date Added (Oldest)", value: "added-asc" },
+                    { label: "Size (Largest)", value: "size-desc" },
+                    { label: "Size (Smallest)", value: "size-asc" },
                     { label: "Name (A-Z)", value: "title-asc" },
                     { label: "Highest Rating", value: "rating-desc" },
                   ]}

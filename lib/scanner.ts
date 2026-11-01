@@ -7,6 +7,8 @@ const BINARY_SUBFOLDERS = new Set([
   "win64",
   "win32",
   "x64",
+  "x64_plus",
+  "x64_legacy",
   "x86",
   "win",
   "system",

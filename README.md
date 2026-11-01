@@ -22,15 +22,73 @@ Track total hours, completion status, favorite titles, and genre breakdowns over
 
 ![Analytics & Telemetry](assets/iamge1.png)
 
+### Game Maps Catalog
+
+Browse hundreds of interactive game maps with location counts, quick regional maps, and offline support.
+
+![Game Maps Catalog](assets/image4.png)
+
+### Interactive Game Map Viewer & Tracker
+
+Full-featured interactive game map with categorized location markers, collectible tracking, instant marker search, offline tile caching, and controller support.
+
+![Interactive Game Map](assets/image5.png)
+
 ## Core Features
 
 - Local Library Management: Add installed games manually or scan directories. Supports custom executable paths, working directories, launch parameters, and uninstaller detection.
 - Catalog Browsing: Search and filter thousands of repack releases (FitGirl, SteamRIP) with instant magnet/torrent links and mirrors.
 - Metadata & Media Fetching: Pull official game summaries, genres, cover art, release dates, and screenshots using IGDB and Steam APIs.
+- Interactive Game Maps: Integrated catalog of 840+ interactive maps across 270+ games with marker categorization, collectible progress tracking, and offline tile caching.
+- In-Game Overlay & Controller Support: Open map overlays on top of running games without alt-tabbing via global controller/keyboard shortcuts (`Select + Start`, `F9`), featuring twin-stick navigation, magnetic marker snapping, trigger zoom, and full gamepad UI control.
 - Playtime Tracking: Automatic session timing and stats tracking for every game launched through the client.
 - Built-in Download Tracking: Monitor downloads and torrent tasks directly within the app.
 - System Tray Integration: Background minimizes to tray with quick-launch shortcuts and active download summaries.
 - Local-First Architecture: All data is saved to a local SQLite database by default. Optional AlsaBase integration allows cross-device synchronization.
+
+## Interactive Game Maps & Controller Integration
+
+FitRepacks Library includes an integrated interactive game map engine, supporting hundreds of popular titles (e.g. _The Witcher 3_, _Cyberpunk 2077_, _Assassin's Creed_, _Elden Ring_, _Red Dead Redemption 2_, _Grand Theft Auto_, and many more).
+
+### Key Map Capabilities
+
+- **Massive Catalog**: Direct access to 840+ regional maps across 270+ games with rich points of interest, quests, collectibles, and secrets.
+- **Progress & Collectible Tracking**: Mark individual pins as collected/completed. The client persists your completion status locally and displays progress tallies per category and overall completion percentages.
+- **Offline Map Mode**: Save map metadata, icon sprite sheets, and tile hierarchies directly to disk (`maps/` directory) for completely offline access during gameplay sessions.
+- **In-Game Overlay Window**: Launch maps inside a borderless, always-on-top floating window (`/map-overlay`) designed to hover over running games. The overlay automatically syncs with your currently launched game title and can be pinned, resized, or minimized.
+
+### How Maps Work with Controllers
+
+The application provides native, full-featured gamepad navigation, allowing you to control the map entirely with an **Xbox**, **PlayStation (DualShock / DualSense)**, or generic game controller without needing a keyboard or mouse.
+
+#### 1. System-Wide In-Game Shortcut (Rust Native Hook)
+
+The Tauri Rust backend runs a low-latency global input listener using **XInput** and **DirectInput / winmm**. This detects controller inputs globally across the operating system—even when your game is running in exclusive fullscreen or borderless windowed mode.
+
+- **Default Controller Combo**: Press **`Select + Start`** (Xbox `View + Menu` / PlayStation `Share/Create + Options`) to instantly summon or dismiss the map overlay over your running game.
+- **Alternative Combos**: Configurable in Settings to **`Guide`** (Xbox / PS Home button), **`L3 + R3`**, **`LB + RB + D-Pad Down`**, or **`LT + RT + D-Pad Down`**.
+- **Keyboard Shortcut**: Also toggles via **`F9`** (or `Ctrl + M`, `Alt + M`).
+
+#### 2. Gamepad Navigation & Interaction Scheme
+
+When a gamepad is connected, the map viewer automatically switches into controller mode, displaying a dynamic center HUD reticle with custom button glyphs adapted to your controller type:
+
+| Input (Xbox / PlayStation) | Action                              | Description                                                                                                                            |
+| -------------------------- | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| **Left Analog Stick**      | **Precision Pan**                   | Smooth, low-speed camera movement with deadzone filtering for fine positioning.                                                        |
+| **Right Analog Stick**     | **Fast Travel Pan**                 | High-speed camera pan for swiftly navigating large open-world maps.                                                                    |
+| **Center Reticle**         | **Magnetic Snap & Sticky Friction** | Proximity targeting system that locks onto nearby markers, applying subtle friction and magnetic pull so you don't overshoot pins.     |
+| **RT / R2**                | **Zoom In**                         | Progressive, smooth zoom-in with analog acceleration.                                                                                  |
+| **LT / L2**                | **Zoom Out**                        | Progressive, smooth zoom-out with analog acceleration.                                                                                 |
+| **A / ✕ (Cross)**          | **Inspect / Open / Enlarge**        | Opens popup details for the locked marker; if a reference link or screenshot is selected, clicks or enlarges it.                       |
+| **Y / △ (Triangle)**       | **Toggle Found Status**             | Marks the targeted location as found or uncollected, showing a floating HUD confirmation toast.                                        |
+| **L3 (Left Stick Click)**  | **Toggle Hide Found**               | Instantly hides or reveals all collected markers to clean up the map view.                                                             |
+| **X / □ (Square)**         | **Media Lightbox / Filter**         | If a marker popup has a screenshot, opens it in full lightbox view; otherwise toggles the category filter menu.                        |
+| **B / ◯ (Circle)**         | **Back / Dismiss**                  | Closes open marker popups, exits the image lightbox, or dismisses menus.                                                               |
+| **D-Pad Up / Down**        | **Scroll & Highlight**              | Scrolls through marker popup descriptions or highlights attached screenshot thumbnails.                                                |
+| **D-Pad Left / Right**     | **Cycle References**                | Cycles through interactive cross-reference buttons inside marker popups.                                                               |
+| **Select / View / Share**  | **Filter Menu**                     | Opens the gamepad-navigable category menu to filter specific categories or groups (e.g. Hide All, Show All, Bosses, Equipment).        |
+| **LB / RB (L1 / R1)**      | **Cycle Regional Maps**             | Instantly cycles through available sub-maps and regions for multi-map titles (e.g. _White Orchard_ ↔ _Velen & Novigrad_ ↔ _Skellige_). |
 
 ## Tech Stack
 
@@ -128,6 +186,7 @@ The compiled binaries and installers will be generated under `src-tauri/target/r
 ```text
 FitRepacks Library/
 ├── app/                  # Next.js App Router entry and main view
+│   └── map-overlay/      # Standalone floating in-game map overlay window
 ├── assets/               # Screenshots and documentation media
 ├── components/           # UI components
 │   ├── analytics/        # Playtime and telemetry charts
@@ -135,14 +194,16 @@ FitRepacks Library/
 │   ├── common/           # Shared buttons, modals, and inputs
 │   ├── layout/           # App navigation and custom window titlebar
 │   ├── library/          # Game cards, grid views, and edit dialogs
+│   ├── maps/             # Leaflet map viewer, gamepad controller, browser & icons
 │   └── repacks/          # Repack catalog tables, search, and filters
-├── lib/                  # State stores, SQLite handlers, IGDB/Steam services
+├── lib/                  # State stores, SQLite handlers, game maps & overlay services
+├── maps/                 # Downloaded offline game maps, tiles, and assets
 ├── public/               # Static web assets
 ├── scripts/              # Catalog scraping utilities and build helpers
 ├── src-tauri/            # Rust native backend and Tauri configuration
 │   ├── capabilities/     # Tauri v2 security permissions
 │   ├── icons/            # App icons for Windows, macOS, Linux
-│   ├── src/main.rs       # Window management, tray, and process runner
+│   ├── src/main.rs       # Window management, tray, global shortcuts & process runner
 │   └── tauri.conf.json   # Tauri application manifest
 ├── theme.ts              # Mantine dark theme configuration
 └── package.json          # Dependencies and npm scripts

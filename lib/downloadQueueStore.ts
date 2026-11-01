@@ -3,34 +3,40 @@ import { persist, createJSONStorage, StateStorage } from "zustand/middleware";
 
 import { getAppSetting, saveAppSetting } from "./db";
 
+const pendingSaves = new Map<string, string>();
 let saveTimeout: ReturnType<typeof setTimeout> | null = null;
-let pendingSaveValue: string | null = null;
-let pendingSaveKey: string | null = null;
+
+async function flushPendingSaves(): Promise<void> {
+  if (pendingSaves.size === 0) return;
+  const entries = Array.from(pendingSaves.entries());
+  pendingSaves.clear();
+  for (const [key, val] of entries) {
+    try {
+      await saveAppSetting(key, val);
+    } catch (_) {}
+  }
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("beforeunload", () => {
+    void flushPendingSaves();
+  });
+}
 
 const sqliteStorage: StateStorage = {
   getItem: async (name: string): Promise<string | null> => {
+    if (pendingSaves.has(name)) {
+      return pendingSaves.get(name)!;
+    }
     return await getAppSetting(name);
   },
   setItem: async (name: string, value: string): Promise<void> => {
-    pendingSaveKey = name;
-    pendingSaveValue = value;
+    pendingSaves.set(name, value);
     if (saveTimeout) clearTimeout(saveTimeout);
-    saveTimeout = setTimeout(async () => {
-      if (pendingSaveKey && pendingSaveValue !== null) {
-        const key = pendingSaveKey;
-        const val = pendingSaveValue;
-        pendingSaveKey = null;
-        pendingSaveValue = null;
-        try {
-          await saveAppSetting(key, val);
-        } catch (_) {}
-      }
-    }, 2000);
+    saveTimeout = setTimeout(flushPendingSaves, 1000);
   },
   removeItem: async (name: string): Promise<void> => {
-    if (saveTimeout) clearTimeout(saveTimeout);
-    pendingSaveKey = null;
-    pendingSaveValue = null;
+    pendingSaves.delete(name);
     try {
       await saveAppSetting(name, "");
     } catch (_) {}

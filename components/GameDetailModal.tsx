@@ -331,6 +331,7 @@ export const GameDetailModalComponent: React.FC<GameDetailModalProps> = ({
     const postTime = parseDateSafe(postDate);
     if (ignTime !== null && postTime !== null && ignTime >= postTime)
       return true;
+    if (ignTime !== null && postTime === null) return true;
     return false;
   };
 
@@ -456,13 +457,13 @@ export const GameDetailModalComponent: React.FC<GameDetailModalProps> = ({
 
   const handleIgnoreUpdate = (postDate?: string) => {
     if (!currentGame) return;
-    const dateToIgnore =
-      postDate ||
-      currentGame.updateInfo?.date ||
-      currentGame.fitgirlUploadDate ||
-      currentGame.steamripUploadDate ||
-      currentGame.releaseDate ||
-      new Date().toISOString();
+    const nowIso = new Date().toISOString();
+    let dateToIgnore = nowIso;
+    if (postDate) {
+      const pTime = parseDateSafe(postDate);
+      const nowTime = Date.now();
+      dateToIgnore = pTime && pTime > nowTime ? postDate : nowIso;
+    }
 
     ignoreGameUpdate(currentGame.id, dateToIgnore);
     const updated = {
@@ -708,7 +709,17 @@ export const GameDetailModalComponent: React.FC<GameDetailModalProps> = ({
                       {currentGame.rating}/100
                     </Badge>
                   )}
-                  {currentGame.repackSize && (
+                  {currentGame.fitgirlSize && (
+                    <Badge color="grape" variant="light" size="sm">
+                      FitGirl: {currentGame.fitgirlSize}
+                    </Badge>
+                  )}
+                  {currentGame.steamripSize && (
+                    <Badge color="cyan" variant="light" size="sm">
+                      SteamRIP: {currentGame.steamripSize}
+                    </Badge>
+                  )}
+                  {!currentGame.fitgirlSize && !currentGame.steamripSize && currentGame.repackSize && (
                     <Badge color="grape" variant="light" size="sm">
                       {currentGame.repackSize}
                     </Badge>
@@ -741,25 +752,69 @@ export const GameDetailModalComponent: React.FC<GameDetailModalProps> = ({
                     </Badge>
                   )}
                   {versionComparison.hasFitgirlUpdate && (
-                    <Badge
-                      color="yellow"
-                      variant="filled"
-                      size="sm"
-                      leftSection={<Sparkles size={11} />}
-                    >
-                      Newer in FitGirl ({versionComparison.fitgirlVer})
-                    </Badge>
+                    <Group gap={4} wrap="nowrap">
+                      <Badge
+                        color="yellow"
+                        variant="filled"
+                        size="sm"
+                        leftSection={<Sparkles size={11} />}
+                      >
+                        Newer in FitGirl ({versionComparison.fitgirlVer})
+                      </Badge>
+                      <Tooltip label="Ignore this version update">
+                        <ActionIcon
+                          size="xs"
+                          variant="subtle"
+                          color="gray"
+                          onClick={() =>
+                            handleIgnoreUpdate(currentGame.fitgirlUploadDate)
+                          }
+                        >
+                          <EyeOff size={12} />
+                        </ActionIcon>
+                      </Tooltip>
+                    </Group>
                   )}
                   {versionComparison.hasSteamripUpdate && (
-                    <Badge
-                      color="yellow"
-                      variant="filled"
-                      size="sm"
-                      leftSection={<Sparkles size={11} />}
-                    >
-                      Newer in SteamRIP ({versionComparison.steamripVer})
-                    </Badge>
+                    <Group gap={4} wrap="nowrap">
+                      <Badge
+                        color="yellow"
+                        variant="filled"
+                        size="sm"
+                        leftSection={<Sparkles size={11} />}
+                      >
+                        Newer in SteamRIP ({versionComparison.steamripVer})
+                      </Badge>
+                      <Tooltip label="Ignore this version update">
+                        <ActionIcon
+                          size="xs"
+                          variant="subtle"
+                          color="gray"
+                          onClick={() =>
+                            handleIgnoreUpdate(currentGame.steamripUploadDate)
+                          }
+                        >
+                          <EyeOff size={12} />
+                        </ActionIcon>
+                      </Tooltip>
+                    </Group>
                   )}
+                  {currentGame.ignoredUpdateDate &&
+                    !versionComparison.hasFitgirlUpdate &&
+                    !versionComparison.hasSteamripUpdate && (
+                      <Tooltip label="Update checking is ignored for this release. Click to restore.">
+                        <Badge
+                          color="gray"
+                          variant="light"
+                          size="sm"
+                          leftSection={<RotateCcw size={11} />}
+                          style={{ cursor: "pointer" }}
+                          onClick={handleUnignoreUpdate}
+                        >
+                          Update Ignored (Restore)
+                        </Badge>
+                      </Tooltip>
+                    )}
                   {currentGame.isCompleted && (
                     <Badge
                       color="teal"
@@ -997,6 +1052,30 @@ export const GameDetailModalComponent: React.FC<GameDetailModalProps> = ({
                 >
                   Clear Status
                 </Menu.Item>
+                {(versionComparison?.hasFitgirlUpdate ||
+                  versionComparison?.hasSteamripUpdate ||
+                  currentGame.hasUpdate) && (
+                  <>
+                    <Menu.Divider />
+                    <Menu.Item
+                      leftSection={<EyeOff size={14} color="#eab308" />}
+                      onClick={() => handleIgnoreUpdate()}
+                    >
+                      Ignore New Version
+                    </Menu.Item>
+                  </>
+                )}
+                {Boolean(currentGame.ignoredUpdateDate) && (
+                  <>
+                    <Menu.Divider />
+                    <Menu.Item
+                      leftSection={<RotateCcw size={14} />}
+                      onClick={() => handleUnignoreUpdate()}
+                    >
+                      Restore Update Checking
+                    </Menu.Item>
+                  </>
+                )}
               </Menu.Dropdown>
             </Menu>
 
@@ -1028,6 +1107,36 @@ export const GameDetailModalComponent: React.FC<GameDetailModalProps> = ({
                 Edit
               </Button>
             )}
+
+            {(versionComparison?.hasFitgirlUpdate ||
+              versionComparison?.hasSteamripUpdate ||
+              currentGame.hasUpdate) && (
+              <Button
+                size="sm"
+                variant="subtle"
+                color="yellow"
+                radius="md"
+                leftSection={<EyeOff size={15} color="#eab308" />}
+                onClick={() => handleIgnoreUpdate()}
+              >
+                Ignore Version
+              </Button>
+            )}
+            {Boolean(currentGame.ignoredUpdateDate) &&
+              !versionComparison?.hasFitgirlUpdate &&
+              !versionComparison?.hasSteamripUpdate &&
+              !currentGame.hasUpdate && (
+                <Button
+                  size="sm"
+                  variant="subtle"
+                  color="gray"
+                  radius="md"
+                  leftSection={<RotateCcw size={14} />}
+                  onClick={() => handleUnignoreUpdate()}
+                >
+                  Restore Update Check
+                </Button>
+              )}
 
             {onUninstall && currentGame.exePath && (
               <HoldToConfirmButton

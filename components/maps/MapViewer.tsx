@@ -26,38 +26,37 @@ import {
   Check,
   Trash2,
   Loader2,
-  Navigation,
-  Crosshair,
-  Radio,
-  Sliders,
-  Grid,
-  Maximize2,
-  Copy,
-  RotateCcw,
-  Compass,
-  MapPin,
   SlidersHorizontal,
-  Target,
-  RotateCw,
-  ArrowLeftRight,
   Layers,
   PictureInPicture2,
+  Eye,
+  EyeOff,
+  RefreshCw,
 } from "lucide-react";
 import { MapViewerProps, MapCategory, MapLocation } from "./types";
 import {
   downloadFullOfflineMap,
   isMapOfflineReady,
+  checkOfflineMapUpdateAvailable,
   deleteOfflineMap,
   getOfflineAsset,
+  getOfflineAssetUrl,
   getOfflineAssetText,
+  getValidOfflineSpriteUrl,
   saveOfflineAsset,
   fetchAssetBlob,
   fetchAndCacheOfflineAsset,
   clearOfflineMapTileCache,
   DownloadProgress,
 } from "../../lib/offlineMapStore";
-import { useLiveGameTracker } from "../../lib/useLiveGameTracker";
 import { openMapOverlay } from "../../lib/mapOverlay";
+import {
+  saveLastOpenedMapSlug,
+  resolveCanonicalMapGenieSlug,
+} from "../../lib/gameMaps";
+import { getMapFoundLocationIds, toggleMapFoundLocation } from "../../lib/db";
+import { MapGamepadController } from "./MapGamepadController";
+import { CategoryIcon } from "./CategoryIcon";
 
 const TRANSPARENT_TILE =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='256' height='256' fill='none'/%3E";
@@ -106,203 +105,6 @@ function formatDescription(desc?: string | null): string {
     .replace(/\n/g, "<br>");
 }
 
-interface DistrictDef {
-  name: string;
-  minX: number;
-  maxX: number;
-  minY: number;
-  maxY: number;
-  color: string;
-}
-
-const KNOWN_GAME_DISTRICTS: Record<string, DistrictDef[]> = {
-  "mafia-2": [
-    {
-      name: "Little Italy",
-      minX: -600,
-      maxX: 200,
-      minY: 300,
-      maxY: 1000,
-      color: "#22c55e",
-    },
-    {
-      name: "Chinatown",
-      minX: -850,
-      maxX: -200,
-      minY: 100,
-      maxY: 550,
-      color: "#eab308",
-    },
-    {
-      name: "Midtown",
-      minX: -300,
-      maxX: 450,
-      minY: -250,
-      maxY: 450,
-      color: "#3b82f6",
-    },
-    {
-      name: "East Side",
-      minX: 400,
-      maxX: 1300,
-      minY: 0,
-      maxY: 850,
-      color: "#a855f7",
-    },
-    {
-      name: "West Side",
-      minX: -1400,
-      maxX: -650,
-      minY: -400,
-      maxY: 300,
-      color: "#ec4899",
-    },
-    {
-      name: "Kingston",
-      minX: -1900,
-      maxX: -950,
-      minY: 400,
-      maxY: 1300,
-      color: "#14b8a6",
-    },
-    {
-      name: "Dipton",
-      minX: -1950,
-      maxX: -1200,
-      minY: -350,
-      maxY: 400,
-      color: "#f97316",
-    },
-    {
-      name: "Riverside",
-      minX: -1250,
-      maxX: -450,
-      minY: 800,
-      maxY: 1700,
-      color: "#06b6d4",
-    },
-    {
-      name: "Hillwood",
-      minX: -250,
-      maxX: 1250,
-      minY: 1000,
-      maxY: 2300,
-      color: "#84cc16",
-    },
-    {
-      name: "Northoak",
-      minX: 600,
-      maxX: 1700,
-      minY: 600,
-      maxY: 1650,
-      color: "#6366f1",
-    },
-    {
-      name: "Oyster Bay",
-      minX: 200,
-      maxX: 1300,
-      minY: -1050,
-      maxY: 0,
-      color: "#10b981",
-    },
-    {
-      name: "Hunters Point",
-      minX: -50,
-      maxX: 850,
-      minY: -1500,
-      maxY: -800,
-      color: "#d946ef",
-    },
-    {
-      name: "South Port",
-      minX: -850,
-      maxX: 250,
-      minY: -2100,
-      maxY: -1000,
-      color: "#ef4444",
-    },
-    {
-      name: "Sand Island",
-      minX: -1900,
-      maxX: -950,
-      minY: -1500,
-      maxY: -500,
-      color: "#f59e0b",
-    },
-    {
-      name: "Greenfield",
-      minX: -1850,
-      maxX: -750,
-      minY: 0,
-      maxY: 850,
-      color: "#8b5cf6",
-    },
-  ],
-};
-
-function projectGameCoords(
-  x: number,
-  y: number,
-  latCenter: number,
-  lngCenter: number,
-  latScale: number,
-  lngScale: number,
-  rotationDeg: number = 0,
-  invertX: boolean = false,
-  invertY: boolean = false,
-  swapXY: boolean = false,
-): [number, number] {
-  let ix = invertX ? -x : x;
-  let iy = invertY ? -y : y;
-  if (swapXY) {
-    const t = ix;
-    ix = iy;
-    iy = t;
-  }
-
-  const rad = (rotationDeg * Math.PI) / 180;
-  const cos = Math.cos(rad);
-  const sin = Math.sin(rad);
-
-  const rx = ix * cos - iy * sin;
-  const ry = ix * sin + iy * cos;
-
-  return [latCenter + ry * latScale, lngCenter + rx * lngScale];
-}
-
-function unprojectMapCoords(
-  lat: number,
-  lng: number,
-  latCenter: number,
-  lngCenter: number,
-  latScale: number,
-  lngScale: number,
-  rotationDeg: number = 0,
-  invertX: boolean = false,
-  invertY: boolean = false,
-  swapXY: boolean = false,
-): [number, number] {
-  const dy = (lat - latCenter) / (latScale || 1);
-  const dx = (lng - lngCenter) / (lngScale || 1);
-
-  const rad = (-rotationDeg * Math.PI) / 180;
-  const cos = Math.cos(rad);
-  const sin = Math.sin(rad);
-
-  let rx = dx * cos - dy * sin;
-  let ry = dx * sin + dy * cos;
-
-  if (swapXY) {
-    const t = rx;
-    rx = ry;
-    ry = t;
-  }
-  if (invertX) rx = -rx;
-  if (invertY) ry = -ry;
-
-  return [rx, ry];
-}
-
 export function MapViewer({
   gameSlug = "",
   mapSlug = "",
@@ -316,7 +118,6 @@ export function MapViewer({
   minZoom: customMinZoom,
   maxZoom: customMaxZoom,
   isOverlay = false,
-  overlayShape = "rounded",
   isSidebarOpen: externalIsSidebarOpen,
   onSelectMap,
   onOpenOverlay,
@@ -327,7 +128,6 @@ export function MapViewer({
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const markerGroupRef = useRef<L.LayerGroup | null>(null);
-  const calibrationLayerGroupRef = useRef<L.LayerGroup | null>(null);
   const markersMapRef = useRef<Map<string | number, L.Marker>>(new Map());
   const leafletModuleRef = useRef<typeof import("leaflet") | null>(null);
   const discoveredWorkingPatternRef = useRef<string | null>(null);
@@ -336,16 +136,59 @@ export function MapViewer({
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [hideFound, setHideFound] = useState(false);
   const [foundIds, setFoundIds] = useState<Set<number | string>>(new Set());
+  const cleanSlug = gameSlug
+    ? gameSlug.includes("--")
+      ? gameSlug.split("--")[0]
+      : gameSlug
+    : "";
+
   const [categoryState, setCategoryState] = useState<Record<string, boolean>>(
     {},
   );
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const [mapReady, setMapReady] = useState(0);
-  const [internalIsSidebarOpen, setInternalIsSidebarOpen] = useState(!isOverlay);
+  const [internalIsSidebarOpen, setInternalIsSidebarOpen] = useState<boolean>(
+    () => {
+      if (typeof window !== "undefined" && cleanSlug) {
+        try {
+          const saved = localStorage.getItem(
+            `fitrepacks_map_sidebar_${cleanSlug}`,
+          );
+          if (saved !== null) {
+            return JSON.parse(saved);
+          }
+        } catch (_) {}
+      }
+      return !isOverlay;
+    },
+  );
+
   const isSidebarOpen =
     externalIsSidebarOpen !== undefined
       ? externalIsSidebarOpen
       : internalIsSidebarOpen;
+
+  // Restore saved per-game sidebar state when game changes
+  useEffect(() => {
+    if (!cleanSlug || typeof window === "undefined") return;
+    try {
+      const saved = localStorage.getItem(`fitrepacks_map_sidebar_${cleanSlug}`);
+      if (saved !== null) {
+        setInternalIsSidebarOpen(JSON.parse(saved));
+      }
+    } catch (_) {}
+  }, [cleanSlug]);
+
+  // Persist per-game sidebar state on change
+  useEffect(() => {
+    if (!cleanSlug || typeof window === "undefined") return;
+    try {
+      localStorage.setItem(
+        `fitrepacks_map_sidebar_${cleanSlug}`,
+        JSON.stringify(isSidebarOpen),
+      );
+    } catch (_) {}
+  }, [cleanSlug, isSidebarOpen]);
 
   const handleToggleSidebar = useCallback(() => {
     if (onToggleSidebar) {
@@ -373,85 +216,18 @@ export function MapViewer({
     return () => clearTimeout(timer);
   }, [isSidebarOpen]);
 
-  // Live Calibration & Scale Visualizer State
-  const [showCalibrationTool, setShowCalibrationTool] = useState(false);
-  const showCalibrationToolRef = useRef(false);
-  showCalibrationToolRef.current = showCalibrationTool;
-  const [showGridOverlay, setShowGridOverlay] = useState(true);
-  const [showDistrictBoxes, setShowDistrictBoxes] = useState(true);
-  const [calibCenterLat, setCalibCenterLat] = useState<number>(1.177677);
-  const [calibCenterLng, setCalibCenterLng] = useState<number>(-1.252454);
-  const [calibScaleX, setCalibScaleX] = useState<number>(0.000453);
-  const [calibScaleY, setCalibScaleY] = useState<number>(0.000453);
-  const [calibRotation, setCalibRotation] = useState<number>(0.82);
-  const [calibInvertX, setCalibInvertX] = useState<boolean>(false);
-  const [calibInvertY, setCalibInvertY] = useState<boolean>(false);
-  const [calibSwapXY, setCalibSwapXY] = useState<boolean>(false);
-
-  // 2-Point Anchor Calibration State
-  const [calibAnchorSlot, setCalibAnchorSlot] = useState<1 | 2 | null>(null);
-  const calibAnchorSlotRef = useRef<1 | 2 | null>(null);
-  calibAnchorSlotRef.current = calibAnchorSlot;
-  const [anchorP1, setAnchorP1] = useState<{
-    gameX: number;
-    gameY: number;
-    mapLat: number;
-    mapLng: number;
-    label?: string;
-  } | null>(null);
-  const [anchorP2, setAnchorP2] = useState<{
-    gameX: number;
-    gameY: number;
-    mapLat: number;
-    mapLng: number;
-    label?: string;
-  } | null>(null);
-  const [activeCalibTab, setActiveCalibTab] = useState<"manual" | "auto">(
-    "manual",
-  );
-
-  const calibParamsRef = useRef({
-    lat: 1.177677,
-    lng: -1.252454,
-    scaleX: 0.000453,
-    scaleY: 0.000453,
-    rotation: 0.82,
-    invertX: false,
-    invertY: false,
-    swapXY: false,
-  });
-  calibParamsRef.current = {
-    lat: calibCenterLat,
-    lng: calibCenterLng,
-    scaleX: calibScaleX,
-    scaleY: calibScaleY,
-    rotation: calibRotation,
-    invertX: calibInvertX,
-    invertY: calibInvertY,
-    swapXY: calibSwapXY,
-  };
-
-  const [calibGridInterval, setCalibGridInterval] = useState<number>(500);
-  const [mouseCoord, setMouseCoord] = useState<{
-    lat: number;
-    lng: number;
-    x: number;
-    y: number;
-  } | null>(null);
-  const [calibrationPin, setCalibrationPin] = useState<{
-    lat: number;
-    lng: number;
-    x: number;
-    y: number;
-  } | null>(null);
-  const [copiedRustCode, setCopiedRustCode] = useState(false);
-
-  // Offline Download State
+  // Offline Download & Update State
   const [isOfflineReady, setIsOfflineReady] = useState(false);
+  const [hasOfflineUpdate, setHasOfflineUpdate] = useState(false);
+  const [updateReason, setUpdateReason] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] =
     useState<DownloadProgress | null>(null);
   const [offlineSpriteUrl, setOfflineSpriteUrl] = useState<string | null>(null);
+  const [detectedSpriteDimensions, setDetectedSpriteDimensions] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
   const abortRef = useRef<{ aborted: boolean }>({ aborted: false });
 
   const iconCacheRef = useRef<Map<string, L.DivIcon>>(new Map());
@@ -471,7 +247,10 @@ export function MapViewer({
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  const effectiveGameSlug = mapData?.game?.slug || gameSlug || "";
+  const effectiveGameSlug = resolveCanonicalMapGenieSlug(
+    mapData?.game?.slug || gameSlug || "",
+    mapData?.game?.title || gameTitle || "",
+  );
   const effectiveMapSlug =
     mapData?.map?.slug || mapData?.mapConfig?.slug || mapSlug || "default";
   const finalStorageKey =
@@ -486,44 +265,36 @@ export function MapViewer({
     ? `map_hide_found_${effectiveGameSlug}_${effectiveMapSlug}`
     : "";
 
-  // Live Game Character Tracking
-  const {
-    isSupported: isTrackerSupported,
-    isActive: isTrackerActive,
-    isGameRunning: isGameRunningTracker,
-    isTracking: isPlayerTracked,
-    position: livePlayerPos,
-    candidates: trackerCandidates,
-    selectedPointerId: trackerSelectedId,
-    setSelectedPointerId: setTrackerSelectedId,
-    followPlayer,
-    setFollowPlayer,
-    toggleTracking,
-    toggleFollowPlayer,
-  } = useLiveGameTracker({
-    gameSlug: effectiveGameSlug,
-    mapSlug: effectiveMapSlug,
-    autoStart: false,
-  });
-
-  const playerMarkerRef = useRef<L.Marker | null>(null);
-  const livePosRef = useRef(livePlayerPos);
-  livePosRef.current = livePlayerPos;
-  const followPlayerRef = useRef(followPlayer);
-  followPlayerRef.current = followPlayer;
-
-  // Check offline readiness
+  // Check offline readiness and update availability
   useEffect(() => {
     let isMounted = true;
     if (effectiveGameSlug && effectiveMapSlug) {
-      isMapOfflineReady(effectiveGameSlug, effectiveMapSlug).then((ready) => {
-        if (isMounted) setIsOfflineReady(ready);
+      isMapOfflineReady(effectiveGameSlug, effectiveMapSlug).then(async (ready) => {
+        if (!isMounted) return;
+        setIsOfflineReady(ready);
+
+        if (ready && mapData) {
+          const updateResult = await checkOfflineMapUpdateAvailable(
+            effectiveGameSlug,
+            effectiveMapSlug,
+            mapData
+          );
+          if (isMounted) {
+            setHasOfflineUpdate(updateResult.hasUpdate);
+            setUpdateReason(updateResult.reason || null);
+          }
+        } else {
+          if (isMounted) {
+            setHasOfflineUpdate(false);
+            setUpdateReason(null);
+          }
+        }
       });
     }
     return () => {
       isMounted = false;
     };
-  }, [effectiveGameSlug, effectiveMapSlug]);
+  }, [effectiveGameSlug, effectiveMapSlug, mapData]);
 
   // Normalization
   const categoriesById = useMemo(() => {
@@ -571,23 +342,53 @@ export function MapViewer({
     return { normalizedLocations: validLocs, categoryCounts: counts };
   }, [mapData?.locations, mapData?.groups]);
 
-  // Load Saved Found Progress & Sync across windows
+  // Helper to populate both string and number representations in Set for robust matching
+  const populateIds = (ids: (string | number)[]) => {
+    const next = new Set<string | number>();
+    if (Array.isArray(ids)) {
+      ids.forEach((id) => {
+        next.add(id);
+        next.add(String(id));
+        const num = Number(id);
+        if (!isNaN(num)) next.add(num);
+      });
+    }
+    return next;
+  };
+
+  // Load Saved Found Progress from SQLite Database & Sync across windows
   useEffect(() => {
-    if (!finalStorageKey && !categoryStorageKey && !hideFoundStorageKey) return;
-    const loadSaved = () => {
-      if (finalStorageKey) {
-        try {
-          const saved = localStorage.getItem(finalStorageKey);
-          if (saved) setFoundIds(new Set(JSON.parse(saved)));
-          else setFoundIds(new Set());
-        } catch {}
+    let isCancelled = false;
+    if (!effectiveGameSlug) return;
+
+    // 1. Initial quick load from localStorage for instant display
+    if (finalStorageKey) {
+      try {
+        const saved = localStorage.getItem(finalStorageKey);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          setFoundIds(populateIds(parsed));
+        }
+      } catch {}
+    }
+
+    // 2. Authoritative load from SQLite database
+    getMapFoundLocationIds(effectiveGameSlug, effectiveMapSlug).then((ids) => {
+      if (!isCancelled && Array.isArray(ids)) {
+        setFoundIds(populateIds(ids));
+        if (finalStorageKey) {
+          try {
+            localStorage.setItem(finalStorageKey, JSON.stringify(ids));
+          } catch {}
+        }
       }
-    };
-    loadSaved();
+    });
 
     const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === finalStorageKey) {
-        loadSaved();
+      if (e.key === finalStorageKey && e.newValue) {
+        try {
+          setFoundIds(populateIds(JSON.parse(e.newValue)));
+        } catch {}
       }
       if (e.key === categoryStorageKey && e.newValue) {
         try {
@@ -602,9 +403,18 @@ export function MapViewer({
     };
     window.addEventListener("storage", handleStorageChange);
     return () => {
+      isCancelled = true;
       window.removeEventListener("storage", handleStorageChange);
     };
-  }, [finalStorageKey, categoryStorageKey, hideFoundStorageKey]);
+  }, [
+    effectiveGameSlug,
+    effectiveMapSlug,
+    finalStorageKey,
+    categoryStorageKey,
+    hideFoundStorageKey,
+  ]);
+
+
 
   // Load Saved Category Visibility State or apply default rule (>100 markers if map > 1000)
   useEffect(() => {
@@ -612,7 +422,8 @@ export function MapViewer({
     try {
       const saved =
         (categoryStorageKey && localStorage.getItem(categoryStorageKey)) ||
-        (effectiveGameSlug && localStorage.getItem(`map_categories_${effectiveGameSlug}`));
+        (effectiveGameSlug &&
+          localStorage.getItem(`map_categories_${effectiveGameSlug}`));
       if (saved) {
         setCategoryState(JSON.parse(saved));
       } else if (normalizedLocations.length > 0) {
@@ -627,7 +438,12 @@ export function MapViewer({
         setCategoryState(defaultState);
       }
     } catch {}
-  }, [categoryStorageKey, effectiveGameSlug, normalizedLocations.length, categoryCounts]);
+  }, [
+    categoryStorageKey,
+    effectiveGameSlug,
+    normalizedLocations.length,
+    categoryCounts,
+  ]);
 
   // Load Saved Hide Found Toggle
   useEffect(() => {
@@ -635,7 +451,8 @@ export function MapViewer({
     try {
       const saved =
         (hideFoundStorageKey && localStorage.getItem(hideFoundStorageKey)) ||
-        (effectiveGameSlug && localStorage.getItem(`map_hide_found_${effectiveGameSlug}`));
+        (effectiveGameSlug &&
+          localStorage.getItem(`map_hide_found_${effectiveGameSlug}`));
       if (saved !== null) setHideFound(JSON.parse(saved));
       else setHideFound(false);
     } catch {}
@@ -645,7 +462,7 @@ export function MapViewer({
   const categoryFoundCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     normalizedLocations.forEach((l) => {
-      if (foundIds.has(l.id)) {
+      if (foundIds.has(l.id) || foundIds.has(String(l.id))) {
         const cId = String(l.category_id);
         counts[cId] = (counts[cId] || 0) + 1;
       }
@@ -657,22 +474,72 @@ export function MapViewer({
     (locId: number | string) => {
       setFoundIds((prev) => {
         const next = new Set(prev);
-        if (next.has(locId)) next.delete(locId);
-        else next.add(locId);
+        const strId = String(locId);
+        const numId = Number(locId);
+        const isCurrentlyFound =
+          next.has(locId) ||
+          next.has(strId) ||
+          (!isNaN(numId) && next.has(numId));
+        const isNowFound = !isCurrentlyFound;
 
+        if (isNowFound) {
+          next.add(locId);
+          next.add(strId);
+          if (!isNaN(numId)) next.add(numId);
+        } else {
+          next.delete(locId);
+          next.delete(strId);
+          if (!isNaN(numId)) next.delete(numId);
+        }
+
+        // 1. Save to SQLite database
+        if (effectiveGameSlug) {
+          toggleMapFoundLocation(
+            effectiveGameSlug,
+            effectiveMapSlug,
+            locId,
+            isNowFound,
+          ).catch((err) => {
+            console.warn("Failed to persist map found location to DB:", err);
+          });
+        }
+
+        // 2. Sync to localStorage for fast cross-window synchronization
         if (finalStorageKey) {
           try {
+            const canonicalIds = Array.from(next).map(String);
+            const uniqueCanonical = Array.from(new Set(canonicalIds));
             localStorage.setItem(
               finalStorageKey,
-              JSON.stringify(Array.from(next)),
+              JSON.stringify(uniqueCanonical),
             );
           } catch {}
         }
         return next;
       });
     },
-    [finalStorageKey],
+    [effectiveGameSlug, effectiveMapSlug, finalStorageKey],
   );
+
+  const toggleHideFound = useCallback(() => {
+    setHideFound((prev) => {
+      const next = !prev;
+      if (hideFoundStorageKey) {
+        try {
+          localStorage.setItem(hideFoundStorageKey, JSON.stringify(next));
+        } catch {}
+      }
+      if (effectiveGameSlug) {
+        try {
+          localStorage.setItem(
+            `map_hide_found_${effectiveGameSlug}`,
+            JSON.stringify(next),
+          );
+        } catch {}
+      }
+      return next;
+    });
+  }, [hideFoundStorageKey, effectiveGameSlug]);
 
   const updateCategoryState = useCallback(
     (updater: React.SetStateAction<Record<string, boolean>>) => {
@@ -685,7 +552,10 @@ export function MapViewer({
         }
         if (effectiveGameSlug) {
           try {
-            localStorage.setItem(`map_categories_${effectiveGameSlug}`, JSON.stringify(next));
+            localStorage.setItem(
+              `map_categories_${effectiveGameSlug}`,
+              JSON.stringify(next),
+            );
           } catch {}
         }
         return next;
@@ -738,7 +608,12 @@ export function MapViewer({
       if (l.category_id != null) allVisible[String(l.category_id)] = true;
     });
     updateCategoryState(allVisible);
-  }, [categoriesById, mapData?.groups, normalizedLocations, updateCategoryState]);
+  }, [
+    categoriesById,
+    mapData?.groups,
+    normalizedLocations,
+    updateCategoryState,
+  ]);
 
   const hideAllCategories = useCallback(() => {
     const allHidden: Record<string, boolean> = {};
@@ -756,19 +631,12 @@ export function MapViewer({
       if (l.category_id != null) allHidden[String(l.category_id)] = false;
     });
     updateCategoryState(allHidden);
-  }, [categoriesById, mapData?.groups, normalizedLocations, updateCategoryState]);
-
-  const toggleHideFound = useCallback(() => {
-    setHideFound((prev) => {
-      const next = !prev;
-      if (hideFoundStorageKey) {
-        try {
-          localStorage.setItem(hideFoundStorageKey, JSON.stringify(next));
-        } catch {}
-      }
-      return next;
-    });
-  }, [hideFoundStorageKey]);
+  }, [
+    categoriesById,
+    mapData?.groups,
+    normalizedLocations,
+    updateCategoryState,
+  ]);
 
   const jumpToLocation = useCallback(
     (targetIdOrTitle: string | number) => {
@@ -777,14 +645,36 @@ export function MapViewer({
 
       const raw = String(targetIdOrTitle).trim();
       const rawLower = raw.toLowerCase();
+      let decodedRaw = rawLower;
+      try {
+        decodedRaw = decodeURIComponent(raw).toLowerCase().trim();
+      } catch {}
 
       // Find the location object
-      const targetLoc = normalizedLocations.find(
+      let targetLoc = normalizedLocations.find(
         (l) =>
           String(l.id) === raw ||
           (l.title && l.title.toLowerCase().trim() === rawLower) ||
-          (l.title && l.title.toLowerCase().includes(rawLower)),
+          (l.title && l.title.toLowerCase().trim() === decodedRaw) ||
+          (l.title && l.title.toLowerCase().includes(decodedRaw)) ||
+          (l.title && decodedRaw.includes(l.title.toLowerCase().trim())),
       );
+
+      if (!targetLoc) {
+        for (const item of allMarkersRef.current) {
+          if (
+            String(item.id) === raw ||
+            (item.loc.title &&
+              item.loc.title.toLowerCase().trim() === decodedRaw) ||
+            (item.loc.title &&
+              item.loc.title.toLowerCase().includes(decodedRaw))
+          ) {
+            targetLoc = item.loc;
+            break;
+          }
+        }
+      }
+
       if (!targetLoc) return;
 
       const lat =
@@ -817,13 +707,19 @@ export function MapViewer({
       // Open target popup
       setTimeout(() => {
         const marker =
-          markersMapRef.current.get(targetLoc.id) ||
-          markersMapRef.current.get(String(targetLoc.id)) ||
-          (targetLoc.title
-            ? markersMapRef.current.get(targetLoc.title.toLowerCase().trim())
+          markersMapRef.current.get(targetLoc!.id) ||
+          markersMapRef.current.get(String(targetLoc!.id)) ||
+          (targetLoc!.title
+            ? markersMapRef.current.get(targetLoc!.title.toLowerCase().trim())
             : undefined);
 
         if (marker) {
+          if (
+            markerGroupRef.current &&
+            !markerGroupRef.current.hasLayer(marker)
+          ) {
+            markerGroupRef.current.addLayer(marker);
+          }
           marker.openPopup();
         }
       }, 350);
@@ -853,6 +749,15 @@ export function MapViewer({
       );
       if (ok) {
         setIsOfflineReady(true);
+        setHasOfflineUpdate(false);
+        setUpdateReason(null);
+        if (effectiveGameSlug) {
+          const freshUrl = await getOfflineAssetUrl(`sprite_${effectiveGameSlug}`);
+          if (freshUrl) {
+            setOfflineSpriteUrl(freshUrl);
+          }
+        }
+        iconCacheRef.current.clear();
       }
     } catch (err) {
       console.error("Offline download failed:", err);
@@ -872,6 +777,8 @@ export function MapViewer({
     if (!effectiveGameSlug || !effectiveMapSlug) return;
     await deleteOfflineMap(effectiveGameSlug, effectiveMapSlug);
     setIsOfflineReady(false);
+    setOfflineSpriteUrl(null);
+    iconCacheRef.current.clear();
   };
 
   const toggleFoundRef = useRef(toggleLocationFound);
@@ -896,17 +803,62 @@ export function MapViewer({
         (effectiveGameSlug
           ? `https://cdn.mapgenie.io/images/games/${effectiveGameSlug}/markers@2x.png`
           : "");
-      const spriteWidth = mapData?.mapConfig?.markerImagesWidth
-        ? mapData.mapConfig.markerImagesWidth / 2
-        : 132;
-      const spriteHeight = mapData?.mapConfig?.markerImagesHeight
-        ? mapData.mapConfig.markerImagesHeight / 2
-        : 220;
+      const spriteWidth =
+        detectedSpriteDimensions?.width ??
+        (mapData?.mapConfig?.markerImagesWidth
+          ? mapData.mapConfig.markerImagesWidth / 2
+          : 132);
+      const spriteHeight =
+        detectedSpriteDimensions?.height ??
+        (mapData?.mapConfig?.markerImagesHeight
+          ? mapData.mapConfig.markerImagesHeight / 2
+          : 220);
 
-      const sprite = spriteMap[cId];
+      const cat = categoriesById[cId];
+      const rawIcon = cat?.icon || "";
+      const rawTitle = cat?.title || "";
+
+      const sprite =
+        spriteMap[cId] ||
+        (rawIcon
+          ? spriteMap[rawIcon] ||
+            spriteMap[rawIcon.toLowerCase()] ||
+            spriteMap[rawIcon.replace(/-/g, "_")] ||
+            spriteMap[rawIcon.replace(/_/g, "-")]
+          : undefined) ||
+        (rawTitle
+          ? spriteMap[rawTitle.toLowerCase().trim()] ||
+            spriteMap[rawTitle.toLowerCase().trim().replace(/\s+/g, "_")] ||
+            spriteMap[rawTitle.toLowerCase().trim().replace(/\s+/g, "-")] ||
+            spriteMap[
+              rawTitle
+                .toLowerCase()
+                .trim()
+                .replace(/['’]/g, "")
+                .replace(/\s+/g, "_")
+            ] ||
+            spriteMap[
+              rawTitle
+                .toLowerCase()
+                .trim()
+                .replace(/['’]/g, "")
+                .replace(/\s+/g, "-")
+            ]
+          : undefined);
+
       let icon: L.DivIcon;
 
-      if (sprite && spriteImgUrl) {
+      const liveSpriteUrl =
+        mapData?.mapConfig?.markerImagesUrl ||
+        (effectiveGameSlug
+          ? `https://media.mapgenie.io/v2/assets/prod/games/${effectiveGameSlug}/markers@2x.png`
+          : "");
+
+      const effectiveSpriteUrl = isOfflineReady
+        ? (offlineSpriteUrl || liveSpriteUrl)
+        : (liveSpriteUrl || offlineSpriteUrl);
+
+      if (sprite && effectiveSpriteUrl && spriteWidth && spriteHeight) {
         const pr = sprite.pixelRatio || 2;
         const posX = sprite.x / pr;
         const posY = sprite.y / pr;
@@ -915,19 +867,18 @@ export function MapViewer({
 
         icon = L.divIcon({
           className: "custom-div-icon",
-          html: `<div class="marker-icon ${isFound ? "is-found" : ""}" style="background-image: url('${spriteImgUrl}'); background-position: -${posX}px -${posY}px; width: ${iconW}px; height: ${iconH}px; background-repeat: no-repeat; background-size: ${spriteWidth}px ${spriteHeight}px; cursor: pointer;"></div>`,
+          html: `<div class="marker-icon ${isFound ? "is-found" : ""}" style="background-image: url('${effectiveSpriteUrl}'); background-position: -${posX}px -${posY}px; width: ${iconW}px; height: ${iconH}px; background-repeat: no-repeat; background-size: ${spriteWidth}px ${spriteHeight}px; cursor: pointer;"></div>`,
           iconSize: [iconW, iconH],
           iconAnchor: [iconW / 2, iconH],
           popupAnchor: [0, -(iconH - 2)],
         });
       } else {
-        const cat = categoriesById[cId];
-        const rawIcon = cat?.icon || "miscellaneous";
-        const iconDash = rawIcon.replace(/_/g, "-");
-        const iconUnder = rawIcon.replace(/-/g, "_");
+        const iconDash = (rawIcon || "miscellaneous").replace(/_/g, "-");
+        const iconUnder = (rawIcon || "miscellaneous").replace(/-/g, "_");
         const pinColor = cat?.color || cat?.icon_color || "#e03131";
         const iconW = 28;
         const iconH = 36;
+        const fallbackInitial = (rawTitle || "?").charAt(0).toUpperCase();
 
         const pinSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 42" width="${iconW}" height="${iconH}" style="display: block; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.6));"><path d="M16 0C7.163 0 0 7.163 0 16c0 10.5 14.2 24.8 14.8 25.4a1.7 1.7 0 0 0 2.4 0C17.8 40.8 32 26.5 32 16 32 7.163 24.837 0 16 0z" fill="${pinColor}"/><circle cx="16" cy="15" r="10" fill="#ffffff"/></svg>`;
 
@@ -937,7 +888,7 @@ export function MapViewer({
             <div class="mg-marker-pin ${isFound ? "is-found" : ""}" style="position: relative; width: ${iconW}px; height: ${iconH}px; cursor: pointer;">
               ${pinSvg}
               <div style="position: absolute; top: 0; left: 0; width: ${iconW}px; height: 30px; display: flex; align-items: center; justify-content: center; pointer-events: none;">
-                <span class="cat-icon icon-${iconDash} icon-${iconUnder}" style="font-size: 13px; color: ${pinColor}; line-height: 1;"></span>
+                <span class="cat-icon icon-${iconDash} icon-${iconUnder}" style="font-size: 13px; color: ${pinColor}; line-height: 1;">${fallbackInitial}</span>
               </div>
             </div>
           `,
@@ -950,7 +901,14 @@ export function MapViewer({
       iconCacheRef.current.set(cacheKey, icon);
       return icon;
     },
-    [mapData?.mapConfig, effectiveGameSlug, categoriesById, offlineSpriteUrl],
+    [
+      mapData?.mapConfig,
+      effectiveGameSlug,
+      categoriesById,
+      offlineSpriteUrl,
+      detectedSpriteDimensions,
+      isOfflineReady,
+    ],
   );
 
   // Load Fonts & CSS
@@ -990,21 +948,16 @@ export function MapViewer({
         }
       };
 
-      // Check offline sprite, or download and cache if online
+      // Check offline sprite, validating against remote markerImagesUrl
       if (effectiveGameSlug) {
-        getOfflineAsset(`sprite_${effectiveGameSlug}`).then((blob) => {
-          if (blob && !isCancelled) {
-            setOfflineSpriteUrl(URL.createObjectURL(blob));
-          } else {
-            const remoteSpriteUrl =
-              mapData?.mapConfig?.markerImagesUrl ||
-              `https://cdn.mapgenie.io/images/games/${effectiveGameSlug}/markers@2x.png`;
-            fetchAndCacheOfflineAsset(`sprite_${effectiveGameSlug}`, remoteSpriteUrl).then((newBlob) => {
-              if (newBlob && !isCancelled) {
-                setOfflineSpriteUrl(URL.createObjectURL(newBlob));
-                iconCacheRef.current.clear();
-              }
-            }).catch(() => {});
+        const remoteSpriteUrl =
+          mapData?.mapConfig?.markerImagesUrl ||
+          `https://media.mapgenie.io/v2/assets/prod/games/${effectiveGameSlug}/markers@2x.png`;
+
+        getValidOfflineSpriteUrl(effectiveGameSlug, remoteSpriteUrl).then((url) => {
+          if (!isCancelled) {
+            setOfflineSpriteUrl(url || null);
+            iconCacheRef.current.clear();
           }
         });
       }
@@ -1049,6 +1002,9 @@ export function MapViewer({
         ...(effectiveGameSlug
           ? [
               `https://cdn.mapgenie.io/css/themes/icons/${effectiveGameSlug}-icons.css`,
+              `https://cdn.mapgenie.io/css/themes/games/${effectiveGameSlug}.css`,
+              `https://cdn.mapgenie.io/css/themes/${effectiveGameSlug}.css`,
+              `https://cdn.mapgenie.io/css/themes/icons/${effectiveGameSlug}.css`,
               `https://mapgenie.io/game-icons/${effectiveGameSlug}/icons.css`,
               `https://media.mapgenie.io/v2/assets/prod/games/${effectiveGameSlug}/theme/theme.css`,
               `https://media.mapgenie.io/v2/assets/prod/games/${effectiveGameSlug}/theme/v3/theme.css`,
@@ -1063,8 +1019,17 @@ export function MapViewer({
           try {
             const res = await fetch(url);
             if (res.ok) {
-              cssText = await res.text();
-              if (cssText.trim().length > 0) break;
+              const text = await res.text();
+              if (text && text.trim().length > 0) {
+                cssText = text;
+                if (effectiveGameSlug) {
+                  saveOfflineAsset(
+                    `css_theme_${effectiveGameSlug}`,
+                    cssText,
+                  ).catch(() => {});
+                }
+                break;
+              }
             }
           } catch (_) {}
         }
@@ -1074,15 +1039,37 @@ export function MapViewer({
 
       let iconRules = "";
       if (cssText) {
-        const iconRegex =
-          /\.icon-([a-zA-Z0-9_\-]+):before\s*\{\s*content:\s*(["'][^"']+["']);?\s*\}/g;
+        iconRules += `\n${cssText}\n`;
+        const pathRegex =
+          /\.icon-([a-zA-Z0-9_\-]+)\s+([.a-zA-Z0-9_\-]+:before)\s*\{([^}]+)\}/g;
+        let pathMatch;
+        while ((pathMatch = pathRegex.exec(cssText)) !== null) {
+          const rawName = pathMatch[1];
+          const subSelector = pathMatch[2];
+          const body = pathMatch[3];
+          const dashed = rawName.replace(/_/g, "-");
+          const underscored = rawName.replace(/-/g, "_");
+          if (dashed !== rawName) {
+            iconRules += `\n.icon-${dashed} ${subSelector} { ${body} }`;
+          }
+          if (underscored !== rawName) {
+            iconRules += `\n.icon-${underscored} ${subSelector} { ${body} }`;
+          }
+        }
+
+        const iconRegex = /\.icon-([a-zA-Z0-9_\-]+):before\s*\{([^}]+)\}/g;
         let match;
         while ((match = iconRegex.exec(cssText)) !== null) {
           const rawName = match[1];
-          const contentVal = match[2];
+          const body = match[2];
           const dashed = rawName.replace(/_/g, "-");
           const underscored = rawName.replace(/-/g, "_");
-          iconRules += `\n.icon-${dashed}:before, .icon-${underscored}:before { content: ${contentVal} !important; }`;
+          if (dashed !== rawName) {
+            iconRules += `\n.icon-${dashed}:before { ${body} }`;
+          }
+          if (underscored !== rawName) {
+            iconRules += `\n.icon-${underscored}:before { ${body} }`;
+          }
         }
       }
 
@@ -1095,25 +1082,42 @@ export function MapViewer({
         .spin {
           animation: spin 1s linear infinite;
         }
-        @keyframes playerPulse {
-          0% { transform: scale(0.92); opacity: 0.95; box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); }
-          70% { transform: scale(1.18); opacity: 0.25; box-shadow: 0 0 0 16px rgba(34, 197, 94, 0); }
-          100% { transform: scale(0.92); opacity: 0.95; box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
-        }
-        .player-beacon-pulse {
-          animation: playerPulse 1.6s infinite cubic-bezier(0.4, 0, 0.6, 1);
-        }
-        .cat-icon, [class^="icon-"], [class*=" icon-"] {
+        .icon, .cat-icon, [class^="icon-"], [class*=" icon-"] {
           font-family: 'icomoon', 'mg-icons' !important;
           speak: never;
           font-style: normal;
           font-weight: normal;
+          font-variant: normal;
           text-transform: none;
           line-height: 1;
           display: inline-block;
-          width: 15px;
           text-align: center;
+          position: relative;
           -webkit-font-smoothing: antialiased;
+          -moz-osx-font-smoothing: grayscale;
+        }
+        .icon [class^="path"], .icon [class*=" path"],
+        [class^="icon-"] [class^="path"], [class^="icon-"] [class*=" path"],
+        [class*=" icon-"] [class^="path"], [class*=" icon-"] [class*=" path"] {
+          font-family: 'icomoon', 'mg-icons' !important;
+          speak: never;
+          font-style: normal;
+          font-weight: normal;
+          font-variant: normal;
+          text-transform: none;
+          line-height: 1;
+          display: inline-block;
+          -webkit-font-smoothing: antialiased;
+          -moz-osx-font-smoothing: grayscale;
+        }
+        .icon [class*="path2"]:before, [class^="icon-"] [class*="path2"]:before, [class*=" icon-"] [class*="path2"]:before,
+        .icon [class*="path3"]:before, [class^="icon-"] [class*="path3"]:before, [class*=" icon-"] [class*="path3"]:before,
+        .icon [class*="path4"]:before, [class^="icon-"] [class*="path4"]:before, [class*=" icon-"] [class*="path4"]:before,
+        .icon [class*="path5"]:before, [class^="icon-"] [class*="path5"]:before, [class*=" icon-"] [class*="path5"]:before,
+        .icon [class*="path6"]:before, [class^="icon-"] [class*="path6"]:before, [class*=" icon-"] [class*="path6"]:before,
+        .icon [class*="path7"]:before, [class^="icon-"] [class*="path7"]:before, [class*=" icon-"] [class*="path7"]:before,
+        .icon [class*="path8"]:before, [class^="icon-"] [class*="path8"]:before, [class*=" icon-"] [class*="path8"]:before {
+          margin-left: -1em;
         }
         .marker-icon {
           transition: transform 0.12s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.15s ease;
@@ -1139,14 +1143,29 @@ export function MapViewer({
           display: inline-flex;
           align-items: center;
           padding: 2px 7px;
-          margin: 2px 0;
+          margin: 2px 2px;
           font-size: 11.5px;
           font-weight: 700;
           color: #93c5fd;
-          background: rgba(37, 99, 235, 0.2);
-          border: 1px solid rgba(96, 165, 250, 0.4);
+          background: rgba(37, 99, 235, 0.25);
+          border: 1px solid rgba(96, 165, 250, 0.5);
           border-radius: 4px;
           cursor: pointer;
+          transition: all 0.15s ease;
+        }
+        .loc-ref-btn:hover {
+          background: rgba(37, 99, 235, 0.55);
+          color: #ffffff;
+          border-color: #93c5fd;
+          transform: translateY(-1px);
+        }
+        .loc-ref-btn.is-gamepad-selected {
+          background: #2563eb !important;
+          color: #ffffff !important;
+          border-color: #93c5fd !important;
+          box-shadow: 0 0 0 2px rgba(147, 197, 253, 0.85), 0 0 12px rgba(37, 99, 235, 0.8) !important;
+          transform: scale(1.08) translateY(-1px) !important;
+          outline: none !important;
         }
         .leaflet-container {
           background: #000000 !important;
@@ -1179,6 +1198,12 @@ export function MapViewer({
           background-color: #1e2433 !important;
           color: #fff !important;
         }
+        .leaflet-pane.leaflet-popup-pane {
+          z-index: 1500 !important;
+        }
+        .leaflet-popup {
+          z-index: 1500 !important;
+        }
         .leaflet-popup-content-wrapper, .leaflet-popup-tip {
           background: #0f121a !important;
           color: #ffffff !important;
@@ -1198,6 +1223,35 @@ export function MapViewer({
         .leaflet-container a.leaflet-popup-close-button:hover {
           color: #ffffff !important;
         }
+        .popup-media-container {
+          transition: transform 0.15s ease, outline 0.15s ease, box-shadow 0.15s ease;
+        }
+        .popup-media-container.is-gamepad-selected {
+          outline: 2px solid #38bdf8 !important;
+          box-shadow: 0 0 16px rgba(56, 189, 248, 0.75), inset 0 0 8px rgba(56, 189, 248, 0.3) !important;
+          border-color: #38bdf8 !important;
+          transform: scale(1.02);
+        }
+        .popup-media-container.is-gamepad-selected::after {
+          content: "X  ENLARGE";
+          position: absolute;
+          bottom: 6px;
+          right: 6px;
+          background: rgba(14, 165, 233, 0.95);
+          color: #ffffff;
+          font-size: 10px;
+          font-weight: 800;
+          letter-spacing: 0.5px;
+          padding: 3px 8px;
+          border-radius: 4px;
+          box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+          pointer-events: none;
+        }
+        .loc-ref-btn.is-gamepad-selected {
+          outline: 2px solid #38bdf8 !important;
+          box-shadow: 0 0 10px rgba(56, 189, 248, 0.6) !important;
+          border-color: #38bdf8 !important;
+        }
       `;
 
       const styleId = "fitrepacks-map-icons-style";
@@ -1209,7 +1263,8 @@ export function MapViewer({
         styleTag.id = styleId;
         document.head.appendChild(styleTag);
       }
-      styleTag.innerHTML = fontOverrides + "\n" + iconRules;
+      styleTag.innerHTML =
+        (cssText || "") + "\n" + fontOverrides + "\n" + iconRules;
     }
 
     loadFontsAndStyles();
@@ -1217,6 +1272,79 @@ export function MapViewer({
       isCancelled = true;
     };
   }, [mapData?.mapConfig, effectiveGameSlug]);
+
+  // Dynamically detect natural dimensions of the sprite image to prevent squished/sliced icons
+  useEffect(() => {
+    const activeSpriteUrl =
+      offlineSpriteUrl ||
+      mapData?.mapConfig?.markerImagesUrl ||
+      (effectiveGameSlug
+        ? `https://cdn.mapgenie.io/images/games/${effectiveGameSlug}/markers@2x.png`
+        : "");
+
+    if (!activeSpriteUrl) {
+      setDetectedSpriteDimensions(null);
+      return;
+    }
+
+    let isCancelled = false;
+    const img = new Image();
+    img.onload = () => {
+      if (!isCancelled && img.naturalWidth > 0 && img.naturalHeight > 0) {
+        const expectedWidth = mapData?.mapConfig?.markerImagesWidth;
+        const expectedHeight = mapData?.mapConfig?.markerImagesHeight;
+
+        // Auto-detect if cached offline sprite sheet is stale (e.g. MapGenie revision or expanded columns)
+        const targetMarkerUrl = mapData?.mapConfig?.markerImagesUrl;
+        if (targetMarkerUrl && effectiveGameSlug) {
+          getOfflineAssetText(`sprite_url_${effectiveGameSlug}`).then((cachedUrl) => {
+            const urlChanged = cachedUrl && cachedUrl.trim() !== targetMarkerUrl.trim();
+            const dimChanged =
+              expectedWidth &&
+              expectedHeight &&
+              (img.naturalWidth !== expectedWidth || img.naturalHeight !== expectedHeight);
+
+            if ((urlChanged || dimChanged) && !isCancelled) {
+              fetchAndCacheOfflineAsset(
+                `sprite_${effectiveGameSlug}`,
+                targetMarkerUrl,
+                true,
+              )
+                .then(async () => {
+                  const freshUrl = await getOfflineAssetUrl(`sprite_${effectiveGameSlug}`);
+                  if (freshUrl && !isCancelled) {
+                    setOfflineSpriteUrl(freshUrl);
+                    iconCacheRef.current.clear();
+                  }
+                })
+                .catch(() => {});
+            }
+          }).catch(() => {});
+        }
+
+        // MapGenie sprite coordinates are configured for 2x retina sheets
+        setDetectedSpriteDimensions({
+          width: img.naturalWidth / 2,
+          height: img.naturalHeight / 2,
+        });
+        iconCacheRef.current.clear();
+      }
+    };
+    img.onerror = () => {
+      if (!isCancelled) {
+        setDetectedSpriteDimensions(null);
+      }
+    };
+    img.src = activeSpriteUrl;
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [
+    offlineSpriteUrl,
+    mapData?.mapConfig?.markerImagesUrl,
+    effectiveGameSlug,
+  ]);
 
   // Leaflet Map Initialization
   useEffect(() => {
@@ -1285,6 +1413,8 @@ export function MapViewer({
         (mapData as any)?.tile_sets ||
         mapData?.map?.tile_sets ||
         mapData?.mapConfig?.tile_sets ||
+        (mapData?.map?.config as any)?.tile_sets ||
+        (mapData?.map as any)?.config?.tile_sets ||
         [];
       const primaryTileSet = (Array.isArray(tileSets) && tileSets[0]) || {};
 
@@ -1292,7 +1422,9 @@ export function MapViewer({
         customMinZoom ??
         primaryTileSet.min_zoom ??
         mapData?.mapConfig?.min_zoom ??
+        (mapData?.map?.config as any)?.min_zoom ??
         (mapData?.map as any)?.min_zoom ??
+        (mapData?.map as any)?.config?.min_zoom ??
         0;
       const maxNativeZoom =
         customMaxZoom ??
@@ -1300,6 +1432,8 @@ export function MapViewer({
         primaryTileSet.max_zoom ??
         (mapData?.mapConfig as any)?.tiles_max_zoom ??
         mapData?.mapConfig?.max_zoom ??
+        (mapData?.map?.config as any)?.tiles_max_zoom ??
+        (mapData?.map?.config as any)?.max_zoom ??
         (mapData?.map as any)?.tiles_max_zoom ??
         (mapData?.map as any)?.max_zoom ??
         16;
@@ -1307,18 +1441,33 @@ export function MapViewer({
 
       let startLat =
         mapData?.mapConfig?.start_lat ??
-        mapData?.map?.start_lat;
+        (mapData?.map?.config as any)?.start_lat ??
+        mapData?.map?.start_lat ??
+        (mapData?.map as any)?.initial_latitude ??
+        (mapData?.map as any)?.config?.start_lat;
       let startLng =
         mapData?.mapConfig?.start_lng ??
-        mapData?.map?.start_lng;
+        (mapData?.map?.config as any)?.start_lng ??
+        mapData?.map?.start_lng ??
+        (mapData?.map as any)?.initial_longitude ??
+        (mapData?.map as any)?.config?.start_lng;
 
-      if ((startLat == null || startLat === 0) && normalizedLocations.length > 0) {
+      if (
+        (startLat == null || startLat === 0) &&
+        normalizedLocations.length > 0
+      ) {
         let sumLat = 0;
         let sumLng = 0;
         let validCount = 0;
         for (const loc of normalizedLocations) {
-          const lLat = typeof loc.latitude === "string" ? parseFloat(loc.latitude) : loc.latitude;
-          const lLng = typeof loc.longitude === "string" ? parseFloat(loc.longitude) : loc.longitude;
+          const lLat =
+            typeof loc.latitude === "string"
+              ? parseFloat(loc.latitude)
+              : loc.latitude;
+          const lLng =
+            typeof loc.longitude === "string"
+              ? parseFloat(loc.longitude)
+              : loc.longitude;
           if (!isNaN(lLat) && !isNaN(lLng) && (lLat !== 0 || lLng !== 0)) {
             sumLat += lLat;
             sumLng += lLng;
@@ -1341,7 +1490,9 @@ export function MapViewer({
         Math.min(
           maxZoom,
           mapData?.mapConfig?.initial_zoom ??
+            (mapData?.map?.config as any)?.initial_zoom ??
             (mapData?.map as any)?.initial_zoom ??
+            (mapData?.map as any)?.config?.initial_zoom ??
             Math.round((minZoom + maxNativeZoom) / 2),
         ),
       );
@@ -1374,11 +1525,61 @@ export function MapViewer({
         } catch (_) {}
       }
 
+      // Calculate location-based content bounds with 35% padding to allow reticle to center border markers while enforcing strict boundaries
+      let initialAllowedBounds: L.LatLngBounds | null = null;
+      let locMinLat = Infinity,
+        locMaxLat = -Infinity,
+        locMinLng = Infinity,
+        locMaxLng = -Infinity;
+      let validLocCount = 0;
+      for (const loc of normalizedLocations) {
+        const lLat =
+          typeof loc.latitude === "string"
+            ? parseFloat(loc.latitude)
+            : loc.latitude;
+        const lLng =
+          typeof loc.longitude === "string"
+            ? parseFloat(loc.longitude)
+            : loc.longitude;
+        if (!isNaN(lLat) && !isNaN(lLng) && (lLat !== 0 || lLng !== 0)) {
+          locMinLat = Math.min(locMinLat, lLat);
+          locMaxLat = Math.max(locMaxLat, lLat);
+          locMinLng = Math.min(locMinLng, lLng);
+          locMaxLng = Math.max(locMaxLng, lLng);
+          validLocCount++;
+        }
+      }
+
+      if (validLocCount > 0 && locMinLat < locMaxLat && locMinLng < locMaxLng) {
+        initialAllowedBounds = L.latLngBounds(
+          [locMinLat, locMinLng],
+          [locMaxLat, locMaxLng],
+        ).pad(0.35);
+      }
+
+      if (!initialAllowedBounds) {
+        initialAllowedBounds = L.latLngBounds([
+          [-80, -170],
+          [80, 170],
+        ]);
+      }
+
+      const allowedCenterBounds = initialAllowedBounds;
+
+      if (
+        allowedCenterBounds.isValid() &&
+        !allowedCenterBounds.contains([activeStartLat, activeStartLng])
+      ) {
+        const center = allowedCenterBounds.getCenter();
+        activeStartLat = center.lat;
+        activeStartLng = center.lng;
+      }
+
       const map = L.map(mapContainerRef.current, {
         minZoom,
         maxZoom: maxZoom + 4,
-        zoomSnap: 0.5,
-        zoomDelta: 0.5,
+        zoomSnap: 0,
+        zoomDelta: 0.25,
         wheelPxPerZoomLevel: 60,
         attributionControl: false,
         zoomControl: false,
@@ -1387,42 +1588,45 @@ export function MapViewer({
         inertiaDeceleration: 3000,
       }).setView([activeStartLat, activeStartLng], activeZoom);
 
-      if (!(isOverlay && overlayShape === "circle")) {
-        L.control.zoom({ position: "bottomright" }).addTo(map);
-      }
+      (map as any)._allowedCenterBounds = allowedCenterBounds;
 
-      // Focus zoom interactions (scroll wheel, double-click, controls) on character instead of mouse when auto-pan is active
-      const origSetZoomAround = map.setZoomAround.bind(map);
-      map.setZoomAround = function (latlng: any, zoom: number, options?: any) {
-        if (followPlayerRef.current) {
-          const charLatLng =
-            playerMarkerRef.current?.getLatLng() ||
-            (livePosRef.current?.map_lat != null &&
-            livePosRef.current?.map_lng != null
-              ? L.latLng(livePosRef.current.map_lat, livePosRef.current.map_lng)
-              : null);
-          if (charLatLng) {
-            return origSetZoomAround(charLatLng, zoom, options);
+      // Real-time boundary clamping during active mouse drag
+      map.on("drag", () => {
+        const allowed = (map as any)._allowedCenterBounds as
+          | L.LatLngBounds
+          | undefined;
+        if (allowed && typeof allowed.contains === "function") {
+          const center = map.getCenter();
+          if (!allowed.contains(center)) {
+            const clampedLat = Math.max(
+              allowed.getSouth(),
+              Math.min(allowed.getNorth(), center.lat),
+            );
+            const clampedLng = Math.max(
+              allowed.getWest(),
+              Math.min(allowed.getEast(), center.lng),
+            );
+            map.setView([clampedLat, clampedLng], map.getZoom(), {
+              animate: false,
+            });
           }
         }
-        return origSetZoomAround(latlng, zoom, options);
-      };
+      });
 
-      const origSetZoom = map.setZoom.bind(map);
-      map.setZoom = function (zoom: number, options?: any) {
-        if (followPlayerRef.current) {
-          const charLatLng =
-            playerMarkerRef.current?.getLatLng() ||
-            (livePosRef.current?.map_lat != null &&
-            livePosRef.current?.map_lng != null
-              ? L.latLng(livePosRef.current.map_lat, livePosRef.current.map_lng)
-              : null);
-          if (charLatLng) {
-            return origSetZoomAround(charLatLng, zoom, options);
+      // Ensure center bounces back inside bounds on drag release
+      map.on("dragend", () => {
+        const allowed = (map as any)._allowedCenterBounds as
+          | L.LatLngBounds
+          | undefined;
+        if (allowed && typeof allowed.contains === "function") {
+          const center = map.getCenter();
+          if (!allowed.contains(center)) {
+            map.panInsideBounds(allowed, { animate: true });
           }
         }
-        return origSetZoom(zoom, options);
-      };
+      });
+
+      L.control.zoom({ position: "bottomright" }).addTo(map);
 
       const DatabaseTileLayer = L.TileLayer.extend({
         createTile: function (coords: any, done: any) {
@@ -1441,6 +1645,12 @@ export function MapViewer({
                 .replace(/\{y\}/g, String(coords.y))
                 .replace(/\{x\}/g, String(coords.x)),
             );
+            rawCandidates.push(
+              mapData.mapConfig.tilePattern
+                .replace(/\{z\}/g, String(coords.z))
+                .replace(/\{y\}/g, String(coords.x))
+                .replace(/\{x\}/g, String(coords.y)),
+            );
           }
 
           // 2. Explicit pattern from primaryTileSet
@@ -1453,6 +1663,12 @@ export function MapViewer({
                 .replace(/\{z\}/g, String(coords.z))
                 .replace(/\{y\}/g, String(coords.y))
                 .replace(/\{x\}/g, String(coords.x)),
+            );
+            rawCandidates.push(
+              pat
+                .replace(/\{z\}/g, String(coords.z))
+                .replace(/\{y\}/g, String(coords.x))
+                .replace(/\{x\}/g, String(coords.y)),
             );
           }
 
@@ -1475,8 +1691,21 @@ export function MapViewer({
             );
           }
 
-          // 5. Versioned fallbacks for gameSlug / mapSlug
-          if (effectiveGameSlug && effectiveMapSlug) {
+          // 5. Versioned fallbacks for effectiveGameSlug / effectiveMapSlug
+          const slugsToTry = Array.from(
+            new Set(
+              [
+                effectiveGameSlug,
+                gameSlug
+                  ? gameSlug.includes("--")
+                    ? gameSlug.split("--")[0]
+                    : gameSlug
+                  : "",
+              ].filter(Boolean),
+            ),
+          );
+
+          if (effectiveMapSlug) {
             const versions = [
               "default-v5",
               "default-v4",
@@ -1485,11 +1714,13 @@ export function MapViewer({
               "default-v1",
               "default",
             ];
-            for (const v of versions) {
-              rawCandidates.push(
-                `https://tiles.mapgenie.io/games/${effectiveGameSlug}/${effectiveMapSlug}/${v}/${coords.z}/${coords.x}/${coords.y}.jpg`,
-                `https://tiles.mapgenie.io/games/${effectiveGameSlug}/${effectiveMapSlug}/${v}/${coords.z}/${coords.y}/${coords.x}.jpg`,
-              );
+            for (const s of slugsToTry) {
+              for (const v of versions) {
+                rawCandidates.push(
+                  `https://tiles.mapgenie.io/games/${s}/${effectiveMapSlug}/${v}/${coords.z}/${coords.x}/${coords.y}.jpg`,
+                  `https://tiles.mapgenie.io/games/${s}/${effectiveMapSlug}/${v}/${coords.z}/${coords.y}/${coords.x}.jpg`,
+                );
+              }
             }
           }
 
@@ -1544,6 +1775,14 @@ export function MapViewer({
                 );
               }
             }
+            if (tile.src.startsWith("blob:")) {
+              const blobUrl = tile.src;
+              setTimeout(() => {
+                try {
+                  URL.revokeObjectURL(blobUrl);
+                } catch (_) {}
+              }, 1500);
+            }
             L.Util.bind(this._tileOnLoad, this, done, tile)();
           };
 
@@ -1551,10 +1790,10 @@ export function MapViewer({
           L.DomEvent.on(tile, "error", tryNextUrl);
 
           const offlineKey = `tile_v3_${effectiveGameSlug}_${effectiveMapSlug}_${coords.z}_${coords.x}_${coords.y}`;
-          getOfflineAsset(offlineKey)
-            .then((blob) => {
-              if (blob && !isCancelled) {
-                tile.src = URL.createObjectURL(blob);
+          getOfflineAssetUrl(offlineKey)
+            .then((url) => {
+              if (url && !isCancelled) {
+                tile.src = url;
               } else {
                 tryNextUrl();
               }
@@ -1565,6 +1804,15 @@ export function MapViewer({
 
           return tile;
         },
+        _removeTile: function (key: string) {
+          const tile = (this as any)._tiles?.[key]?.el;
+          if (tile && tile.src && tile.src.startsWith("blob:")) {
+            try {
+              URL.revokeObjectURL(tile.src);
+            } catch (_) {}
+          }
+          return (L.GridLayer.prototype as any)._removeTile.call(this, key);
+        },
       });
 
       new (DatabaseTileLayer as any)("", {
@@ -1574,26 +1822,20 @@ export function MapViewer({
         maxNativeZoom,
         tileSize: 256,
         noWrap: true,
-        keepBuffer: 8,
+        keepBuffer: 12,
         updateWhenIdle: false,
-        updateWhenZooming: false,
-        updateInterval: 50,
+        updateWhenZooming: true,
+        updateInterval: 25,
       }).addTo(map);
 
       markerGroupRef.current = L.layerGroup().addTo(map);
-      calibrationLayerGroupRef.current = L.layerGroup().addTo(map);
       mapInstanceRef.current = map;
       setMapReady((v) => v + 1);
-
-      // Automatically disable auto-pan when user manually drags / moves the map
-      map.on("dragstart", () => {
-        setFollowPlayer(false);
-      });
 
       // Save map position & zoom on move/zoom with debounce
       let saveViewTimer: any = null;
       map.on("moveend zoomend", () => {
-        if (!effectiveGameSlug || followPlayerRef.current || typeof window === "undefined") return;
+        if (!effectiveGameSlug || typeof window === "undefined") return;
         clearTimeout(saveViewTimer);
         saveViewTimer = setTimeout(() => {
           try {
@@ -1605,71 +1847,6 @@ export function MapViewer({
             );
           } catch (_) {}
         }, 400);
-      });
-
-      map.on("mousemove", (e: any) => {
-        if (!e.latlng) return;
-        const p = calibParamsRef.current;
-        const [x, y] = unprojectMapCoords(
-          e.latlng.lat,
-          e.latlng.lng,
-          p.lat,
-          p.lng,
-          p.scaleY,
-          p.scaleX,
-          p.rotation,
-          p.invertX,
-          p.invertY,
-          p.swapXY,
-        );
-        setMouseCoord({ lat: e.latlng.lat, lng: e.latlng.lng, x, y });
-      });
-
-      map.on("mouseout", () => {
-        setMouseCoord(null);
-      });
-
-      map.on("click", (e: any) => {
-        if (!showCalibrationToolRef.current || !e.latlng) return;
-        const p = calibParamsRef.current;
-        const [x, y] = unprojectMapCoords(
-          e.latlng.lat,
-          e.latlng.lng,
-          p.lat,
-          p.lng,
-          p.scaleY,
-          p.scaleX,
-          p.rotation,
-          p.invertX,
-          p.invertY,
-          p.swapXY,
-        );
-
-        if (calibAnchorSlotRef.current === 1) {
-          const gx = livePosRef.current ? livePosRef.current.x : x;
-          const gy = livePosRef.current ? livePosRef.current.y : y;
-          setAnchorP1({
-            gameX: gx,
-            gameY: gy,
-            mapLat: e.latlng.lat,
-            mapLng: e.latlng.lng,
-            label: "Anchor 1",
-          });
-          setCalibAnchorSlot(null);
-        } else if (calibAnchorSlotRef.current === 2) {
-          const gx = livePosRef.current ? livePosRef.current.x : x;
-          const gy = livePosRef.current ? livePosRef.current.y : y;
-          setAnchorP2({
-            gameX: gx,
-            gameY: gy,
-            mapLat: e.latlng.lat,
-            mapLng: e.latlng.lng,
-            label: "Anchor 2",
-          });
-          setCalibAnchorSlot(null);
-        } else {
-          setCalibrationPin({ lat: e.latlng.lat, lng: e.latlng.lng, x, y });
-        }
       });
 
       map.on("popupopen popupclose", () => {
@@ -1685,7 +1862,11 @@ export function MapViewer({
       if (typeof ResizeObserver !== "undefined" && mapContainerRef.current) {
         resizeObserver = new ResizeObserver((entries) => {
           for (const entry of entries) {
-            if (entry.contentRect.width > 0 && entry.contentRect.height > 0 && mapInstanceRef.current) {
+            if (
+              entry.contentRect.width > 0 &&
+              entry.contentRect.height > 0 &&
+              mapInstanceRef.current
+            ) {
               mapInstanceRef.current.invalidateSize({ pan: false });
             }
           }
@@ -1714,14 +1895,7 @@ export function MapViewer({
       window.removeEventListener("pointerup", onWindowRelease, true);
       window.removeEventListener("touchend", onWindowRelease, true);
       window.removeEventListener("pointermove", onPointerMoveCheck, true);
-      if (playerMarkerRef.current) {
-        playerMarkerRef.current.remove();
-        playerMarkerRef.current = null;
-      }
-      if (calibrationLayerGroupRef.current) {
-        calibrationLayerGroupRef.current.clearLayers();
-        calibrationLayerGroupRef.current = null;
-      }
+
       if (markerGroupRef.current) {
         markerGroupRef.current.clearLayers();
         markerGroupRef.current = null;
@@ -1734,423 +1908,6 @@ export function MapViewer({
     };
   }, [mapData?.mapConfig, effectiveGameSlug, effectiveMapSlug]);
 
-  // Live Calibration & Scale Visualizer Layer Drawing Effect
-  useEffect(() => {
-    const L = leafletModuleRef.current;
-    const map = mapInstanceRef.current;
-    const calibGroup = calibrationLayerGroupRef.current;
-    if (!map || !L || !calibGroup) return;
-
-    calibGroup.clearLayers();
-
-    if (!showCalibrationTool) return;
-
-    // 1. Draw World Origin (0, 0) Crosshair
-    const [origLat, origLng] = projectGameCoords(
-      0,
-      0,
-      calibCenterLat,
-      calibCenterLng,
-      calibScaleY,
-      calibScaleX,
-      calibRotation,
-      calibInvertX,
-      calibInvertY,
-      calibSwapXY,
-    );
-    const originIcon = L.divIcon({
-      className: "origin-pin-icon",
-      html: `
-        <div style="position: relative; width: 0; height: 0; pointer-events: none;">
-          <div style="position: absolute; top: -7px; left: -7px; width: 14px; height: 14px; border-radius: 50%; background: #3b82f6; border: 2px solid #ffffff; box-shadow: 0 0 10px rgba(59,130,246,0.9);"></div>
-          <div style="position: absolute; top: 10px; left: 0; transform: translateX(-50%); background: rgba(15,23,42,0.92); border: 1px solid #3b82f6; border-radius: 4px; padding: 1px 5px; font-size: 9px; font-weight: 700; color: #93c5fd; white-space: nowrap; font-family: 'Oswald', sans-serif; letter-spacing: 0.5px; box-shadow: 0 2px 6px rgba(0,0,0,0.8);">ORIGIN (0,0)</div>
-        </div>
-      `,
-      iconSize: [0, 0],
-      iconAnchor: [0, 0],
-    });
-    L.marker([origLat, origLng], {
-      icon: originIcon,
-      interactive: false,
-    }).addTo(calibGroup);
-
-    // 2. Draw Grid Lines with Rotation
-    if (showGridOverlay) {
-      const step = calibGridInterval;
-      // Vertical grid lines (X axis lines)
-      for (let x = -2500; x <= 2500; x += step) {
-        const [p1Lat, p1Lng] = projectGameCoords(
-          x,
-          -3000,
-          calibCenterLat,
-          calibCenterLng,
-          calibScaleY,
-          calibScaleX,
-          calibRotation,
-          calibInvertX,
-          calibInvertY,
-          calibSwapXY,
-        );
-        const [p2Lat, p2Lng] = projectGameCoords(
-          x,
-          3000,
-          calibCenterLat,
-          calibCenterLng,
-          calibScaleY,
-          calibScaleX,
-          calibRotation,
-          calibInvertX,
-          calibInvertY,
-          calibSwapXY,
-        );
-        const isAxis = x === 0;
-        L.polyline(
-          [
-            [p1Lat, p1Lng],
-            [p2Lat, p2Lng],
-          ],
-          {
-            color: isAxis ? "#22c55e" : "#3b82f6",
-            weight: isAxis ? 2.5 : 1,
-            opacity: isAxis ? 0.85 : 0.28,
-            dashArray: isAxis ? undefined : "4, 6",
-            interactive: false,
-          },
-        ).addTo(calibGroup);
-      }
-
-      // Horizontal grid lines (Y axis lines)
-      for (let y = -3000; y <= 3000; y += step) {
-        const [p1Lat, p1Lng] = projectGameCoords(
-          -2500,
-          y,
-          calibCenterLat,
-          calibCenterLng,
-          calibScaleY,
-          calibScaleX,
-          calibRotation,
-          calibInvertX,
-          calibInvertY,
-          calibSwapXY,
-        );
-        const [p2Lat, p2Lng] = projectGameCoords(
-          2500,
-          y,
-          calibCenterLat,
-          calibCenterLng,
-          calibScaleY,
-          calibScaleX,
-          calibRotation,
-          calibInvertX,
-          calibInvertY,
-          calibSwapXY,
-        );
-        const isAxis = y === 0;
-        L.polyline(
-          [
-            [p1Lat, p1Lng],
-            [p2Lat, p2Lng],
-          ],
-          {
-            color: isAxis ? "#ef4444" : "#3b82f6",
-            weight: isAxis ? 2.5 : 1,
-            opacity: isAxis ? 0.85 : 0.28,
-            dashArray: isAxis ? undefined : "4, 6",
-            interactive: false,
-          },
-        ).addTo(calibGroup);
-      }
-    }
-
-    // 3. Draw District Polygons with Rotation
-    if (showDistrictBoxes && KNOWN_GAME_DISTRICTS["mafia-2"]) {
-      KNOWN_GAME_DISTRICTS["mafia-2"].forEach((d) => {
-        const p1 = projectGameCoords(
-          d.minX,
-          d.minY,
-          calibCenterLat,
-          calibCenterLng,
-          calibScaleY,
-          calibScaleX,
-          calibRotation,
-          calibInvertX,
-          calibInvertY,
-          calibSwapXY,
-        );
-        const p2 = projectGameCoords(
-          d.maxX,
-          d.minY,
-          calibCenterLat,
-          calibCenterLng,
-          calibScaleY,
-          calibScaleX,
-          calibRotation,
-          calibInvertX,
-          calibInvertY,
-          calibSwapXY,
-        );
-        const p3 = projectGameCoords(
-          d.maxX,
-          d.maxY,
-          calibCenterLat,
-          calibCenterLng,
-          calibScaleY,
-          calibScaleX,
-          calibRotation,
-          calibInvertX,
-          calibInvertY,
-          calibSwapXY,
-        );
-        const p4 = projectGameCoords(
-          d.minX,
-          d.maxY,
-          calibCenterLat,
-          calibCenterLng,
-          calibScaleY,
-          calibScaleX,
-          calibRotation,
-          calibInvertX,
-          calibInvertY,
-          calibSwapXY,
-        );
-
-        const poly = L.polygon([p1, p2, p3, p4], {
-          color: d.color,
-          weight: 1.5,
-          opacity: 0.75,
-          fillColor: d.color,
-          fillOpacity: 0.08,
-          dashArray: "3, 5",
-        }).addTo(calibGroup);
-
-        poly.bindTooltip(d.name, {
-          permanent: false,
-          direction: "center",
-          className: "district-tooltip",
-        });
-
-        // Center district title label
-        const [centerLat, centerLng] = projectGameCoords(
-          (d.minX + d.maxX) / 2,
-          (d.minY + d.maxY) / 2,
-          calibCenterLat,
-          calibCenterLng,
-          calibScaleY,
-          calibScaleX,
-          calibRotation,
-          calibInvertX,
-          calibInvertY,
-          calibSwapXY,
-        );
-        const labelIcon = L.divIcon({
-          className: "district-label-icon",
-          html: `
-            <div style="position: relative; width: 0; height: 0; pointer-events: none;">
-              <div style="position: absolute; top: 0; left: 0; transform: translate(-50%, -50%); background: rgba(10, 14, 23, 0.85); border: 1px solid ${d.color}; border-radius: 4px; padding: 2px 6px; font-size: 10px; font-weight: 700; color: #ffffff; letter-spacing: 0.5px; text-transform: uppercase; white-space: nowrap; box-shadow: 0 2px 8px rgba(0,0,0,0.7); font-family: 'Oswald', sans-serif;">
-                ${d.name}
-              </div>
-            </div>
-          `,
-          iconSize: [0, 0],
-          iconAnchor: [0, 0],
-        });
-        L.marker([centerLat, centerLng], {
-          icon: labelIcon,
-          interactive: false,
-        }).addTo(calibGroup);
-      });
-    }
-
-    // 4. Draw Anchor Points & Connecting Vector
-    if (anchorP1 && anchorP2) {
-      L.polyline(
-        [
-          [anchorP1.mapLat, anchorP1.mapLng],
-          [anchorP2.mapLat, anchorP2.mapLng],
-        ],
-        {
-          color: "#f43f5e",
-          weight: 2,
-          dashArray: "6, 6",
-          interactive: false,
-        },
-      ).addTo(calibGroup);
-    }
-
-    if (anchorP1) {
-      const a1Icon = L.divIcon({
-        className: "anchor-pin-1",
-        html: `
-          <div style="position: relative; width: 0; height: 0; cursor: pointer;">
-            <div style="position: absolute; top: -8px; left: -8px; width: 16px; height: 16px; border-radius: 50%; background: #06b6d4; border: 2px solid #ffffff; box-shadow: 0 0 12px rgba(6,182,212,0.9);"></div>
-            <div style="position: absolute; top: 11px; left: 0; transform: translateX(-50%); background: rgba(15, 23, 42, 0.95); border: 1px solid #06b6d4; border-radius: 4px; padding: 2px 6px; font-size: 9.5px; font-weight: 700; color: #67e8f9; white-space: nowrap; font-family: monospace; box-shadow: 0 2px 8px rgba(0,0,0,0.8);">
-              P1: (${anchorP1.gameX.toFixed(0)}, ${anchorP1.gameY.toFixed(0)})
-            </div>
-          </div>
-        `,
-        iconSize: [0, 0],
-        iconAnchor: [0, 0],
-      });
-      const p1Marker = L.marker([anchorP1.mapLat, anchorP1.mapLng], {
-        icon: a1Icon,
-      }).addTo(calibGroup);
-      p1Marker.on("click", () => setAnchorP1(null));
-    }
-
-    if (anchorP2) {
-      const a2Icon = L.divIcon({
-        className: "anchor-pin-2",
-        html: `
-          <div style="position: relative; width: 0; height: 0; cursor: pointer;">
-            <div style="position: absolute; top: -8px; left: -8px; width: 16px; height: 16px; border-radius: 50%; background: #ec4899; border: 2px solid #ffffff; box-shadow: 0 0 12px rgba(236,72,153,0.9);"></div>
-            <div style="position: absolute; top: 11px; left: 0; transform: translateX(-50%); background: rgba(15, 23, 42, 0.95); border: 1px solid #ec4899; border-radius: 4px; padding: 2px 6px; font-size: 9.5px; font-weight: 700; color: #f472b6; white-space: nowrap; font-family: monospace; box-shadow: 0 2px 8px rgba(0,0,0,0.8);">
-              P2: (${anchorP2.gameX.toFixed(0)}, ${anchorP2.gameY.toFixed(0)})
-            </div>
-          </div>
-        `,
-        iconSize: [0, 0],
-        iconAnchor: [0, 0],
-      });
-      const p2Marker = L.marker([anchorP2.mapLat, anchorP2.mapLng], {
-        icon: a2Icon,
-      }).addTo(calibGroup);
-      p2Marker.on("click", () => setAnchorP2(null));
-    }
-
-    // 5. Draw Measure Pin if placed
-    if (calibrationPin) {
-      const pinIcon = L.divIcon({
-        className: "calib-pin-icon",
-        html: `
-          <div style="position: relative; width: 0; height: 0; cursor: pointer;">
-            <div style="position: absolute; top: -8px; left: -8px; width: 16px; height: 16px; border-radius: 50%; background: #f59e0b; border: 2px solid #ffffff; box-shadow: 0 0 12px rgba(245, 158, 11, 0.9);"></div>
-            <div style="position: absolute; top: 11px; left: 0; transform: translateX(-50%); background: rgba(15, 23, 42, 0.95); border: 1px solid #f59e0b; border-radius: 4px; padding: 2px 6px; font-size: 10px; font-weight: 700; color: #fbbf24; white-space: nowrap; font-family: monospace; box-shadow: 0 2px 10px rgba(0,0,0,0.8);">
-              X: ${calibrationPin.x.toFixed(1)}m | Y: ${calibrationPin.y.toFixed(1)}m
-            </div>
-          </div>
-        `,
-        iconSize: [0, 0],
-        iconAnchor: [0, 0],
-      });
-      const pinMarker = L.marker([calibrationPin.lat, calibrationPin.lng], {
-        icon: pinIcon,
-      }).addTo(calibGroup);
-      pinMarker.on("click", () => setCalibrationPin(null));
-    }
-  }, [
-    showCalibrationTool,
-    showGridOverlay,
-    showDistrictBoxes,
-    calibCenterLat,
-    calibCenterLng,
-    calibScaleX,
-    calibScaleY,
-    calibRotation,
-    calibInvertX,
-    calibInvertY,
-    calibSwapXY,
-    calibGridInterval,
-    calibrationPin,
-    anchorP1,
-    anchorP2,
-  ]);
-
-  // Live Player Character Marker on Leaflet Map
-  useEffect(() => {
-    const L = leafletModuleRef.current;
-    const map = mapInstanceRef.current;
-    if (!map || !L) return;
-
-    if (isPlayerTracked && livePlayerPos != null) {
-      const [calibLat, calibLng] = projectGameCoords(
-        livePlayerPos.x,
-        livePlayerPos.y,
-        calibCenterLat,
-        calibCenterLng,
-        calibScaleY,
-        calibScaleX,
-        calibRotation,
-        calibInvertX,
-        calibInvertY,
-        calibSwapXY,
-      );
-      const lat = showCalibrationTool
-        ? calibLat
-        : (livePlayerPos.map_lat ?? calibLat);
-      const lng = showCalibrationTool
-        ? calibLng
-        : (livePlayerPos.map_lng ?? calibLng);
-      const heading = (livePlayerPos.heading_degrees ?? 0) - calibRotation;
-      const districtText = livePlayerPos.district || "Empire Bay";
-
-      const playerIconHtml = `
-        <div class="player-live-wrapper" style="position: relative; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; cursor: pointer;">
-          <div class="player-beacon-pulse" style="position: absolute; width: 38px; height: 38px; border-radius: 50%; background: rgba(34, 197, 94, 0.25); border: 2px solid #22c55e; pointer-events: none;"></div>
-          <div style="transform: rotate(${heading}deg); transition: transform 0.08s linear; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; position: relative;">
-            <svg viewBox="0 0 32 32" width="30" height="30" style="position: absolute; top: 0; left: 0; filter: drop-shadow(0 2px 5px rgba(0,0,0,0.8));">
-              <polygon points="16,2 26,28 16,22 6,28" fill="#22c55e" stroke="#ffffff" stroke-width="1.8" stroke-linejoin="round"/>
-            </svg>
-          </div>
-          <div style="position: absolute; width: 8px; height: 8px; border-radius: 50%; background: #ffffff; border: 2px solid #15803d; pointer-events: none;"></div>
-        </div>
-      `;
-
-      const playerIcon = L.divIcon({
-        className: "live-player-icon",
-        html: playerIconHtml,
-        iconSize: [44, 44],
-        iconAnchor: [22, 22],
-        popupAnchor: [0, -22],
-      });
-
-      const popupHtml = `
-        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; min-width: 170px; color: #ffffff;">
-          <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
-            <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #22c55e;"></span>
-            <span style="font-size: 13px; font-weight: 700; color: #22c55e; font-family: 'Oswald', sans-serif; text-transform: uppercase;">LIVE CHARACTER</span>
-          </div>
-          <div style="font-size: 14px; font-weight: 700; color: #ffffff; margin-bottom: 4px;">${districtText}</div>
-          <div style="font-size: 11px; color: #94a3b8; font-family: monospace;">X: ${livePlayerPos.x.toFixed(1)}m | Y: ${livePlayerPos.y.toFixed(1)}m | Z: ${livePlayerPos.z.toFixed(1)}m</div>
-        </div>
-      `;
-
-      if (!playerMarkerRef.current) {
-        const marker = L.marker([lat, lng], {
-          icon: playerIcon,
-          zIndexOffset: 10000,
-        }).addTo(map);
-
-        marker.bindPopup(popupHtml, { minWidth: 180 });
-        playerMarkerRef.current = marker;
-      } else {
-        playerMarkerRef.current.setLatLng([lat, lng]);
-        playerMarkerRef.current.setIcon(playerIcon);
-        playerMarkerRef.current.setPopupContent(popupHtml);
-      }
-
-      if (followPlayer && !(map as any)._animatingZoom) {
-        map.panTo([lat, lng], { animate: true, duration: 0.15 });
-      }
-    } else if (playerMarkerRef.current) {
-      map.removeLayer(playerMarkerRef.current);
-      playerMarkerRef.current = null;
-    }
-  }, [
-    livePlayerPos,
-    isPlayerTracked,
-    followPlayer,
-    mapReady,
-    showCalibrationTool,
-    calibCenterLat,
-    calibCenterLng,
-    calibScaleX,
-    calibScaleY,
-    calibRotation,
-    calibInvertX,
-    calibInvertY,
-    calibSwapXY,
-  ]);
-
   // 1. Build all markers once when map and data are ready
   useEffect(() => {
     const L = leafletModuleRef.current;
@@ -2159,6 +1916,13 @@ export function MapViewer({
     iconCacheRef.current.clear();
     markersMapRef.current.clear();
     const created: typeof allMarkersRef.current = [];
+
+    // Dynamically calculate and update content boundaries based on all loaded locations
+    let locMinLat = Infinity,
+      locMaxLat = -Infinity,
+      locMinLng = Infinity,
+      locMaxLng = -Infinity;
+    let validLocCount = 0;
 
     normalizedLocations.forEach((loc) => {
       const lat =
@@ -2170,6 +1934,14 @@ export function MapViewer({
           ? parseFloat(loc.longitude)
           : loc.longitude;
       if (isNaN(lat) || isNaN(lng)) return;
+
+      if (lat !== 0 || lng !== 0) {
+        locMinLat = Math.min(locMinLat, lat);
+        locMaxLat = Math.max(locMaxLat, lat);
+        locMinLng = Math.min(locMinLng, lng);
+        locMaxLng = Math.max(locMaxLng, lng);
+        validLocCount++;
+      }
 
       const cId = String(loc.category_id);
       const isFound = foundIdsRef.current.has(loc.id);
@@ -2244,10 +2016,10 @@ export function MapViewer({
                 ${loc.title || "Location"}
               </div>
               ${mediaHtml}
-              ${loc.description ? `<div style="font-size: 12px; color: #cbd5e1; line-height: 1.45; background: #161a24; border: 1px solid #232a3b; border-radius: 6px; padding: 8px 10px; max-height: 140px; overflow-y: auto;">${formattedDesc}</div>` : ""}
+              ${loc.description ? `<div class="popup-desc-container" style="font-size: 12px; color: #cbd5e1; line-height: 1.45; background: #161a24; border: 1px solid #232a3b; border-radius: 6px; padding: 8px 10px; max-height: 140px; overflow-y: auto;">${formattedDesc}</div>` : ""}
               <div style="margin-top: 10px;">
                 <button class="toggle-found-btn" style="width: 100%; padding: 6px 12px; font-size: 11.5px; font-weight: 700; letter-spacing: 0.8px; text-transform: uppercase; border-radius: 4px; border: 1px solid ${currentIsFound ? "#e03131" : "#242c3d"}; cursor: pointer; background: ${currentIsFound ? "#e03131" : "#171c26"}; color: #ffffff; transition: all 0.15s ease;">
-                  ${currentIsFound ? "✓ MARKED AS FOUND" : "FOUND"}
+                  ${currentIsFound ? "MARKED AS FOUND" : "FOUND"}
                 </button>
               </div>
             </div>
@@ -2281,7 +2053,7 @@ export function MapViewer({
                 ? "#e03131"
                 : "#242c3d";
               (btn as HTMLButtonElement).innerText = nextFound
-                ? "✓ MARKED AS FOUND"
+                ? "MARKED AS FOUND"
                 : "FOUND";
             });
           }
@@ -2332,13 +2104,45 @@ export function MapViewer({
     });
 
     allMarkersRef.current = created;
+
+    if (validLocCount > 0 && locMinLat < locMaxLat && locMinLng < locMaxLng) {
+      const allowed = L.latLngBounds(
+        [locMinLat, locMinLng],
+        [locMaxLat, locMaxLng],
+      ).pad(0.35);
+      if (mapInstanceRef.current) {
+        (mapInstanceRef.current as any)._allowedCenterBounds = allowed;
+      }
+    }
+
+    // Immediately add markers to the layerGroup so they appear instantly
+    const layerGroup = markerGroupRef.current;
+    if (layerGroup) {
+      layerGroup.clearLayers();
+      const term = debouncedSearch.trim().toLowerCase();
+      created.forEach((item) => {
+        if (categoryState[item.cId] === false) return;
+        const isFound = foundIds.has(item.id);
+        if (hideFound && isFound) return;
+        if (term) {
+          const title = item.loc.title || "";
+          const desc = item.loc.description || "";
+          if (
+            !title.toLowerCase().includes(term) &&
+            !desc.toLowerCase().includes(term)
+          )
+            return;
+        }
+        layerGroup.addLayer(item.marker);
+      });
+    }
   }, [mapReady, normalizedLocations, getIcon, categoriesById]);
 
   // 2. High-speed visibility / filter sync without re-allocating markers
   useEffect(() => {
     const layerGroup = markerGroupRef.current;
     const L = leafletModuleRef.current;
-    if (!layerGroup || !L || allMarkersRef.current.length === 0) return;
+    if (!layerGroup || !L) return;
 
     layerGroup.clearLayers();
     const term = debouncedSearch.trim().toLowerCase();
@@ -2359,9 +2163,7 @@ export function MapViewer({
 
       // Ensure icon reflects current found status
       const icon = getIcon(item.cId, isFound, L);
-      if (item.marker.getIcon() !== icon) {
-        item.marker.setIcon(icon);
-      }
+      item.marker.setIcon(icon);
 
       layerGroup.addLayer(item.marker);
     });
@@ -2376,6 +2178,33 @@ export function MapViewer({
     return count;
   }, [normalizedLocations, foundIds]);
 
+  const spriteMap = useMemo(
+    () => mapData?.mapConfig?.markerSpritePositions || {},
+    [mapData?.mapConfig?.markerSpritePositions],
+  );
+  const spriteImgUrl =
+    offlineSpriteUrl ||
+    mapData?.mapConfig?.markerImagesUrl ||
+    (effectiveGameSlug
+      ? `https://cdn.mapgenie.io/images/games/${effectiveGameSlug}/markers@2x.png`
+      : "");
+  const spriteWidth = useMemo(
+    () =>
+      detectedSpriteDimensions?.width ??
+      (mapData?.mapConfig?.markerImagesWidth
+        ? mapData.mapConfig.markerImagesWidth / 2
+        : undefined),
+    [detectedSpriteDimensions?.width, mapData?.mapConfig?.markerImagesWidth],
+  );
+  const spriteHeight = useMemo(
+    () =>
+      detectedSpriteDimensions?.height ??
+      (mapData?.mapConfig?.markerImagesHeight
+        ? mapData.mapConfig.markerImagesHeight / 2
+        : undefined),
+    [detectedSpriteDimensions?.height, mapData?.mapConfig?.markerImagesHeight],
+  );
+
   const progressPercent =
     totalLocations > 0 ? Math.round((totalFound / totalLocations) * 100) : 0;
 
@@ -2388,7 +2217,9 @@ export function MapViewer({
       mapData.groups.forEach((g) => {
         if (Array.isArray(g.categories)) {
           g.categories.forEach((c) => {
-            if (!allCats.some((existing) => String(existing.id) === String(c.id))) {
+            if (
+              !allCats.some((existing) => String(existing.id) === String(c.id))
+            ) {
               allCats.push({ ...c, group_id: c.group_id || g.id });
             }
           });
@@ -2398,13 +2229,17 @@ export function MapViewer({
 
     if (Array.isArray(mapData?.groups) && mapData.groups.length > 0) {
       return mapData.groups.map((g) => {
-        let cats = Array.isArray(g.categories) && g.categories.length > 0 ? [...g.categories] : [];
+        let cats =
+          Array.isArray(g.categories) && g.categories.length > 0
+            ? [...g.categories]
+            : [];
         if (cats.length === 0) {
           cats = allCats.filter(
             (c) =>
               String(c.group_id) === String(g.id) ||
               (c as any).group_title === g.title ||
-              ((c as any).group && String((c as any).group.id) === String(g.id))
+              ((c as any).group &&
+                String((c as any).group.id) === String(g.id)),
           );
         }
         return {
@@ -2453,84 +2288,81 @@ export function MapViewer({
       {isSidebarOpen && (
         <Box
           style={{
-            width: isOverlay && overlayShape === "circle" ? "100%" : isOverlay ? 300 : 360,
-            minWidth: isOverlay && overlayShape === "circle" ? "100%" : isOverlay ? 300 : 360,
-            maxWidth: isOverlay && overlayShape !== "circle" ? "85vw" : undefined,
+            width: isOverlay ? 300 : 360,
+            minWidth: isOverlay ? 300 : 360,
+            maxWidth: isOverlay ? "85vw" : undefined,
             height: "100%",
             backgroundColor: isOverlay ? "rgba(8, 10, 15, 0.98)" : "#000000",
             backdropFilter: isOverlay ? "blur(16px)" : undefined,
-            borderRight: isOverlay && overlayShape === "circle" ? "none" : "1px solid #1a1a1a",
-            borderRadius: isOverlay && overlayShape === "circle" ? "50%" : undefined,
+            borderRight: "1px solid #1a1a1a",
             display: "flex",
             flexDirection: "column",
             position: isOverlay ? "absolute" : "relative",
-            inset: isOverlay && overlayShape === "circle" ? 0 : undefined,
-            left: isOverlay && overlayShape !== "circle" ? 0 : undefined,
-            top: isOverlay && overlayShape !== "circle" ? 0 : undefined,
-            bottom: isOverlay && overlayShape !== "circle" ? 0 : undefined,
+            left: isOverlay ? 0 : undefined,
+            top: isOverlay ? 0 : undefined,
+            bottom: isOverlay ? 0 : undefined,
             zIndex: 1200,
             fontFamily: "'Oswald', 'Arial Narrow', sans-serif",
             color: "#ffffff",
             userSelect: "none",
-            boxShadow: isOverlay && overlayShape !== "circle" ? "5px 0 28px rgba(0,0,0,0.85)" : undefined,
-            padding: isOverlay && overlayShape === "circle" ? "64px 14px 48px 14px" : undefined,
-            overflowY: isOverlay && overlayShape === "circle" ? "auto" : "hidden",
+            boxShadow: isOverlay ? "5px 0 28px rgba(0,0,0,0.85)" : undefined,
+            overflowY: "hidden",
             overflowX: "hidden",
           }}
         >
           {/* Top Header & Logo */}
           <Box
+            data-tauri-drag-region={isOverlay ? "" : undefined}
+            onMouseDown={
+              isOverlay
+                ? async (e) => {
+                    if (e.button !== 0 && e.button !== 1) return;
+                    if (
+                      (e.target as HTMLElement).closest(
+                        "button, [role='button'], input, [data-tauri-drag-region='false']",
+                      )
+                    )
+                      return;
+                    if (
+                      typeof window !== "undefined" &&
+                      (window as any).__TAURI_INTERNALS__
+                    ) {
+                      try {
+                        const { getCurrentWindow } = await import(
+                          "@tauri-apps/api/window"
+                        );
+                        await getCurrentWindow().startDragging();
+                      } catch (_) {}
+                    }
+                  }
+                : undefined
+            }
             style={{
-              padding: isOverlay && overlayShape === "circle" ? "4px 6px 8px" : "14px 16px 10px",
+              padding: "14px 16px 10px",
               borderBottom: "1px solid #141414",
               textAlign: "center",
               position: "relative",
               flexShrink: 0,
+              cursor: isOverlay ? "grab" : undefined,
             }}
           >
-            {isOverlay && overlayShape === "circle" ? (
-              <Flex justify="space-between" align="center" style={{ marginBottom: 6, padding: "0 2px" }}>
-                <Text
-                  style={{
-                    fontSize: 11.5,
-                    fontWeight: 800,
-                    color: "#60a5fa",
-                    textTransform: "uppercase",
-                    letterSpacing: 0.8,
-                  }}
-                >
-                  MAP FILTERS
-                </Text>
-                <Button
-                  size="compact-xs"
-                  variant="filled"
-                  color="red"
-                  leftSection={<X size={11} />}
-                  onClick={handleCloseSidebar}
-                  style={{ fontSize: 10, height: 22, padding: "0 8px", cursor: "pointer" }}
-                >
-                  EXIT
-                </Button>
-              </Flex>
-            ) : (
-              <ActionIcon
-                size="sm"
-                variant="subtle"
-                color="gray"
-                pos="absolute"
-                top={8}
-                right={8}
-                onClick={handleCloseSidebar}
-                title="Close Sidebar"
-                style={{ cursor: "pointer", zIndex: 10, color: "#cbd5e1" }}
-              >
-                <X size={15} color="#cbd5e1" />
-              </ActionIcon>
-            )}
+            <ActionIcon
+              size="sm"
+              variant="subtle"
+              color="gray"
+              pos="absolute"
+              top={8}
+              right={8}
+              onClick={handleCloseSidebar}
+              title="Close Sidebar"
+              style={{ cursor: "pointer", zIndex: 10, color: "#cbd5e1" }}
+            >
+              <X size={15} color="#cbd5e1" />
+            </ActionIcon>
 
             <Text
               style={{
-                fontSize: isOverlay && overlayShape === "circle" ? 14 : 22,
+                fontSize: 22,
                 fontWeight: 700,
                 letterSpacing: 1.2,
                 lineHeight: 1.1,
@@ -2542,589 +2374,535 @@ export function MapViewer({
               {gameTitle || effectiveGameSlug.replace(/-/g, " ")} MAP
             </Text>
 
-          <Text
-            style={{
-              fontSize: 11.5,
-              fontWeight: 600,
-              letterSpacing: 1,
-              color: "#a0a0a0",
-              textTransform: "uppercase",
-              marginTop: 4,
-              fontFamily: "'Oswald', 'Arial Narrow', sans-serif",
-            }}
-          >
-            {gameTitle || effectiveGameSlug.replace(/-/g, " ")} INTERACTIVE MAP
-          </Text>
+            <Text
+              style={{
+                fontSize: 11.5,
+                fontWeight: 600,
+                letterSpacing: 1,
+                color: "#a0a0a0",
+                textTransform: "uppercase",
+                marginTop: 4,
+                fontFamily: "'Oswald', 'Arial Narrow', sans-serif",
+              }}
+            >
+              {gameTitle || effectiveGameSlug.replace(/-/g, " ")} INTERACTIVE
+              MAP
+            </Text>
 
-          {/* Offline Download Status / Progress / Button */}
-          <Box style={{ marginTop: 10 }}>
-            {downloading ? (
-              <Box
-                style={{
-                  backgroundColor: "#091428",
-                  border: "1px solid #1e3a8a",
-                  borderRadius: 4,
-                  padding: "8px 10px",
-                }}
-              >
-                <Flex
-                  justify="space-between"
-                  align="center"
-                  style={{ marginBottom: 5 }}
+            {/* Offline Download Status / Progress / Button */}
+            <Box style={{ marginTop: 10 }}>
+              {downloading ? (
+                <Box
+                  style={{
+                    backgroundColor: "#091428",
+                    border: "1px solid #1e3a8a",
+                    borderRadius: 4,
+                    padding: "8px 10px",
+                  }}
                 >
-                  <Flex align="center" gap={6}>
-                    <Loader2 size={12} className="spin" color="#60a5fa" />
-                    <Text
+                  <Flex
+                    justify="space-between"
+                    align="center"
+                    style={{ marginBottom: 5 }}
+                  >
+                    <Flex align="center" gap={6}>
+                      <Loader2 size={12} className="spin" color="#60a5fa" />
+                      <Text
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          color: "#60a5fa",
+                          letterSpacing: 0.5,
+                        }}
+                      >
+                        DOWNLOADING ({downloadProgress?.percentage || 0}%)
+                      </Text>
+                    </Flex>
+                    <UnstyledButton
+                      onClick={handleCancelDownload}
                       style={{
-                        fontSize: 11,
+                        fontSize: 10,
                         fontWeight: 700,
-                        color: "#60a5fa",
+                        color: "#f87171",
+                        cursor: "pointer",
                         letterSpacing: 0.5,
                       }}
                     >
-                      DOWNLOADING ({downloadProgress?.percentage || 0}%)
-                    </Text>
+                      CANCEL
+                    </UnstyledButton>
                   </Flex>
-                  <UnstyledButton
-                    onClick={handleCancelDownload}
-                    style={{
-                      fontSize: 10,
-                      fontWeight: 700,
-                      color: "#f87171",
-                      cursor: "pointer",
-                      letterSpacing: 0.5,
-                    }}
-                  >
-                    CANCEL
-                  </UnstyledButton>
-                </Flex>
-                <Progress
-                  value={downloadProgress?.percentage || 0}
-                  size="xs"
-                  color="blue"
-                  animated
-                />
-                <Text
-                  style={{
-                    fontSize: 9.5,
-                    color: "#94a3b8",
-                    marginTop: 4,
-                    textAlign: "center",
-                    textTransform: "none",
-                  }}
-                >
-                  {downloadProgress?.status || "Downloading tiles & assets..."}
-                </Text>
-              </Box>
-            ) : isOfflineReady ? (
-              <Flex
-                justify="space-between"
-                align="center"
-                style={{
-                  backgroundColor: "#062817",
-                  border: "1px solid #166534",
-                  borderRadius: 4,
-                  padding: "4px 10px",
-                }}
-              >
-                <Flex align="center" gap={6}>
-                  <Check size={12} color="#4ade80" />
+                  <Progress
+                    value={downloadProgress?.percentage || 0}
+                    size="xs"
+                    color="blue"
+                    animated
+                  />
                   <Text
                     style={{
-                      fontSize: 11,
-                      fontWeight: 700,
-                      color: "#4ade80",
-                      letterSpacing: 0.6,
+                      fontSize: 9.5,
+                      color: "#94a3b8",
+                      marginTop: 4,
+                      textAlign: "center",
+                      textTransform: "none",
                     }}
                   >
-                    OFFLINE READY
+                    {downloadProgress?.status ||
+                      "Downloading tiles & assets..."}
                   </Text>
-                </Flex>
-                <UnstyledButton
-                  onClick={handleDeleteOffline}
-                  title="Remove offline downloaded map files"
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 700,
-                    color: "#f87171",
-                    letterSpacing: 0.5,
-                    cursor: "pointer",
-                  }}
-                >
-                  REMOVE
-                </UnstyledButton>
-              </Flex>
-            ) : (
-              <Button
-                variant="filled"
-                size="xs"
-                fullWidth
-                leftSection={<Download size={13} />}
-                onClick={handleStartDownload}
-                style={{
-                  backgroundColor: "#0c1424",
-                  border: "1px solid #243454",
-                  color: "#93c5fd",
-                  fontSize: 11,
-                  fontWeight: 700,
-                  letterSpacing: 0.8,
-                  height: 28,
-                  borderRadius: 4,
-                  fontFamily: "'Oswald', 'Arial Narrow', sans-serif",
-                }}
-              >
-                DOWNLOAD OFFLINE MAP
-              </Button>
-            )}
-
-            {/* Live Game Character Tracker Panel */}
-            {isTrackerSupported && (
-              <Box
-                style={{
-                  marginTop: 8,
-                  backgroundColor: isPlayerTracked
-                    ? "rgba(6, 40, 23, 0.7)"
-                    : isGameRunningTracker
-                      ? "rgba(40, 30, 6, 0.7)"
-                      : "rgba(18, 20, 28, 0.7)",
-                  border: `1px solid ${
-                    isPlayerTracked
-                      ? "#166534"
-                      : isGameRunningTracker
-                        ? "#854d0e"
-                        : "#262e3d"
-                  }`,
-                  borderRadius: 4,
-                  padding: "8px 10px",
-                }}
-              >
-                <Flex justify="space-between" align="center">
-                  <Flex align="center" gap={6}>
-                    <Radio
-                      size={13}
-                      color={
-                        isPlayerTracked
-                          ? "#22c55e"
-                          : isGameRunningTracker
-                            ? "#eab308"
-                            : "#94a3b8"
-                      }
-                      className={
-                        isPlayerTracked ? "player-beacon-pulse" : undefined
-                      }
-                    />
-                    <Text
+                </Box>
+              ) : isOfflineReady ? (
+                hasOfflineUpdate ? (
+                  <Box
+                    style={{
+                      backgroundColor: "rgba(245, 158, 11, 0.08)",
+                      border: "1px solid rgba(245, 158, 11, 0.4)",
+                      borderRadius: 4,
+                      padding: "8px 10px",
+                    }}
+                  >
+                    <Flex
+                      justify="space-between"
+                      align="center"
+                      style={{ marginBottom: 6 }}
+                    >
+                      <Flex align="center" gap={6}>
+                        <RefreshCw size={12} color="#fbbf24" />
+                        <Text
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 700,
+                            color: "#fbbf24",
+                            letterSpacing: 0.6,
+                          }}
+                        >
+                          UPDATE AVAILABLE
+                        </Text>
+                      </Flex>
+                      <UnstyledButton
+                        onClick={handleDeleteOffline}
+                        title="Remove offline downloaded map files"
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 700,
+                          color: "#f87171",
+                          letterSpacing: 0.5,
+                          cursor: "pointer",
+                        }}
+                      >
+                        REMOVE
+                      </UnstyledButton>
+                    </Flex>
+                    {updateReason && (
+                      <Text
+                        style={{
+                          fontSize: 10,
+                          color: "#d1d5db",
+                          marginBottom: 8,
+                          lineHeight: 1.3,
+                          textTransform: "none",
+                        }}
+                      >
+                        {updateReason}
+                      </Text>
+                    )}
+                    <Button
+                      variant="filled"
+                      size="xs"
+                      fullWidth
+                      leftSection={<RefreshCw size={12} />}
+                      onClick={handleStartDownload}
                       style={{
+                        backgroundColor: "#d97706",
+                        color: "#ffffff",
                         fontSize: 11,
                         fontWeight: 700,
                         letterSpacing: 0.8,
-                        color: isPlayerTracked
-                          ? "#4ade80"
-                          : isGameRunningTracker
-                            ? "#fde047"
-                            : "#cbd5e1",
-                        textTransform: "uppercase",
+                        height: 28,
+                        borderRadius: 4,
+                        fontFamily: "'Oswald', 'Arial Narrow', sans-serif",
                       }}
                     >
-                      {isPlayerTracked
-                        ? `GPS: ${livePlayerPos?.district || "ACTIVE"}`
-                        : isGameRunningTracker
-                          ? "GAME RUNNING"
-                          : "LIVE GPS TRACKER"}
-                    </Text>
-                  </Flex>
-                  <UnstyledButton
-                    onClick={toggleTracking}
-                    style={{
-                      fontSize: 10,
-                      fontWeight: 700,
-                      color: isTrackerActive ? "#4ade80" : "#94a3b8",
-                      letterSpacing: 0.5,
-                      cursor: "pointer",
-                    }}
-                  >
-                    {isTrackerActive ? "ENABLED" : "ENABLE"}
-                  </UnstyledButton>
-                </Flex>
-
-                {isPlayerTracked && livePlayerPos?.map_lat != null && (
+                      UPDATE DOWNLOADED MAP
+                    </Button>
+                  </Box>
+                ) : (
                   <Flex
                     justify="space-between"
                     align="center"
                     style={{
-                      marginTop: 6,
-                      paddingTop: 6,
-                      borderTop: "1px solid rgba(22, 101, 52, 0.4)",
+                      backgroundColor: "#062817",
+                      border: "1px solid #166534",
+                      borderRadius: 4,
+                      padding: "4px 10px",
                     }}
                   >
-                    <UnstyledButton
-                      onClick={() => {
-                        if (
-                          mapInstanceRef.current &&
-                          livePlayerPos.map_lat != null &&
-                          livePlayerPos.map_lng != null
-                        ) {
-                          mapInstanceRef.current.setView(
-                            [livePlayerPos.map_lat, livePlayerPos.map_lng],
-                            Math.max(mapInstanceRef.current.getZoom(), 11),
-                            { animate: true },
-                          );
-                          setFollowPlayer(true);
-                        }
-                      }}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 4,
-                        fontSize: 10.5,
-                        fontWeight: 700,
-                        color: "#86efac",
-                        letterSpacing: 0.5,
-                        cursor: "pointer",
-                      }}
-                    >
-                      <Crosshair size={11} />
-                      CENTER CHARACTER
-                    </UnstyledButton>
-                    <UnstyledButton
-                      onClick={toggleFollowPlayer}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 4,
-                        fontSize: 10.5,
-                        fontWeight: 700,
-                        color: followPlayer ? "#22c55e" : "#64748b",
-                        letterSpacing: 0.5,
-                        cursor: "pointer",
-                      }}
-                    >
-                      <Navigation size={11} />
-                      {followPlayer ? "AUTO-PAN: ON" : "AUTO-PAN: OFF"}
-                    </UnstyledButton>
-                    <UnstyledButton
-                      onClick={() => setShowCalibrationTool((prev) => !prev)}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 4,
-                        fontSize: 10.5,
-                        fontWeight: 700,
-                        color: showCalibrationTool ? "#60a5fa" : "#94a3b8",
-                        letterSpacing: 0.5,
-                        cursor: "pointer",
-                      }}
-                    >
-                      <Sliders size={11} />
-                      {showCalibrationTool ? "SCALE: ON" : "SCALE"}
-                    </UnstyledButton>
-                  </Flex>
-                )}
-              </Box>
-            )}
-          </Box>
-        </Box>
-
-        {/* SHOW ALL / HIDE ALL Bar */}
-        <Flex
-          justify="center"
-          align="center"
-          gap={32}
-          style={{
-            padding: "10px 16px",
-            borderBottom: "1px solid #141414",
-            backgroundColor: "#050505",
-          }}
-        >
-          <UnstyledButton
-            onClick={showAllCategories}
-            style={{
-              fontSize: 13,
-              fontWeight: 700,
-              color: "#ffffff",
-              letterSpacing: 1.2,
-              textTransform: "uppercase",
-              fontFamily: "'Oswald', 'Arial Narrow', sans-serif",
-            }}
-          >
-            SHOW ALL
-          </UnstyledButton>
-
-          <UnstyledButton
-            onClick={hideAllCategories}
-            style={{
-              fontSize: 13,
-              fontWeight: 700,
-              color: "#ffffff",
-              letterSpacing: 1.2,
-              textTransform: "uppercase",
-              fontFamily: "'Oswald', 'Arial Narrow', sans-serif",
-            }}
-          >
-            HIDE ALL
-          </UnstyledButton>
-        </Flex>
-
-        {/* Search Bar + Button */}
-        <Box
-          style={{
-            padding: "12px 16px 8px",
-            borderBottom: "1px solid #141414",
-          }}
-        >
-          <Flex gap={4}>
-            <TextInput
-              placeholder="Search..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.currentTarget.value)}
-              styles={{
-                root: { flex: 1 },
-                input: {
-                  backgroundColor: "#080808",
-                  borderColor: "#222222",
-                  color: "#ffffff",
-                  fontSize: 13,
-                  borderRadius: 2,
-                  fontFamily: "'Oswald', 'Arial Narrow', sans-serif",
-                  letterSpacing: 0.5,
-                  height: 32,
-                },
-              }}
-            />
-            <Button
-              variant="default"
-              size="xs"
-              style={{
-                backgroundColor: "#080808",
-                borderColor: "#222222",
-                color: "#ffffff",
-                fontSize: 12,
-                fontWeight: 700,
-                letterSpacing: 1,
-                borderRadius: 2,
-                height: 32,
-                padding: "0 12px",
-                fontFamily: "'Oswald', 'Arial Narrow', sans-serif",
-              }}
-              onClick={() => {}}
-            >
-              SEARCH
-            </Button>
-          </Flex>
-
-          <Text
-            style={{
-              fontSize: 11,
-              fontWeight: 500,
-              color: "#e5b95f",
-              letterSpacing: 0.3,
-              marginTop: 6,
-              textAlign: "center",
-              fontFamily: "'Oswald', 'Arial Narrow', sans-serif",
-            }}
-          >
-            Tip: Right-click any marker to mark as found!
-          </Text>
-        </Box>
-
-        {/* Categories 2-Column List */}
-        <Box
-          style={{
-            flex: isOverlay && overlayShape === "circle" ? "none" : 1,
-            overflowY: isOverlay && overlayShape === "circle" ? "visible" : "auto",
-            padding: isOverlay && overlayShape === "circle" ? "10px 4px" : "12px 16px",
-          }}
-        >
-          {groupsList.map((g) => (
-            <Box key={g.id} style={{ marginBottom: 18 }}>
-              {/* Group Title - Click to toggle all categories in this group */}
-              {(() => {
-                const groupCats = g.categories || [];
-                const isGroupVisible =
-                  groupCats.length > 0
-                    ? groupCats.some(
-                        (c) => categoryState[String(c.id)] !== false,
-                      )
-                    : true;
-                return (
-                  <Text
-                    onClick={() => toggleGroupCategories(groupCats)}
-                    style={{
-                      fontSize: 13,
-                      fontWeight: 700,
-                      color: isGroupVisible ? "#ffffff" : "#718096",
-                      textTransform: "uppercase",
-                      letterSpacing: 1,
-                      marginBottom: 8,
-                      borderBottom: `1px solid ${isGroupVisible ? "#262b36" : "#141414"}`,
-                      paddingBottom: 4,
-                      fontFamily: "'Oswald', 'Arial Narrow', sans-serif",
-                      cursor: "pointer",
-                      transition: "all 0.15s ease",
-                      userSelect: "none",
-                      opacity: isGroupVisible ? 1 : 0.45,
-                    }}
-                    title={isGroupVisible ? "Click to hide all items in this category group" : "Click to show all items in this category group"}
-                  >
-                    {g.title}
-                  </Text>
-                );
-              })()}
-
-              {/* 2-Column Grid */}
-              <Box
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                  columnGap: 14,
-                  rowGap: 6,
-                }}
-              >
-                {g.categories?.map((c) => {
-                  const sId = String(c.id);
-                  const isVisible = categoryState[sId] !== false;
-                  const total = categoryCounts[sId] || c.locations_count || 0;
-                  const found = categoryFoundCounts[sId] || 0;
-                  const isComplete = total > 0 && found >= total;
-                  const rawIcon = c.icon || "miscellaneous";
-                  const iconDash = rawIcon.replace(/_/g, "-");
-                  const iconUnder = rawIcon.replace(/-/g, "_");
-
-                  return (
-                    <Box
-                      key={c.id}
-                      onClick={() => toggleCategory(c.id)}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        padding: "3px 2px",
-                        cursor: "pointer",
-                        opacity: isVisible ? 1 : 0.28,
-                        transition: "opacity 0.12s",
-                      }}
-                    >
-                      <Flex
-                        align="center"
-                        gap={6}
-                        style={{ overflow: "hidden", minWidth: 0, flex: 1 }}
-                      >
-                        <span
-                          className={`cat-icon icon-${iconDash} icon-${iconUnder}`}
-                          style={{
-                            fontSize: 13,
-                            width: 15,
-                            height: 15,
-                            display: "inline-flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            flexShrink: 0,
-                            color: isVisible ? "#ffffff" : "#666666",
-                          }}
-                        />
-                        <Text
-                          style={{
-                            fontSize: 11,
-                            fontWeight: 600,
-                            color: isVisible ? "#e2e8f0" : "#666666",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                            textTransform: "uppercase",
-                            letterSpacing: 0.4,
-                            fontFamily: "'Oswald', 'Arial Narrow', sans-serif",
-                          }}
-                          title={c.title}
-                        >
-                          {c.title}
-                        </Text>
-                      </Flex>
-
+                    <Flex align="center" gap={6}>
+                      <Check size={12} color="#4ade80" />
                       <Text
                         style={{
-                          fontSize: 11.5,
+                          fontSize: 11,
                           fontWeight: 700,
-                          color: isComplete
-                            ? "#4ade80"
-                            : isVisible
-                              ? "#ffffff"
-                              : "#666666",
-                          flexShrink: 0,
-                          marginLeft: 4,
-                          fontFamily: "'Oswald', 'Arial Narrow', sans-serif",
+                          color: "#4ade80",
+                          letterSpacing: 0.6,
                         }}
                       >
-                        {found > 0 ? (
-                          <>
-                            <span
-                              style={{
-                                color: isComplete ? "#4ade80" : "#e5b95f",
-                              }}
-                            >
-                              {found}
-                            </span>
-                            /{total}
-                          </>
-                        ) : (
-                          `0/${total}`
-                        )}
+                        OFFLINE READY
                       </Text>
-                    </Box>
-                  );
-                })}
-              </Box>
+                    </Flex>
+                    <UnstyledButton
+                      onClick={handleDeleteOffline}
+                      title="Remove offline downloaded map files"
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        color: "#f87171",
+                        letterSpacing: 0.5,
+                        cursor: "pointer",
+                      }}
+                    >
+                      REMOVE
+                    </UnstyledButton>
+                  </Flex>
+                )
+              ) : (
+                <Button
+                  variant="filled"
+                  size="xs"
+                  fullWidth
+                  leftSection={<Download size={13} />}
+                  onClick={handleStartDownload}
+                  style={{
+                    backgroundColor: "#0c1424",
+                    border: "1px solid #243454",
+                    color: "#93c5fd",
+                    fontSize: 11,
+                    fontWeight: 700,
+                    letterSpacing: 0.8,
+                    height: 28,
+                    borderRadius: 4,
+                    fontFamily: "'Oswald', 'Arial Narrow', sans-serif",
+                  }}
+                >
+                  DOWNLOAD OFFLINE MAP
+                </Button>
+              )}
             </Box>
-          ))}
-        </Box>
+          </Box>
 
-        {/* Bottom Bar: Progress & Found Toggle */}
-        <Box
-          style={{
-            padding: "8px 16px",
-            borderTop: "1px solid #141414",
-            backgroundColor: "#040404",
-            flexShrink: 0,
-            borderRadius: isOverlay && overlayShape === "circle" ? 8 : undefined,
-            marginTop: isOverlay && overlayShape === "circle" ? 12 : 0,
-            marginBottom: isOverlay && overlayShape === "circle" ? 16 : 0,
-          }}
-        >
-          <Flex justify="space-between" align="center">
-            <Text
+          {/* SHOW ALL / HIDE ALL / HIDE FOUND Bar */}
+          <Flex
+            justify="center"
+            align="center"
+            gap={16}
+            style={{
+              padding: "10px 16px",
+              borderBottom: "1px solid #141414",
+              backgroundColor: "#050505",
+            }}
+          >
+            <UnstyledButton
+              onClick={showAllCategories}
               style={{
-                fontSize: 11,
+                fontSize: 12,
                 fontWeight: 700,
-                color: "#888",
-                letterSpacing: 0.5,
+                color: "#ffffff",
+                letterSpacing: 1,
                 textTransform: "uppercase",
                 fontFamily: "'Oswald', 'Arial Narrow', sans-serif",
               }}
             >
-              TRACKER:{" "}
-              <span style={{ color: "#e5b95f" }}>
-                {totalFound} / {totalLocations} ({progressPercent}%)
-              </span>
-            </Text>
+              SHOW ALL
+            </UnstyledButton>
+
+            <UnstyledButton
+              onClick={hideAllCategories}
+              style={{
+                fontSize: 12,
+                fontWeight: 700,
+                color: "#ffffff",
+                letterSpacing: 1,
+                textTransform: "uppercase",
+                fontFamily: "'Oswald', 'Arial Narrow', sans-serif",
+              }}
+            >
+              HIDE ALL
+            </UnstyledButton>
 
             <UnstyledButton
               onClick={toggleHideFound}
               style={{
-                fontSize: 10.5,
+                fontSize: 12,
                 fontWeight: 700,
-                padding: "2px 6px",
-                borderRadius: 2,
-                backgroundColor: hideFound ? "#c92a2a" : "#141414",
-                color: "#ffffff",
-                letterSpacing: 0.5,
+                color: hideFound ? "#f87171" : "#94a3b8",
+                letterSpacing: 1,
                 textTransform: "uppercase",
                 fontFamily: "'Oswald', 'Arial Narrow', sans-serif",
+                borderLeft: "1px solid #222",
+                paddingLeft: 12,
               }}
             >
               {hideFound ? "SHOW FOUND" : "HIDE FOUND"}
             </UnstyledButton>
           </Flex>
+
+          {/* Search Bar + Button */}
+          <Box
+            style={{
+              padding: "12px 16px 8px",
+              borderBottom: "1px solid #141414",
+            }}
+          >
+            <Flex gap={4}>
+              <TextInput
+                placeholder="Search..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.currentTarget.value)}
+                styles={{
+                  root: { flex: 1 },
+                  input: {
+                    backgroundColor: "#080808",
+                    borderColor: "#222222",
+                    color: "#ffffff",
+                    fontSize: 13,
+                    borderRadius: 2,
+                    fontFamily: "'Oswald', 'Arial Narrow', sans-serif",
+                    letterSpacing: 0.5,
+                    height: 32,
+                  },
+                }}
+              />
+              <Button
+                variant="default"
+                size="xs"
+                style={{
+                  backgroundColor: "#080808",
+                  borderColor: "#222222",
+                  color: "#ffffff",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  letterSpacing: 1,
+                  borderRadius: 2,
+                  height: 32,
+                  padding: "0 12px",
+                  fontFamily: "'Oswald', 'Arial Narrow', sans-serif",
+                }}
+                onClick={() => {}}
+              >
+                SEARCH
+              </Button>
+            </Flex>
+
+            <Text
+              style={{
+                fontSize: 11,
+                fontWeight: 500,
+                color: "#e5b95f",
+                letterSpacing: 0.3,
+                marginTop: 6,
+                textAlign: "center",
+                fontFamily: "'Oswald', 'Arial Narrow', sans-serif",
+              }}
+            >
+              Tip: Right-click any marker to mark as found!
+            </Text>
+          </Box>
+
+          {/* Categories 2-Column List */}
+          <Box
+            style={{
+              flex: 1,
+              overflowY: "auto",
+              padding: "12px 16px",
+            }}
+          >
+            {groupsList.map((g) => (
+              <Box key={g.id} style={{ marginBottom: 18 }}>
+                {/* Group Title - Click to toggle all categories in this group */}
+                {(() => {
+                  const groupCats = g.categories || [];
+                  const isGroupVisible =
+                    groupCats.length > 0
+                      ? groupCats.some(
+                          (c) => categoryState[String(c.id)] !== false,
+                        )
+                      : true;
+                  return (
+                    <Text
+                      onClick={() => toggleGroupCategories(groupCats)}
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 700,
+                        color: isGroupVisible ? "#ffffff" : "#718096",
+                        textTransform: "uppercase",
+                        letterSpacing: 1,
+                        marginBottom: 8,
+                        borderBottom: `1px solid ${isGroupVisible ? "#262b36" : "#141414"}`,
+                        paddingBottom: 4,
+                        fontFamily: "'Oswald', 'Arial Narrow', sans-serif",
+                        cursor: "pointer",
+                        transition: "all 0.15s ease",
+                        userSelect: "none",
+                        opacity: isGroupVisible ? 1 : 0.45,
+                      }}
+                      title={
+                        isGroupVisible
+                          ? "Click to hide all items in this category group"
+                          : "Click to show all items in this category group"
+                      }
+                    >
+                      {g.title}
+                    </Text>
+                  );
+                })()}
+
+                {/* 2-Column Grid */}
+                <Box
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                    columnGap: 14,
+                    rowGap: 6,
+                  }}
+                >
+                  {g.categories?.map((c) => {
+                    const sId = String(c.id);
+                    const isVisible = categoryState[sId] !== false;
+                    const total = categoryCounts[sId] || c.locations_count || 0;
+                    const found = categoryFoundCounts[sId] || 0;
+                    const isComplete = total > 0 && found >= total;
+                    const rawIcon = c.icon || "miscellaneous";
+                    const iconDash = rawIcon.replace(/_/g, "-");
+                    const iconUnder = rawIcon.replace(/-/g, "_");
+
+                    return (
+                      <Box
+                        key={c.id}
+                        onClick={() => toggleCategory(c.id)}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          padding: "3px 2px",
+                          cursor: "pointer",
+                          opacity: isVisible ? 1 : 0.28,
+                          transition: "opacity 0.12s",
+                        }}
+                      >
+                        <Flex
+                          align="center"
+                          gap={6}
+                          style={{ overflow: "hidden", minWidth: 0, flex: 1 }}
+                        >
+                          <CategoryIcon
+                            category={c}
+                            spriteMap={spriteMap}
+                            spriteImgUrl={spriteImgUrl}
+                            spriteWidth={spriteWidth}
+                            spriteHeight={spriteHeight}
+                            isVisible={isVisible}
+                            size={18}
+                          />
+                          <Text
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 600,
+                              color: isVisible ? "#e2e8f0" : "#666666",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                              textTransform: "uppercase",
+                              letterSpacing: 0.4,
+                              fontFamily:
+                                "'Oswald', 'Arial Narrow', sans-serif",
+                            }}
+                            title={c.title}
+                          >
+                            {c.title}
+                          </Text>
+                        </Flex>
+
+                        <Text
+                          style={{
+                            fontSize: 11.5,
+                            fontWeight: 700,
+                            color: isComplete
+                              ? "#4ade80"
+                              : isVisible
+                                ? "#ffffff"
+                                : "#666666",
+                            flexShrink: 0,
+                            marginLeft: 4,
+                            fontFamily: "'Oswald', 'Arial Narrow', sans-serif",
+                          }}
+                        >
+                          {found > 0 ? (
+                            <>
+                              <span
+                                style={{
+                                  color: isComplete ? "#4ade80" : "#e5b95f",
+                                }}
+                              >
+                                {found}
+                              </span>
+                              /{total}
+                            </>
+                          ) : (
+                            `0/${total}`
+                          )}
+                        </Text>
+                      </Box>
+                    );
+                  })}
+                </Box>
+              </Box>
+            ))}
+          </Box>
+
+          {/* Bottom Bar: Progress & Found Toggle */}
+          <Box
+            style={{
+              padding: "8px 16px",
+              borderTop: "1px solid #141414",
+              backgroundColor: "#040404",
+              flexShrink: 0,
+            }}
+          >
+            <Flex justify="space-between" align="center">
+              <Text
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: "#888",
+                  letterSpacing: 0.5,
+                  textTransform: "uppercase",
+                  fontFamily: "'Oswald', 'Arial Narrow', sans-serif",
+                }}
+              >
+                TRACKER:{" "}
+                <span style={{ color: "#e5b95f" }}>
+                  {totalFound} / {totalLocations} ({progressPercent}%)
+                </span>
+              </Text>
+
+              <UnstyledButton
+                onClick={toggleHideFound}
+                style={{
+                  fontSize: 10.5,
+                  fontWeight: 700,
+                  padding: "2px 6px",
+                  borderRadius: 2,
+                  backgroundColor: hideFound ? "#c92a2a" : "#141414",
+                  color: "#ffffff",
+                  letterSpacing: 0.5,
+                  textTransform: "uppercase",
+                  fontFamily: "'Oswald', 'Arial Narrow', sans-serif",
+                }}
+              >
+                {hideFound ? "SHOW FOUND" : "HIDE FOUND"}
+              </UnstyledButton>
+            </Flex>
+          </Box>
         </Box>
-      </Box>
       )}
 
       {/* Map Container + Floating Overlays */}
@@ -3152,853 +2930,292 @@ export function MapViewer({
           }}
         />
 
+        {/* Gamepad / Controller Integration */}
+        <MapGamepadController
+          map={mapInstanceRef.current}
+          allMarkersRef={allMarkersRef}
+          foundIds={foundIds}
+          hideFound={hideFound}
+          onToggleHideFound={toggleHideFound}
+          categoriesById={categoriesById}
+          groupsList={groupsList}
+          categoryState={categoryState}
+          spriteMap={spriteMap}
+          spriteImgUrl={spriteImgUrl}
+          spriteWidth={spriteWidth}
+          spriteHeight={spriteHeight}
+          onToggleFound={toggleLocationFound}
+          onToggleCategory={toggleCategory}
+          onToggleGroupCategories={toggleGroupCategories}
+          onShowAllCategories={showAllCategories}
+          onHideAllCategories={hideAllCategories}
+          onToggleSidebar={handleToggleSidebar}
+          minZoom={customMinZoom ?? 0}
+          maxZoom={customMaxZoom ?? 20}
+          isOverlay={isOverlay}
+          availableMaps={availableMaps}
+          currentMapSlug={currentMapSlug || effectiveMapSlug}
+          onSelectMap={onSelectMap}
+          isLightboxOpen={Boolean(lightboxImage)}
+          onCloseLightbox={() => setLightboxImage(null)}
+        />
+
         {/* Top Floating Header Controls */}
-        {!(isOverlay && overlayShape === "circle") && (
-          <Flex
-            justify="space-between"
-            align="center"
+        <Flex
+          justify="space-between"
+          align="center"
+          style={{
+            position: "absolute",
+            top: 12,
+            left: 12,
+            right: 12,
+            zIndex: 1000,
+            pointerEvents: "none",
+          }}
+        >
+          {/* Left: Sidebar Toggle & Sub-map Switcher */}
+          <Group
+            gap="xs"
             style={{
-              position: "absolute",
-              top: 12,
-              left: 12,
-              right: 12,
-              zIndex: 1000,
-              pointerEvents: "none",
+              pointerEvents: "auto",
+              flex: 1,
+              minWidth: 0,
+              marginRight: 16,
             }}
           >
-            {/* Left: Sidebar Toggle & Sub-map Switcher */}
-            <Group gap="xs" style={{ pointerEvents: "auto" }}>
-              <Tooltip label={isSidebarOpen ? "Hide Filters & Categories" : "Show Filters & Categories"} withArrow>
-                <ActionIcon
-                  variant="filled"
-                  color="dark"
-                  size="lg"
-                  radius="xl"
-                  onClick={handleToggleSidebar}
-                  style={{
-                    backgroundColor: "rgba(12, 14, 18, 0.92)",
-                    border: "1px solid #262b36",
-                    color: isSidebarOpen ? "#60a5fa" : "#ffffff",
-                    boxShadow: "0 4px 16px rgba(0,0,0,0.5)",
-                    backdropFilter: "blur(8px)",
-                  }}
-                >
-                  <SlidersHorizontal size={17} />
-                </ActionIcon>
-              </Tooltip>
-
-              {/* Sub-map Switcher */}
-              {availableMaps && availableMaps.length > 1 && (
-                <Flex
-                  gap={4}
-                  style={{
-                    backgroundColor: "rgba(12, 14, 18, 0.92)",
-                    padding: "4px 6px",
-                    borderRadius: 8,
-                    border: "1px solid #262b36",
-                    boxShadow: "0 4px 16px rgba(0,0,0,0.5)",
-                    backdropFilter: "blur(8px)",
-                  }}
-                >
-                  {availableMaps.map((m) => {
-                    const isSelected =
-                      (currentMapSlug || effectiveMapSlug) === m.slug;
-                    return (
-                      <UnstyledButton
-                        key={m.slug}
-                        onClick={() => onSelectMap?.(m.slug)}
-                        style={{
-                          padding: "4px 10px",
-                          borderRadius: 6,
-                          fontSize: 12,
-                          fontWeight: 700,
-                          backgroundColor: isSelected ? "#e03131" : "transparent",
-                          color: isSelected ? "#fff" : "#a0aec0",
-                          transition: "all 0.15s",
-                        }}
-                      >
-                        {m.title}
-                      </UnstyledButton>
-                    );
-                  })}
-                </Flex>
-              )}
-            </Group>
-
-            {/* Top Right Actions: Overlay Popout & Close */}
-            <Group gap="xs" style={{ pointerEvents: "auto" }}>
-              {!isOverlay && (onOpenOverlay || gameSlug) && (
-                <Tooltip label="Pop out to floating in-game overlay" withArrow>
-                  <ActionIcon
-                    variant="filled"
-                    color="dark"
-                    size="lg"
-                    radius="xl"
-                    onClick={() => {
-                      if (onOpenOverlay) {
-                        onOpenOverlay();
-                      } else {
-                        openMapOverlay({
-                          gameSlug,
-                          mapSlug: currentMapSlug || effectiveMapSlug,
-                          gameTitle,
-                          minZoom: customMinZoom,
-                          maxZoom: customMaxZoom,
-                        });
-                        if (onClose) onClose();
-                      }
-                    }}
-                    style={{
-                      backgroundColor: "rgba(12, 14, 18, 0.92)",
-                      border: "1px solid #262b36",
-                      color: "#60a5fa",
-                      boxShadow: "0 4px 16px rgba(0,0,0,0.5)",
-                      backdropFilter: "blur(8px)",
-                    }}
-                  >
-                    <PictureInPicture2 size={18} />
-                  </ActionIcon>
-                </Tooltip>
-              )}
-
-              {onClose && (
-                <ActionIcon
-                  variant="filled"
-                  color="dark"
-                  size="lg"
-                  radius="xl"
-                  onClick={onClose}
-                  style={{
-                    backgroundColor: "rgba(12, 14, 18, 0.92)",
-                    border: "1px solid #262b36",
-                    color: "#fff",
-                    boxShadow: "0 4px 16px rgba(0,0,0,0.5)",
-                    backdropFilter: "blur(8px)",
-                  }}
-                >
-                  <X size={18} />
-                </ActionIcon>
-              )}
-            </Group>
-          </Flex>
-        )}
-
-        {/* Floating Calibration & Scale Visualizer Widget */}
-        {showCalibrationTool && (
-          <Box
-            style={{
-              position: "absolute",
-              bottom: 24,
-              left: 24,
-              zIndex: 1100,
-              backgroundColor: "rgba(10, 14, 23, 0.96)",
-              border: "1px solid #25334d",
-              borderRadius: 8,
-              padding: "12px 14px",
-              boxShadow: "0 8px 32px rgba(0,0,0,0.85)",
-              backdropFilter: "blur(12px)",
-              width: 340,
-              fontFamily:
-                "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
-              userSelect: "none",
-            }}
-          >
-            {/* Header */}
-            <Flex
-              justify="space-between"
-              align="center"
-              style={{
-                marginBottom: 8,
-                paddingBottom: 6,
-                borderBottom: "1px solid #1e293b",
-              }}
+            <Tooltip
+              label={
+                isSidebarOpen
+                  ? "Hide Filters & Categories"
+                  : "Show Filters & Categories"
+              }
+              withArrow
             >
-              <Flex align="center" gap={6}>
-                <Sliders size={14} color="#60a5fa" />
-                <Text
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 700,
-                    color: "#93c5fd",
-                    letterSpacing: 0.5,
-                    fontFamily: "'Oswald', sans-serif",
-                    textTransform: "uppercase",
-                  }}
-                >
-                  MAP ALIGNMENT CALIBRATOR
-                </Text>
-              </Flex>
               <ActionIcon
-                size="xs"
-                variant="subtle"
-                color="gray"
-                onClick={() => {
-                  setShowCalibrationTool(false);
-                  setCalibAnchorSlot(null);
+                variant="filled"
+                color="dark"
+                size="lg"
+                radius="xl"
+                onClick={handleToggleSidebar}
+                style={{
+                  flexShrink: 0,
+                  backgroundColor: "rgba(12, 14, 18, 0.92)",
+                  border: "1px solid #262b36",
+                  color: isSidebarOpen ? "#60a5fa" : "#ffffff",
+                  boxShadow: "0 4px 16px rgba(0,0,0,0.5)",
+                  backdropFilter: "blur(8px)",
                 }}
-                style={{ cursor: "pointer", color: "#cbd5e1" }}
               >
-                <X size={13} color="#cbd5e1" />
+                <SlidersHorizontal size={17} />
               </ActionIcon>
-            </Flex>
+            </Tooltip>
 
-            {/* Navigation Tabs (Manual vs 2-Point Auto) */}
-            <Flex
-              gap={4}
-              style={{
-                marginBottom: 10,
-                backgroundColor: "#060911",
-                padding: 4,
-                borderRadius: 6,
-                border: "1px solid #1e293b",
-              }}
-            >
-              <UnstyledButton
-                onClick={() => setActiveCalibTab("manual")}
-                style={{
-                  flex: 1,
-                  padding: "6px 8px",
-                  borderRadius: 4,
-                  fontSize: 10.5,
-                  fontWeight: 800,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 5,
-                  backgroundColor:
-                    activeCalibTab === "manual" ? "#0284c7" : "transparent",
-                  color: activeCalibTab === "manual" ? "#ffffff" : "#94a3b8",
-                  transition: "all 0.15s",
-                  cursor: "pointer",
-                }}
+            {/* Offline Map Update Available Button in Floating Bar */}
+            {isOfflineReady && hasOfflineUpdate && (
+              <Tooltip
+                label={
+                  updateReason
+                    ? `Update available: ${updateReason}. Click to update.`
+                    : "Map update available online. Click to update offline map."
+                }
+                withArrow
               >
-                <Sliders size={12} />
-                MANUAL CONTROLS
-              </UnstyledButton>
-              <UnstyledButton
-                onClick={() => setActiveCalibTab("auto")}
-                style={{
-                  flex: 1,
-                  padding: "6px 8px",
-                  borderRadius: 4,
-                  fontSize: 10.5,
-                  fontWeight: 800,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 5,
-                  backgroundColor:
-                    activeCalibTab === "auto" ? "#e11d48" : "transparent",
-                  color: activeCalibTab === "auto" ? "#ffffff" : "#94a3b8",
-                  transition: "all 0.15s",
-                  cursor: "pointer",
-                }}
-              >
-                <Target size={12} />
-                2-POINT AUTO-FIT
-              </UnstyledButton>
-            </Flex>
-
-            {/* Mouse / Pin Inspector */}
-            <Box
-              style={{
-                backgroundColor: "#060911",
-                border: "1px solid #1e293b",
-                borderRadius: 4,
-                padding: "6px 8px",
-                marginBottom: 8,
-              }}
-            >
-              <Text
-                style={{
-                  fontSize: 9.5,
-                  fontWeight: 700,
-                  color: "#64748b",
-                  textTransform: "uppercase",
-                  letterSpacing: 0.5,
-                  marginBottom: 2,
-                }}
-              >
-                CURSOR / INSPECTOR GAME COORDS
-              </Text>
-              {mouseCoord ? (
-                <Flex justify="space-between" align="center">
-                  <Text
-                    style={{
-                      fontSize: 11,
-                      color: "#e2e8f0",
-                      fontFamily: "monospace",
-                    }}
-                  >
-                    X:{" "}
-                    <span style={{ color: "#38bdf8", fontWeight: 700 }}>
-                      {mouseCoord.x.toFixed(1)}m
-                    </span>{" "}
-                    | Y:{" "}
-                    <span style={{ color: "#f43f5e", fontWeight: 700 }}>
-                      {mouseCoord.y.toFixed(1)}m
-                    </span>
-                  </Text>
-                  <Text
-                    style={{
-                      fontSize: 9.5,
-                      color: "#94a3b8",
-                      fontFamily: "monospace",
-                    }}
-                  >
-                    ({mouseCoord.lat.toFixed(4)}, {mouseCoord.lng.toFixed(4)})
-                  </Text>
-                </Flex>
-              ) : (
-                <Text
-                  style={{
-                    fontSize: 10,
-                    color: "#64748b",
-                    fontStyle: "italic",
-                  }}
-                >
-                  Move cursor over map to inspect game units
-                </Text>
-              )}
-            </Box>
-
-            {/* Overlay Toggles */}
-            <Flex gap={6} style={{ marginBottom: 8 }}>
-              <UnstyledButton
-                onClick={() => setShowGridOverlay((v) => !v)}
-                style={{
-                  flex: 1,
-                  padding: "4px 6px",
-                  borderRadius: 4,
-                  backgroundColor: showGridOverlay
-                    ? "rgba(59, 130, 246, 0.2)"
-                    : "#0f172a",
-                  border: `1px solid ${showGridOverlay ? "#3b82f6" : "#1e293b"}`,
-                  fontSize: 9.5,
-                  fontWeight: 700,
-                  color: showGridOverlay ? "#60a5fa" : "#64748b",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 4,
-                }}
-              >
-                <Grid size={11} />
-                GRID: {showGridOverlay ? "ON" : "OFF"}
-              </UnstyledButton>
-
-              <UnstyledButton
-                onClick={() => setShowDistrictBoxes((v) => !v)}
-                style={{
-                  flex: 1,
-                  padding: "4px 6px",
-                  borderRadius: 4,
-                  backgroundColor: showDistrictBoxes
-                    ? "rgba(34, 197, 94, 0.2)"
-                    : "#0f172a",
-                  border: `1px solid ${showDistrictBoxes ? "#22c55e" : "#1e293b"}`,
-                  fontSize: 9.5,
-                  fontWeight: 700,
-                  color: showDistrictBoxes ? "#4ade80" : "#64748b",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 4,
-                }}
-              >
-                <Maximize2 size={11} />
-                DISTRICTS: {showDistrictBoxes ? "ON" : "OFF"}
-              </UnstyledButton>
-            </Flex>
-
-            {activeCalibTab === "manual" ? (
-              <>
-                {/* Steppers Box */}
-                <Box
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 5,
-                    marginBottom: 8,
-                  }}
-                >
-                  {/* Rotation Angle */}
-                  <Flex justify="space-between" align="center">
-                    <Flex align="center" gap={4}>
-                      <RotateCw size={11} color="#a855f7" />
-                      <Text
-                        style={{
-                          fontSize: 10.5,
-                          fontWeight: 600,
-                          color: "#c084fc",
-                        }}
-                      >
-                        Rotation Angle (θ):
-                      </Text>
-                    </Flex>
-                    <Flex align="center" gap={3}>
-                      <ActionIcon
-                        size="xs"
-                        variant="default"
-                        onClick={() =>
-                          setCalibRotation((v) => +(v - 0.5).toFixed(2))
-                        }
-                      >
-                        -
-                      </ActionIcon>
-                      <Text
-                        style={{
-                          fontSize: 11,
-                          fontWeight: 700,
-                          color: "#f8fafc",
-                          fontFamily: "monospace",
-                          width: 68,
-                          textAlign: "center",
-                        }}
-                      >
-                        {calibRotation.toFixed(1)}°
-                      </Text>
-                      <ActionIcon
-                        size="xs"
-                        variant="default"
-                        onClick={() =>
-                          setCalibRotation((v) => +(v + 0.5).toFixed(2))
-                        }
-                      >
-                        +
-                      </ActionIcon>
-                    </Flex>
-                  </Flex>
-
-                  {/* Center Lat */}
-                  <Flex justify="space-between" align="center">
-                    <Text
-                      style={{
-                        fontSize: 10.5,
-                        fontWeight: 600,
-                        color: "#94a3b8",
-                      }}
-                    >
-                      Center Lat (Y):
-                    </Text>
-                    <Flex align="center" gap={3}>
-                      <ActionIcon
-                        size="xs"
-                        variant="default"
-                        onClick={() =>
-                          setCalibCenterLat((v) => +(v - 0.0005).toFixed(6))
-                        }
-                      >
-                        -
-                      </ActionIcon>
-                      <Text
-                        style={{
-                          fontSize: 11,
-                          fontWeight: 700,
-                          color: "#f8fafc",
-                          fontFamily: "monospace",
-                          width: 68,
-                          textAlign: "center",
-                        }}
-                      >
-                        {calibCenterLat.toFixed(6)}
-                      </Text>
-                      <ActionIcon
-                        size="xs"
-                        variant="default"
-                        onClick={() =>
-                          setCalibCenterLat((v) => +(v + 0.0005).toFixed(6))
-                        }
-                      >
-                        +
-                      </ActionIcon>
-                    </Flex>
-                  </Flex>
-
-                  {/* Center Lng */}
-                  <Flex justify="space-between" align="center">
-                    <Text
-                      style={{
-                        fontSize: 10.5,
-                        fontWeight: 600,
-                        color: "#94a3b8",
-                      }}
-                    >
-                      Center Lng (X):
-                    </Text>
-                    <Flex align="center" gap={3}>
-                      <ActionIcon
-                        size="xs"
-                        variant="default"
-                        onClick={() =>
-                          setCalibCenterLng((v) => +(v - 0.0005).toFixed(6))
-                        }
-                      >
-                        -
-                      </ActionIcon>
-                      <Text
-                        style={{
-                          fontSize: 11,
-                          fontWeight: 700,
-                          color: "#f8fafc",
-                          fontFamily: "monospace",
-                          width: 68,
-                          textAlign: "center",
-                        }}
-                      >
-                        {calibCenterLng.toFixed(6)}
-                      </Text>
-                      <ActionIcon
-                        size="xs"
-                        variant="default"
-                        onClick={() =>
-                          setCalibCenterLng((v) => +(v + 0.0005).toFixed(6))
-                        }
-                      >
-                        +
-                      </ActionIcon>
-                    </Flex>
-                  </Flex>
-
-                  {/* Scale X */}
-                  <Flex justify="space-between" align="center">
-                    <Text
-                      style={{
-                        fontSize: 10.5,
-                        fontWeight: 600,
-                        color: "#38bdf8",
-                      }}
-                    >
-                      Scale X (Width):
-                    </Text>
-                    <Flex align="center" gap={3}>
-                      <ActionIcon
-                        size="xs"
-                        variant="default"
-                        onClick={() =>
-                          setCalibScaleX((v) => +(v - 0.000004).toFixed(6))
-                        }
-                      >
-                        -
-                      </ActionIcon>
-                      <Text
-                        style={{
-                          fontSize: 11,
-                          fontWeight: 700,
-                          color: "#f8fafc",
-                          fontFamily: "monospace",
-                          width: 68,
-                          textAlign: "center",
-                        }}
-                      >
-                        {calibScaleX.toFixed(6)}
-                      </Text>
-                      <ActionIcon
-                        size="xs"
-                        variant="default"
-                        onClick={() =>
-                          setCalibScaleX((v) => +(v + 0.000004).toFixed(6))
-                        }
-                      >
-                        +
-                      </ActionIcon>
-                    </Flex>
-                  </Flex>
-
-                  {/* Scale Y */}
-                  <Flex justify="space-between" align="center">
-                    <Text
-                      style={{
-                        fontSize: 10.5,
-                        fontWeight: 600,
-                        color: "#f43f5e",
-                      }}
-                    >
-                      Scale Y (Height):
-                    </Text>
-                    <Flex align="center" gap={3}>
-                      <ActionIcon
-                        size="xs"
-                        variant="default"
-                        onClick={() =>
-                          setCalibScaleY((v) => +(v - 0.000004).toFixed(6))
-                        }
-                      >
-                        -
-                      </ActionIcon>
-                      <Text
-                        style={{
-                          fontSize: 11,
-                          fontWeight: 700,
-                          color: "#f8fafc",
-                          fontFamily: "monospace",
-                          width: 68,
-                          textAlign: "center",
-                        }}
-                      >
-                        {calibScaleY.toFixed(6)}
-                      </Text>
-                      <ActionIcon
-                        size="xs"
-                        variant="default"
-                        onClick={() =>
-                          setCalibScaleY((v) => +(v + 0.000004).toFixed(6))
-                        }
-                      >
-                        +
-                      </ActionIcon>
-                    </Flex>
-                  </Flex>
-                </Box>
-
-                {/* Axis Invert / Swap Controls */}
-                <Flex gap={4} style={{ marginBottom: 8 }}>
-                  <UnstyledButton
-                    onClick={() => setCalibInvertX((v) => !v)}
-                    style={{
-                      flex: 1,
-                      padding: "3px 4px",
-                      borderRadius: 3,
-                      fontSize: 9.5,
-                      fontWeight: 700,
-                      backgroundColor: calibInvertX
-                        ? "rgba(239, 68, 68, 0.2)"
-                        : "#0f172a",
-                      border: `1px solid ${calibInvertX ? "#ef4444" : "#1e293b"}`,
-                      color: calibInvertX ? "#f87171" : "#64748b",
-                      textAlign: "center",
-                    }}
-                  >
-                    INVERT X: {calibInvertX ? "YES" : "NO"}
-                  </UnstyledButton>
-                  <UnstyledButton
-                    onClick={() => setCalibInvertY((v) => !v)}
-                    style={{
-                      flex: 1,
-                      padding: "3px 4px",
-                      borderRadius: 3,
-                      fontSize: 9.5,
-                      fontWeight: 700,
-                      backgroundColor: calibInvertY
-                        ? "rgba(239, 68, 68, 0.2)"
-                        : "#0f172a",
-                      border: `1px solid ${calibInvertY ? "#ef4444" : "#1e293b"}`,
-                      color: calibInvertY ? "#f87171" : "#64748b",
-                      textAlign: "center",
-                    }}
-                  >
-                    INVERT Y: {calibInvertY ? "YES" : "NO"}
-                  </UnstyledButton>
-                  <UnstyledButton
-                    onClick={() => setCalibSwapXY((v) => !v)}
-                    style={{
-                      flex: 1,
-                      padding: "3px 4px",
-                      borderRadius: 3,
-                      fontSize: 9.5,
-                      fontWeight: 700,
-                      backgroundColor: calibSwapXY
-                        ? "rgba(168, 85, 247, 0.2)"
-                        : "#0f172a",
-                      border: `1px solid ${calibSwapXY ? "#a855f7" : "#1e293b"}`,
-                      color: calibSwapXY ? "#c084fc" : "#64748b",
-                      textAlign: "center",
-                    }}
-                  >
-                    SWAP X/Y
-                  </UnstyledButton>
-                </Flex>
-              </>
-            ) : (
-              /* 2-Point Auto-Fit Tab */
-              <Box
-                style={{
-                  backgroundColor: "#060911",
-                  border: "1px solid #1e293b",
-                  borderRadius: 4,
-                  padding: "8px",
-                  marginBottom: 8,
-                }}
-              >
-                <Text
-                  style={{
-                    fontSize: 9.5,
-                    color: "#94a3b8",
-                    marginBottom: 6,
-                    lineHeight: 1.3,
-                  }}
-                >
-                  Stand at 2 distant landmarks in-game, capture both points, and
-                  click solve to automatically calculate exact scale & rotation
-                  angle.
-                </Text>
-
-                {/* Point 1 */}
-                <Flex
-                  justify="space-between"
-                  align="center"
-                  style={{ marginBottom: 4 }}
-                >
-                  <Text
-                    style={{
-                      fontSize: 10,
-                      fontWeight: 700,
-                      color: anchorP1 ? "#38bdf8" : "#64748b",
-                    }}
-                  >
-                    {anchorP1
-                      ? `P1: (${anchorP1.gameX.toFixed(0)}, ${anchorP1.gameY.toFixed(0)})`
-                      : "P1: Not Set"}
-                  </Text>
-                  <UnstyledButton
-                    onClick={() =>
-                      setCalibAnchorSlot(calibAnchorSlot === 1 ? null : 1)
-                    }
-                    style={{
-                      padding: "3px 8px",
-                      borderRadius: 3,
-                      fontSize: 9.5,
-                      fontWeight: 700,
-                      backgroundColor:
-                        calibAnchorSlot === 1 ? "#0284c7" : "#1e293b",
-                      color: "#ffffff",
-                    }}
-                  >
-                    {calibAnchorSlot === 1 ? "CLICK MAP NOW" : "SET P1"}
-                  </UnstyledButton>
-                </Flex>
-
-                {/* Point 2 */}
-                <Flex
-                  justify="space-between"
-                  align="center"
-                  style={{ marginBottom: 8 }}
-                >
-                  <Text
-                    style={{
-                      fontSize: 10,
-                      fontWeight: 700,
-                      color: anchorP2 ? "#ec4899" : "#64748b",
-                    }}
-                  >
-                    {anchorP2
-                      ? `P2: (${anchorP2.gameX.toFixed(0)}, ${anchorP2.gameY.toFixed(0)})`
-                      : "P2: Not Set"}
-                  </Text>
-                  <UnstyledButton
-                    onClick={() =>
-                      setCalibAnchorSlot(calibAnchorSlot === 2 ? null : 2)
-                    }
-                    style={{
-                      padding: "3px 8px",
-                      borderRadius: 3,
-                      fontSize: 9.5,
-                      fontWeight: 700,
-                      backgroundColor:
-                        calibAnchorSlot === 2 ? "#db2777" : "#1e293b",
-                      color: "#ffffff",
-                    }}
-                  >
-                    {calibAnchorSlot === 2 ? "CLICK MAP NOW" : "SET P2"}
-                  </UnstyledButton>
-                </Flex>
-
-                {/* Solve Button */}
                 <Button
                   size="xs"
                   variant="filled"
-                  color="pink"
-                  fullWidth
-                  disabled={!anchorP1 || !anchorP2}
-                  onClick={() => {
-                    if (!anchorP1 || !anchorP2) return;
-                    const dxGame = anchorP2.gameX - anchorP1.gameX;
-                    const dyGame = anchorP2.gameY - anchorP1.gameY;
-                    const distGame = Math.hypot(dxGame, dyGame);
-
-                    const dLngMap = anchorP2.mapLng - anchorP1.mapLng;
-                    const dLatMap = anchorP2.mapLat - anchorP1.mapLat;
-                    const distMap = Math.hypot(dLngMap, dLatMap);
-
-                    if (distGame < 1 || distMap < 0.00001) return;
-
-                    const angleGame = Math.atan2(dyGame, dxGame);
-                    const angleMap = Math.atan2(dLatMap, dLngMap);
-                    let rotDeg = ((angleMap - angleGame) * 180) / Math.PI;
-
-                    while (rotDeg > 180) rotDeg -= 360;
-                    while (rotDeg < -180) rotDeg += 360;
-
-                    const scale = distMap / distGame;
-                    const rad = (rotDeg * Math.PI) / 180;
-                    const cos = Math.cos(rad);
-                    const sin = Math.sin(rad);
-
-                    const rx1 = anchorP1.gameX * cos - anchorP1.gameY * sin;
-                    const ry1 = anchorP1.gameX * sin + anchorP1.gameY * cos;
-
-                    const cLat = anchorP1.mapLat - ry1 * scale;
-                    const cLng = anchorP1.mapLng - rx1 * scale;
-
-                    setCalibRotation(+rotDeg.toFixed(2));
-                    setCalibScaleX(+scale.toFixed(6));
-                    setCalibScaleY(+scale.toFixed(6));
-                    setCalibCenterLat(+cLat.toFixed(6));
-                    setCalibCenterLng(+cLng.toFixed(6));
-                    setCalibInvertX(false);
-                    setCalibInvertY(false);
-                    setCalibSwapXY(false);
+                  leftSection={
+                    <RefreshCw
+                      size={12}
+                      className={downloading ? "spin" : undefined}
+                    />
+                  }
+                  onClick={handleStartDownload}
+                  loading={downloading}
+                  style={{
+                    backgroundColor: "#d97706",
+                    color: "#ffffff",
+                    height: 32,
+                    fontWeight: 700,
+                    fontSize: 11,
+                    letterSpacing: 0.6,
+                    borderRadius: 8,
+                    boxShadow: "0 4px 16px rgba(217, 119, 6, 0.45)",
+                    fontFamily: "'Oswald', 'Arial Narrow', sans-serif",
                   }}
-                  style={{ fontSize: 10, fontWeight: 700, height: 26 }}
                 >
-                  CALCULATE & FIT ROTATION + SCALE
+                  UPDATE AVAILABLE
                 </Button>
-              </Box>
+              </Tooltip>
             )}
 
-            {/* Actions Bar */}
-            <Flex gap={6}>
-              <Button
-                size="xs"
-                variant="filled"
-                color="blue"
-                leftSection={
-                  copiedRustCode ? <Check size={11} /> : <Copy size={11} />
-                }
-                fullWidth
-                onClick={() => {
-                  const code = `let lat_center = ${calibCenterLat.toFixed(6)};\nlet lng_center = ${calibCenterLng.toFixed(6)};\nlet lat_scale = ${calibScaleY.toFixed(6)};\nlet lng_scale = ${calibScaleX.toFixed(6)};\nlet rotation_deg = ${calibRotation.toFixed(2)};\nlet invert_x = ${calibInvertX};\nlet invert_y = ${calibInvertY};\nlet swap_xy = ${calibSwapXY};`;
-                  navigator.clipboard.writeText(code);
-                  setCopiedRustCode(true);
-                  setTimeout(() => setCopiedRustCode(false), 2000);
+            {/* Sub-map Switcher (In normal modal view) */}
+            {!isOverlay && availableMaps && availableMaps.length > 1 && (
+              <Box
+                onWheel={(e) => {
+                  if (e.deltaY !== 0) {
+                    e.currentTarget.scrollLeft += e.deltaY;
+                  }
                 }}
-                style={{ fontSize: 10.5, fontWeight: 700, height: 26 }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
+                  backgroundColor: "rgba(12, 14, 18, 0.92)",
+                  padding: "3px 4px",
+                  borderRadius: 8,
+                  border: "1px solid #262b36",
+                  boxShadow: "0 4px 16px rgba(0,0,0,0.5)",
+                  backdropFilter: "blur(8px)",
+                  overflowX: "auto",
+                  maxWidth: "calc(100vw - 260px)",
+                  scrollbarWidth: "none",
+                }}
               >
-                {copiedRustCode ? "COPIED RUST CODE!" : "COPY RUST CODE"}
-              </Button>
+                {availableMaps.map((m) => {
+                  const isSelected =
+                    (currentMapSlug || effectiveMapSlug) === m.slug;
+                  return (
+                    <UnstyledButton
+                      key={m.slug}
+                      onClick={() => {
+                        if (effectiveGameSlug) {
+                          saveLastOpenedMapSlug(effectiveGameSlug, m.slug);
+                        }
+                        onSelectMap?.(m.slug);
+                      }}
+                      style={{
+                        whiteSpace: "nowrap",
+                        padding: "5px 12px",
+                        borderRadius: 6,
+                        fontSize: 11.5,
+                        fontWeight: 700,
+                        letterSpacing: 0.6,
+                        textTransform: "uppercase",
+                        fontFamily: "'Oswald', 'Arial Narrow', sans-serif",
+                        backgroundColor: isSelected ? "#c92a2a" : "transparent",
+                        backgroundImage: isSelected
+                          ? "linear-gradient(135deg, #e03131 0%, #b91c1c 100%)"
+                          : "none",
+                        color: isSelected ? "#ffffff" : "#94a3b8",
+                        boxShadow: isSelected
+                          ? "0 2px 8px rgba(224, 49, 49, 0.4)"
+                          : "none",
+                        border: isSelected
+                          ? "1px solid rgba(255, 255, 255, 0.2)"
+                          : "1px solid transparent",
+                        transition: "all 0.15s ease",
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!isSelected) {
+                          e.currentTarget.style.backgroundColor =
+                            "rgba(255, 255, 255, 0.08)";
+                          e.currentTarget.style.color = "#ffffff";
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!isSelected) {
+                          e.currentTarget.style.backgroundColor = "transparent";
+                          e.currentTarget.style.color = "#94a3b8";
+                        }
+                      }}
+                    >
+                      {m.title}
+                    </UnstyledButton>
+                  );
+                })}
+              </Box>
+            )}
+          </Group>
 
+          {/* When in overlay mode, let empty space in floating controls drag the window */}
+          {isOverlay && (
+            <Box
+              data-tauri-drag-region
+              onMouseDown={async (e) => {
+                if (e.button !== 0 && e.button !== 1) return;
+                if (
+                  (e.target as HTMLElement).closest(
+                    "button, [role='button'], input, [data-tauri-drag-region='false']",
+                  )
+                )
+                  return;
+                if (
+                  typeof window !== "undefined" &&
+                  (window as any).__TAURI_INTERNALS__
+                ) {
+                  try {
+                    const { getCurrentWindow } = await import(
+                      "@tauri-apps/api/window"
+                    );
+                    await getCurrentWindow().startDragging();
+                  } catch (_) {}
+                }
+              }}
+              style={{
+                flex: 1,
+                height: 36,
+                cursor: "grab",
+                pointerEvents: "auto",
+              }}
+            />
+          )}
+
+          {/* Top Right Actions: Hide Found, Overlay Popout & Close */}
+          <Group gap="xs" style={{ pointerEvents: "auto" }}>
+            {!isOverlay && (onOpenOverlay || gameSlug) && (
+              <Tooltip label="Pop out to floating in-game overlay" withArrow>
+                <ActionIcon
+                  variant="filled"
+                  color="dark"
+                  size="lg"
+                  radius="xl"
+                  onClick={() => {
+                    if (onOpenOverlay) {
+                      onOpenOverlay();
+                    } else {
+                      openMapOverlay({
+                        gameSlug,
+                        mapSlug: currentMapSlug || effectiveMapSlug,
+                        gameTitle,
+                        minZoom: customMinZoom,
+                        maxZoom: customMaxZoom,
+                      });
+                      if (onClose) onClose();
+                    }
+                  }}
+                  style={{
+                    backgroundColor: "rgba(12, 14, 18, 0.92)",
+                    border: "1px solid #262b36",
+                    color: "#60a5fa",
+                    boxShadow: "0 4px 16px rgba(0,0,0,0.5)",
+                    backdropFilter: "blur(8px)",
+                  }}
+                >
+                  <PictureInPicture2 size={18} />
+                </ActionIcon>
+              </Tooltip>
+            )}
+
+            {onClose && (
               <ActionIcon
-                size={26}
-                variant="default"
-                title="Reset to default calibration"
-                onClick={() => {
-                  setCalibCenterLat(1.177677);
-                  setCalibCenterLng(-1.252454);
-                  setCalibScaleX(0.000453);
-                  setCalibScaleY(0.000453);
-                  setCalibRotation(0.82);
-                  setCalibInvertX(false);
-                  setCalibInvertY(false);
-                  setCalibSwapXY(false);
-                  setAnchorP1(null);
-                  setAnchorP2(null);
+                variant="filled"
+                color="dark"
+                size="lg"
+                radius="xl"
+                onClick={onClose}
+                style={{
+                  backgroundColor: "rgba(12, 14, 18, 0.92)",
+                  border: "1px solid #262b36",
+                  color: "#fff",
+                  boxShadow: "0 4px 16px rgba(0,0,0,0.5)",
+                  backdropFilter: "blur(8px)",
                 }}
               >
-                <RotateCcw size={12} />
+                <X size={18} />
               </ActionIcon>
-            </Flex>
-          </Box>
-        )}
+            )}
+          </Group>
+        </Flex>
       </Box>
 
       {/* Lightbox Modal */}

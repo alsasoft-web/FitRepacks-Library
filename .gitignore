@@ -6,7 +6,6 @@ yarn-debug.log*
 yarn-error.log*
 lerna-debug.log*
 .pnpm-debug.log*
-scripts
 ab_hooks
 
 # Diagnostic reports (https://nodejs.org/api/report.html)
@@ -17,7 +16,9 @@ DS4Windows
 .trash
 mantine-llms.md
 pb_hooks
-scripts/*.json
+scripts/
+maps/
+maps
 
 # Runtime data
 pids
@@ -141,3 +142,4 @@ dist
 .DS_Store
 src-tauri/updater.key
 src-tauri/target/
+maps/

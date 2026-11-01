@@ -205,11 +205,50 @@ export async function searchSourceCandidates(
   // 2. FitGirl
   if (source === "all" || source === "fitgirl") {
     try {
-      const fgMatches = await loadRepacksPaginated({
+      let fgMatches = await loadRepacksPaginated({
         searchQuery: cleanQ,
         dataSource: "fitgirl",
         perPage: 6,
       });
+      // If 0 matches, try Roman numeral / Arabic numeral conversion fallback
+      if (fgMatches.items.length === 0) {
+        const romanToArabic = cleanQ
+          .replace(/\bVIII\b/gi, "8")
+          .replace(/\bVII\b/gi, "7")
+          .replace(/\bVI\b/gi, "6")
+          .replace(/\bIV\b/gi, "4")
+          .replace(/\bV\b/gi, "5")
+          .replace(/\bIX\b/gi, "9")
+          .replace(/\bIII\b/gi, "3")
+          .replace(/\bII\b/gi, "2")
+          .replace(/\bI\b/gi, "1");
+        const arabicToRoman = cleanQ
+          .replace(/\b8\b/g, "VIII")
+          .replace(/\b7\b/g, "VII")
+          .replace(/\b6\b/g, "VI")
+          .replace(/\b4\b/g, "IV")
+          .replace(/\b5\b/g, "V")
+          .replace(/\b9\b/g, "IX")
+          .replace(/\b3\b/g, "III")
+          .replace(/\b2\b/g, "II")
+          .replace(/\b1\b/g, "I");
+        const altQ =
+          romanToArabic !== cleanQ
+            ? romanToArabic
+            : arabicToRoman !== cleanQ
+              ? arabicToRoman
+              : null;
+        if (altQ) {
+          const altMatches = await loadRepacksPaginated({
+            searchQuery: altQ,
+            dataSource: "fitgirl",
+            perPage: 6,
+          });
+          if (altMatches.items.length > 0) {
+            fgMatches = altMatches;
+          }
+        }
+      }
       for (const item of fgMatches.items) {
         const magnets = extractMagnetLinks(item.mirrorGroups);
         const directs = extractDirectDownloadLinks(item.mirrorGroups);
@@ -529,7 +568,18 @@ export function applyCandidateMatch(
     ...game,
     mirrorGroups: mergedMirrors.length > 0 ? mergedMirrors : undefined,
     gameUpdates: mergedUpdates.length > 0 ? mergedUpdates : undefined,
-    repackSize: match.repackSize || game.repackSize,
+    fitgirlSize:
+      candidate.source === "fitgirl"
+        ? (match.repackSize || candidate.repackSize || game.fitgirlSize)
+        : game.fitgirlSize,
+    steamripSize:
+      candidate.source === "steamrip"
+        ? (match.repackSize || candidate.repackSize || game.steamripSize)
+        : game.steamripSize,
+    repackSize:
+      candidate.source === "fitgirl"
+        ? (match.repackSize || candidate.repackSize || game.repackSize)
+        : (game.fitgirlSize || match.repackSize || candidate.repackSize || game.repackSize),
     repackUrl: match.url || game.repackUrl,
     fitgirlVersion:
       candidate.source === "fitgirl"
@@ -694,6 +744,7 @@ export async function linkGameToFitGirl(
         ...game,
         mirrorGroups: mergedMirrors.length > 0 ? mergedMirrors : undefined,
         gameUpdates: mergedUpdates.length > 0 ? mergedUpdates : undefined,
+        fitgirlSize: match.repackSize || game.fitgirlSize,
         repackSize: match.repackSize || game.repackSize,
         repackUrl: match.url || game.repackUrl,
         fitgirlVersion: version || game.fitgirlVersion,
@@ -786,7 +837,8 @@ export async function linkGameToSteamRIP(
         ...game,
         mirrorGroups: mergedMirrors.length > 0 ? mergedMirrors : undefined,
         gameUpdates: mergedUpdates.length > 0 ? mergedUpdates : undefined,
-        repackSize: match.repackSize || game.repackSize,
+        steamripSize: match.repackSize || game.steamripSize,
+        repackSize: game.fitgirlSize || match.repackSize || game.repackSize,
         repackUrl: match.url || game.repackUrl,
         steamripVersion: version || game.steamripVersion,
         steamripUploadDate: match.date || game.steamripUploadDate,

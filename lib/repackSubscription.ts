@@ -267,7 +267,7 @@ async function flushNotificationBatch(): Promise<void> {
         (remainingCount > 0 ? `\n...and ${remainingCount} more` : "");
 
       await sendDesktopNotification({
-        title: "🎮 FitRepacks Library Updates",
+        title: "FitRepacks Library Updates",
         body: `${summaryBody}${previewText}`,
       });
     }
@@ -592,13 +592,11 @@ export async function initRepackSubscription(): Promise<() => void> {
 
       await ab
         .collection("repacks")
-        .subscribe("*", (e) => handleRepackEvent(e, "fitgirl"));
-      await ab
-        .collection("steamrip")
-        .subscribe("*", (e) => handleRepackEvent(e, "steamrip"));
+        .subscribe("*", (e) => handleRepackEvent(e, "fitgirl"))
+        .catch(() => {});
       isSubscribed = true;
       console.log(
-        "[AlsaBase] Successfully subscribed to 'repacks' and 'steamrip' collections realtime events.",
+        "[AlsaBase] Successfully subscribed to 'repacks' realtime events.",
       );
     } catch (err) {
       console.error("[AlsaBase] Failed to subscribe to collections:", err);

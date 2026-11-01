@@ -636,17 +636,18 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
     const postTime = parseDateSafe(postDate);
     if (ignTime !== null && postTime !== null && ignTime >= postTime)
       return true;
+    if (ignTime !== null && postTime === null) return true;
     return false;
   };
 
   const handleIgnoreUpdate = (postDate?: string) => {
-    const dateToIgnore =
-      postDate ||
-      currentGame.updateInfo?.date ||
-      currentGame.fitgirlUploadDate ||
-      currentGame.steamripUploadDate ||
-      currentGame.releaseDate ||
-      new Date().toISOString();
+    const nowIso = new Date().toISOString();
+    let dateToIgnore = nowIso;
+    if (postDate) {
+      const pTime = parseDateSafe(postDate);
+      const nowTime = Date.now();
+      dateToIgnore = pTime && pTime > nowTime ? postDate : nowIso;
+    }
 
     const updated: Game = {
       ...currentGame,
@@ -944,7 +945,29 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                 </Badge>
               )}
 
-              {currentGame.repackSize && (
+              {currentGame.fitgirlSize && (
+                <Badge
+                  color="grape"
+                  variant="light"
+                  size="sm"
+                  leftSection={<HardDrive size={12} />}
+                >
+                  FitGirl: {currentGame.fitgirlSize}
+                </Badge>
+              )}
+
+              {currentGame.steamripSize && (
+                <Badge
+                  color="cyan"
+                  variant="light"
+                  size="sm"
+                  leftSection={<HardDrive size={12} />}
+                >
+                  SteamRIP: {currentGame.steamripSize}
+                </Badge>
+              )}
+
+              {!currentGame.fitgirlSize && !currentGame.steamripSize && currentGame.repackSize && (
                 <Badge
                   color="grape"
                   variant="light"
@@ -1404,6 +1427,28 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                   >
                     Clear Status
                   </Menu.Item>
+                  {(hasFitgirlUpdate || hasSteamripUpdate || currentGame.hasUpdate) && (
+                    <>
+                      <Menu.Divider />
+                      <Menu.Item
+                        leftSection={<EyeOff size={14} color="#eab308" />}
+                        onClick={() => handleIgnoreUpdate()}
+                      >
+                        Ignore New Version
+                      </Menu.Item>
+                    </>
+                  )}
+                  {Boolean(currentGame.ignoredUpdateDate) && (
+                    <>
+                      <Menu.Divider />
+                      <Menu.Item
+                        leftSection={<RotateCcw size={14} />}
+                        onClick={() => handleUnignoreUpdate()}
+                      >
+                        Restore Update Checking
+                      </Menu.Item>
+                    </>
+                  )}
                 </Menu.Dropdown>
               </Menu>
 
@@ -1447,6 +1492,34 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                   Edit Info
                 </Button>
               )}
+
+              {(hasFitgirlUpdate || hasSteamripUpdate || currentGame.hasUpdate) && (
+                <Button
+                  size="sm"
+                  variant="subtle"
+                  color="yellow"
+                  radius="md"
+                  leftSection={<EyeOff size={15} color="#eab308" />}
+                  onClick={() => handleIgnoreUpdate()}
+                >
+                  Ignore Version
+                </Button>
+              )}
+              {Boolean(currentGame.ignoredUpdateDate) &&
+                !hasFitgirlUpdate &&
+                !hasSteamripUpdate &&
+                !currentGame.hasUpdate && (
+                  <Button
+                    size="sm"
+                    variant="subtle"
+                    color="gray"
+                    radius="md"
+                    leftSection={<RotateCcw size={14} />}
+                    onClick={() => handleUnignoreUpdate()}
+                  >
+                    Restore Update Check
+                  </Button>
+                )}
 
               {currentGame.exePath && onUninstall && (
                 <HoldToConfirmButton

@@ -1,19 +1,101 @@
 /**
- * Offline Map Storage Manager using native IndexedDB.
- * Zero external dependencies.
+ * Pure File-System Offline Map Storage Manager.
+ * All downloaded maps, tiles, fonts, styles, sprites, and media are saved ONLY
+ * as standard files inside the "maps" folder in the application folder.
+ * Zero database / webview storage is used.
  */
 
-const DB_NAME = "fitrepacks_maps_offline_db";
-const DB_VERSION = 1;
-
-const STORES = {
-  MAPS: "offline_maps",
-  ASSETS: "offline_assets",
-  METADATA: "offline_metadata",
-} as const;
-
-function isTauri(): boolean {
+export function isTauri(): boolean {
   return typeof window !== "undefined" && Boolean((window as any).__TAURI_INTERNALS__);
+}
+
+// Clean up any legacy webview IndexedDB if present
+if (typeof window !== "undefined" && typeof indexedDB !== "undefined") {
+  try {
+    indexedDB.deleteDatabase("fitrepacks_maps_offline_db");
+  } catch (_) {}
+}
+
+function hashString(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash << 5) - hash + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return hash;
+}
+
+/**
+ * Maps an internal asset cache key to a clean relative path inside the "maps/" directory:
+ * - Tile: <gameSlug>/<mapSlug>/tiles/<z>/<x>/<y>.jpg
+ * - Sprite: <gameSlug>/assets/markers@2x.png
+ * - Fonts: <gameSlug>/assets/icomoon.woff, <gameSlug>/assets/mg-icons.woff
+ * - CSS: <gameSlug>/assets/theme.css
+ * - Media: <gameSlug>/media/<safeFilename>.jpg
+ */
+export function keyToRelativePath(key: string): string {
+  if (!key) return "misc/unknown.bin";
+
+  // 1. Tile keys: tile_v3_game_map_z_x_y or tile_v2_... or tile_...
+  const tileMatch = key.match(/^tile(?:_v\d+)?_([^_]+)_([^_]+)_(\d+)_(\d+)_(\d+)$/);
+  if (tileMatch) {
+    const [, gameSlug, mapSlug, z, x, y] = tileMatch;
+    return `${gameSlug}/${mapSlug}/tiles/${z}/${x}/${y}.jpg`;
+  }
+
+  // 2. Sprite sheet
+  const spriteMatch = key.match(/^sprite_([^_]+)$/);
+  if (spriteMatch) {
+    return `${spriteMatch[1]}/assets/markers@2x.png`;
+  }
+
+  const spriteUrlMatch = key.match(/^sprite_url_([^_]+)$/);
+  if (spriteUrlMatch) {
+    return `${spriteUrlMatch[1]}/assets/sprite_url.txt`;
+  }
+
+  // 3. Fonts
+  const icomoonMatch = key.match(/^font_icomoon_([^_]+)$/);
+  if (icomoonMatch) {
+    return `${icomoonMatch[1]}/assets/icomoon.woff`;
+  }
+
+  const mgIconsMatch = key.match(/^font_mg_icons_([^_]+)$/);
+  if (mgIconsMatch) {
+    return `${mgIconsMatch[1]}/assets/mg-icons.woff`;
+  }
+
+  // 4. CSS Themes
+  const cssMatch = key.match(/^css_theme_([^_]+)$/);
+  if (cssMatch) {
+    return `${cssMatch[1]}/assets/theme.css`;
+  }
+
+  // 5. Media previews
+  if (key.startsWith("media_")) {
+    const rawUrl = decodeURIComponent(key.replace(/^media_/, ""));
+    let safeName = rawUrl.split("/").pop() || "";
+    safeName = safeName.split("?")[0].replace(/[^a-zA-Z0-9._-]/g, "_");
+    if (!safeName || safeName.length < 3) {
+      safeName = `media_${Math.abs(hashString(rawUrl))}.jpg`;
+    }
+    const gameMatch = rawUrl.match(/games\/([^/]+)/);
+    const gameSlug = gameMatch ? gameMatch[1] : "shared";
+    return `${gameSlug}/media/${safeName}`;
+  }
+
+  const sanitized = key.replace(/[^a-zA-Z0-9._-]/g, "_");
+  return `misc/${sanitized}`;
+}
+
+export async function getMapsFolder(): Promise<string> {
+  if (isTauri()) {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      return await invoke<string>("get_maps_folder");
+    } catch (_) {}
+  }
+  return "maps";
 }
 
 export async function fetchAssetBlob(url: string): Promise<Blob | null> {
@@ -31,7 +113,7 @@ export async function fetchAssetBlob(url: string): Promise<Blob | null> {
       if (res.ok) {
         return await res.blob();
       }
-    } catch {}
+    } catch (_) {}
   }
 
   try {
@@ -39,147 +121,164 @@ export async function fetchAssetBlob(url: string): Promise<Blob | null> {
     if (res.ok) {
       return await res.blob();
     }
-  } catch {}
+  } catch (_) {}
   return null;
 }
 
-export async function fetchAndCacheOfflineAsset(key: string, url: string): Promise<Blob | null> {
+export async function fetchAndCacheOfflineAsset(
+  key: string,
+  url: string,
+  force: boolean = false,
+): Promise<Blob | null> {
   if (!key || !url) return null;
-  const existing = await getOfflineAsset(key);
-  if (existing) return existing;
+  if (!force) {
+    const existing = await getOfflineAsset(key);
+    if (existing) return existing;
+  }
 
   const blob = await fetchAssetBlob(url);
   if (blob && blob.size > 0) {
     try {
       await saveOfflineAsset(key, blob);
-    } catch {}
+      const spriteMatch = key.match(/^sprite_([^_]+)$/);
+      if (spriteMatch) {
+        await saveOfflineAsset(`sprite_url_${spriteMatch[1]}`, url.trim());
+      }
+    } catch (_) {}
     return blob;
   }
   return null;
 }
 
-let dbPromise: Promise<IDBDatabase> | null = null;
+// ----------------- File-based Asset Storage -----------------
 
-export function getOfflineDb(): Promise<IDBDatabase> {
-  if (typeof window === "undefined") {
-    return Promise.reject(new Error("IndexedDB is only available in browser"));
-  }
-  if (!dbPromise) {
-    dbPromise = new Promise((resolve, reject) => {
-      const request = indexedDB.open(DB_NAME, DB_VERSION);
-      request.onupgradeneeded = (event) => {
-        const db = (event.target as IDBOpenDBRequest).result;
-        if (!db.objectStoreNames.contains(STORES.MAPS)) {
-          db.createObjectStore(STORES.MAPS, { keyPath: "key" });
-        }
-        if (!db.objectStoreNames.contains(STORES.ASSETS)) {
-          db.createObjectStore(STORES.ASSETS, { keyPath: "key" });
-        }
-        if (!db.objectStoreNames.contains(STORES.METADATA)) {
-          db.createObjectStore(STORES.METADATA, { keyPath: "key" });
-        }
-      };
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-  }
-  return dbPromise;
-}
+export async function saveOfflineAsset(key: string, data: Blob | string | Uint8Array | ArrayBuffer): Promise<void> {
+  const relPath = keyToRelativePath(key);
 
-export async function saveOfflineAsset(key: string, data: Blob | string): Promise<void> {
-  const db = await getOfflineDb();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORES.ASSETS, "readwrite");
-    const store = tx.objectStore(STORES.ASSETS);
-    const req = store.put({ key, data, timestamp: Date.now() });
-    req.onsuccess = () => resolve();
-    req.onerror = () => reject(req.error);
-  });
+  if (isTauri()) {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      if (typeof data === "string") {
+        await invoke("save_map_text_file", { relativePath: relPath, content: data });
+      } else if (data instanceof Blob) {
+        const buffer = await data.arrayBuffer();
+        await invoke("save_map_file", { relativePath: relPath, data: new Uint8Array(buffer) });
+      } else if (data instanceof Uint8Array) {
+        await invoke("save_map_file", { relativePath: relPath, data });
+      } else if (data instanceof ArrayBuffer) {
+        await invoke("save_map_file", { relativePath: relPath, data: new Uint8Array(data) });
+      }
+    } catch (e) {
+      console.warn(`Failed to save map asset file: ${relPath}`, e);
+    }
+  }
 }
 
 export async function getOfflineAsset(key: string): Promise<Blob | null> {
   if (!key) return null;
-  try {
-    const db = await getOfflineDb();
-    return new Promise((resolve) => {
-      const tx = db.transaction(STORES.ASSETS, "readonly");
-      const store = tx.objectStore(STORES.ASSETS);
-      const req = store.get(key);
-      req.onsuccess = () => {
-        if (req.result?.data) {
-          if (req.result.data instanceof Blob) {
-            resolve(req.result.data);
-          } else if (typeof req.result.data === "string") {
-            resolve(new Blob([req.result.data]));
-          } else {
-            resolve(null);
-          }
-        } else {
-          resolve(null);
+  const relPath = keyToRelativePath(key);
+
+  if (isTauri()) {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const exists = await invoke<boolean>("map_file_exists", { relativePath: relPath });
+      if (exists) {
+        const bytes = await invoke<number[]>("read_map_file", { relativePath: relPath });
+        if (bytes && bytes.length > 0) {
+          return new Blob([new Uint8Array(bytes)]);
         }
-      };
-      req.onerror = () => resolve(null);
-    });
-  } catch {
-    return null;
+      }
+    } catch (_) {}
   }
+  return null;
+}
+
+export async function getOfflineAssetUrl(key: string): Promise<string | null> {
+  if (!key) return null;
+  const blob = await getOfflineAsset(key);
+  if (blob) {
+    return URL.createObjectURL(blob);
+  }
+  return null;
 }
 
 export async function getOfflineAssetText(key: string): Promise<string | null> {
   if (!key) return null;
-  try {
-    const db = await getOfflineDb();
-    return new Promise((resolve) => {
-      const tx = db.transaction(STORES.ASSETS, "readonly");
-      const store = tx.objectStore(STORES.ASSETS);
-      const req = store.get(key);
-      req.onsuccess = async () => {
-        if (req.result?.data) {
-          if (typeof req.result.data === "string") {
-            resolve(req.result.data);
-          } else if (req.result.data instanceof Blob) {
-            resolve(await req.result.data.text());
-          } else {
-            resolve(null);
-          }
-        } else {
-          resolve(null);
-        }
-      };
-      req.onerror = () => resolve(null);
-    });
-  } catch {
-    return null;
+  const relPath = keyToRelativePath(key);
+
+  if (isTauri()) {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const exists = await invoke<boolean>("map_file_exists", { relativePath: relPath });
+      if (exists) {
+        const text = await invoke<string>("read_map_text_file", { relativePath: relPath });
+        if (text) return text;
+      }
+    } catch (_) {}
   }
+  return null;
 }
 
+export async function getValidOfflineSpriteUrl(
+  gameSlug: string,
+  targetUrl?: string,
+): Promise<string | null> {
+  if (!gameSlug) return null;
+  const spriteKey = `sprite_${gameSlug}`;
+  const spriteUrlKey = `sprite_url_${gameSlug}`;
+
+  if (targetUrl && targetUrl.trim()) {
+    const cachedSourceUrl = await getOfflineAssetText(spriteUrlKey);
+    const isStale = !cachedSourceUrl || cachedSourceUrl.trim() !== targetUrl.trim();
+
+    if (isStale) {
+      const freshBlob = await fetchAndCacheOfflineAsset(spriteKey, targetUrl, true);
+      if (freshBlob) {
+        return URL.createObjectURL(freshBlob);
+      }
+    }
+  }
+
+  return await getOfflineAssetUrl(spriteKey);
+}
+
+// ----------------- File-based Map JSON Storage -----------------
+
 export async function saveOfflineMapData(gameSlug: string, mapSlug: string, data: any): Promise<void> {
-  const db = await getOfflineDb();
-  const key = `${gameSlug}_${mapSlug}`;
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORES.MAPS, "readwrite");
-    const store = tx.objectStore(STORES.MAPS);
-    const req = store.put({ key, data, timestamp: Date.now() });
-    req.onsuccess = () => resolve();
-    req.onerror = () => reject(req.error);
-  });
+  if (!gameSlug || !mapSlug || !data) return;
+  const relPath = `${gameSlug}/${mapSlug}/map.json`;
+
+  if (isTauri()) {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const jsonStr = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+      await invoke("save_map_text_file", { relativePath: relPath, content: jsonStr });
+    } catch (e) {
+      console.warn(`Failed to save map.json to maps folder: ${relPath}`, e);
+    }
+  }
 }
 
 export async function getOfflineMapData(gameSlug: string, mapSlug: string): Promise<any | null> {
-  try {
-    const db = await getOfflineDb();
-    const key = `${gameSlug}_${mapSlug}`;
-    return new Promise((resolve) => {
-      const tx = db.transaction(STORES.MAPS, "readonly");
-      const store = tx.objectStore(STORES.MAPS);
-      const req = store.get(key);
-      req.onsuccess = () => resolve(req.result?.data || null);
-      req.onerror = () => resolve(null);
-    });
-  } catch {
-    return null;
+  if (!gameSlug || !mapSlug) return null;
+  const relPath = `${gameSlug}/${mapSlug}/map.json`;
+
+  if (isTauri()) {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const exists = await invoke<boolean>("map_file_exists", { relativePath: relPath });
+      if (exists) {
+        const text = await invoke<string>("read_map_text_file", { relativePath: relPath });
+        if (text) {
+          return JSON.parse(text);
+        }
+      }
+    } catch (_) {}
   }
+  return null;
 }
+
+// ----------------- Metadata & Readiness -----------------
 
 export interface OfflineMapMeta {
   key: string;
@@ -188,73 +287,262 @@ export interface OfflineMapMeta {
   totalItems: number;
   totalBytes: number;
   downloadedAt: number;
+  locationsCount?: number;
+  categoriesCount?: number;
+  markerImagesUrl?: string;
+  markerImagesWidth?: number;
+  markerImagesHeight?: number;
+  spritePositionsCount?: number;
+  tilePath?: string;
+}
+
+export interface OfflineMapUpdateCheckResult {
+  hasUpdate: boolean;
+  reason?: string;
+  latestSpriteUrl?: string;
+  diffLocations?: number;
+  offlineLocationsCount?: number;
+  onlineLocationsCount?: number;
 }
 
 export async function isMapOfflineReady(gameSlug: string, mapSlug: string): Promise<boolean> {
   if (!gameSlug || !mapSlug) return false;
-  try {
-    const db = await getOfflineDb();
-    const key = `${gameSlug}_${mapSlug}`;
-    return new Promise((resolve) => {
-      const tx = db.transaction(STORES.METADATA, "readonly");
-      const store = tx.objectStore(STORES.METADATA);
-      const req = store.get(key);
-      req.onsuccess = () => resolve(Boolean(req.result));
-      req.onerror = () => resolve(false);
-    });
-  } catch {
-    return false;
+  // A map is fully offline ready only if its offline download metadata (meta.json) exists,
+  // indicating all map tiles & assets were actually downloaded (not merely that map.json was viewed/cached).
+  const relPath = `${gameSlug}/${mapSlug}/meta.json`;
+
+  if (isTauri()) {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      return await invoke<boolean>("map_file_exists", { relativePath: relPath });
+    } catch (_) {}
   }
+  return false;
+}
+
+export async function listOfflineMaps(): Promise<string[]> {
+  if (isTauri()) {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      return await invoke<string[]>("list_downloaded_maps");
+    } catch (_) {}
+  }
+  return [];
 }
 
 export async function getOfflineMetadata(gameSlug: string, mapSlug: string): Promise<OfflineMapMeta | null> {
-  try {
-    const db = await getOfflineDb();
-    const key = `${gameSlug}_${mapSlug}`;
-    return new Promise((resolve) => {
-      const tx = db.transaction(STORES.METADATA, "readonly");
-      const store = tx.objectStore(STORES.METADATA);
-      const req = store.get(key);
-      req.onsuccess = () => resolve(req.result || null);
-      req.onerror = () => resolve(null);
-    });
-  } catch {
-    return null;
+  if (!gameSlug || !mapSlug) return null;
+  const relPath = `${gameSlug}/${mapSlug}/meta.json`;
+
+  if (isTauri()) {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const exists = await invoke<boolean>("map_file_exists", { relativePath: relPath });
+      if (exists) {
+        const text = await invoke<string>("read_map_text_file", { relativePath: relPath });
+        if (text) {
+          return JSON.parse(text);
+        }
+      }
+    } catch (_) {}
   }
+  return null;
+}
+
+/**
+ * Checks whether an offline downloaded map has an update available on MapGenie
+ * by comparing local metadata / map snapshot with live online map data.
+ */
+export async function checkOfflineMapUpdateAvailable(
+  gameSlug: string,
+  mapSlug: string,
+  onlineMapData?: any | null
+): Promise<OfflineMapUpdateCheckResult> {
+  if (!gameSlug || !mapSlug) return { hasUpdate: false };
+
+  // 1. Must be downloaded / offline ready
+  const isReady = await isMapOfflineReady(gameSlug, mapSlug);
+  if (!isReady) return { hasUpdate: false };
+
+  // 2. Fetch local metadata and/or local map.json
+  const meta = await getOfflineMetadata(gameSlug, mapSlug);
+  const localMap = await getOfflineMapData(gameSlug, mapSlug);
+
+  if (!meta && !localMap) return { hasUpdate: false };
+
+  const offlineLocCount =
+    meta?.locationsCount ?? (Array.isArray(localMap?.locations) ? localMap.locations.length : 0);
+  const offlineCatCount =
+    meta?.categoriesCount ?? (Array.isArray(localMap?.categories) ? localMap.categories.length : 0);
+  const offlineSpriteUrl =
+    meta?.markerImagesUrl || localMap?.mapConfig?.markerImagesUrl || "";
+  const offlineSpriteWidth =
+    meta?.markerImagesWidth || localMap?.mapConfig?.markerImagesWidth;
+  const offlineSpriteHeight =
+    meta?.markerImagesHeight || localMap?.mapConfig?.markerImagesHeight;
+  const offlineSpriteCount =
+    meta?.spritePositionsCount ??
+    (localMap?.mapConfig?.markerSpritePositions
+      ? Object.keys(localMap.mapConfig.markerSpritePositions).length
+      : 0);
+  const offlineDownloadedAt = meta?.downloadedAt || 0;
+
+  // 3. Online Data Comparison
+  let onlineData = onlineMapData;
+
+  // If onlineMapData was not passed directly, try to get from global map cache
+  if (!onlineData && typeof window !== "undefined") {
+    try {
+      const cached = localStorage.getItem("fitrepacks_mapgenie_maps_v3");
+      if (cached) {
+        const allMaps = JSON.parse(cached);
+        if (Array.isArray(allMaps)) {
+          const matched = allMaps.find(
+            (m: any) =>
+              (m.game_slug?.toLowerCase() === gameSlug.toLowerCase() ||
+                m.slug?.toLowerCase() === gameSlug.toLowerCase() ||
+                m.slug?.toLowerCase().startsWith(`${gameSlug.toLowerCase()}--`)) &&
+              (m.map_slug?.toLowerCase() === mapSlug.toLowerCase() ||
+                m.slug?.toLowerCase().endsWith(`--${mapSlug.toLowerCase()}`) ||
+                m.slug?.toLowerCase() === mapSlug.toLowerCase())
+          );
+          if (matched && typeof matched.locations_count === "number" && matched.locations_count > 0) {
+            if (matched.locations_count !== offlineLocCount) {
+              const diff = matched.locations_count - offlineLocCount;
+              return {
+                hasUpdate: true,
+                reason:
+                  offlineLocCount === 0
+                    ? `${matched.locations_count} locations available (current: 0)`
+                    : diff > 0
+                      ? `${diff} new location(s) available (${offlineLocCount} -> ${matched.locations_count})`
+                      : `Location count updated (${offlineLocCount} -> ${matched.locations_count})`,
+                diffLocations: diff,
+                offlineLocationsCount: offlineLocCount,
+                onlineLocationsCount: matched.locations_count,
+              };
+            }
+          }
+        }
+      }
+    } catch (_) {}
+    return { hasUpdate: false };
+  }
+
+  if (!onlineData) return { hasUpdate: false };
+
+  const onlineLocCount = Array.isArray(onlineData?.locations) ? onlineData.locations.length : 0;
+  const onlineCatCount = Array.isArray(onlineData?.categories) ? onlineData.categories.length : 0;
+  const onlineSpriteUrl = onlineData?.mapConfig?.markerImagesUrl || "";
+  const onlineSpriteWidth = onlineData?.mapConfig?.markerImagesWidth;
+  const onlineSpriteHeight = onlineData?.mapConfig?.markerImagesHeight;
+  const onlineSpriteCount = onlineData?.mapConfig?.markerSpritePositions
+    ? Object.keys(onlineData.mapConfig.markerSpritePositions).length
+    : 0;
+
+  // A. Locations count difference
+  if (onlineLocCount > 0 && onlineLocCount !== offlineLocCount) {
+    const diff = onlineLocCount - offlineLocCount;
+    return {
+      hasUpdate: true,
+      reason:
+        offlineLocCount === 0
+          ? `${onlineLocCount} locations available (current: 0)`
+          : diff > 0
+            ? `${diff} new location(s) available (${offlineLocCount} -> ${onlineLocCount})`
+            : `Location count updated (${offlineLocCount} -> ${onlineLocCount})`,
+      diffLocations: diff,
+      offlineLocationsCount: offlineLocCount,
+      onlineLocationsCount: onlineLocCount,
+    };
+  }
+
+  // B. Marker Sprite URL or version changed
+  if (onlineSpriteUrl && offlineSpriteUrl && onlineSpriteUrl !== offlineSpriteUrl) {
+    return {
+      hasUpdate: true,
+      reason: "Updated marker icon sprite sheet available",
+      latestSpriteUrl: onlineSpriteUrl,
+      offlineLocationsCount: offlineLocCount,
+      onlineLocationsCount: onlineLocCount,
+    };
+  }
+
+  // C. Marker Sprite dimensions changed
+  if (
+    onlineSpriteWidth &&
+    offlineSpriteWidth &&
+    (onlineSpriteWidth !== offlineSpriteWidth || onlineSpriteHeight !== offlineSpriteHeight)
+  ) {
+    return {
+      hasUpdate: true,
+      reason: `Updated marker sprite format (${offlineSpriteWidth}x${offlineSpriteHeight} -> ${onlineSpriteWidth}x${onlineSpriteHeight})`,
+      offlineLocationsCount: offlineLocCount,
+      onlineLocationsCount: onlineLocCount,
+    };
+  }
+
+  // D. Sprite Positions count changed
+  if (onlineSpriteCount > 0 && offlineSpriteCount > 0 && onlineSpriteCount !== offlineSpriteCount) {
+    const diff = onlineSpriteCount - offlineSpriteCount;
+    return {
+      hasUpdate: true,
+      reason: `${Math.abs(diff)} marker icons updated`,
+      offlineLocationsCount: offlineLocCount,
+      onlineLocationsCount: onlineLocCount,
+    };
+  }
+
+  // E. Categories count changed
+  if (onlineCatCount > 0 && offlineCatCount > 0 && onlineCatCount !== offlineCatCount) {
+    return {
+      hasUpdate: true,
+      reason: "Map categories updated on MapGenie",
+      offlineLocationsCount: offlineLocCount,
+      onlineLocationsCount: onlineLocCount,
+    };
+  }
+
+  // F. Timestamp / Revision
+  const onlineUpdatedAtStr =
+    onlineData?.map?.updated_at ||
+    onlineData?.mapConfig?.updated_at ||
+    onlineData?.updated_at;
+  if (onlineUpdatedAtStr && offlineDownloadedAt > 0) {
+    const onlineTime = new Date(onlineUpdatedAtStr).getTime();
+    if (!isNaN(onlineTime) && onlineTime > offlineDownloadedAt) {
+      return {
+        hasUpdate: true,
+        reason: "Newer map revision available online",
+        offlineLocationsCount: offlineLocCount,
+        onlineLocationsCount: onlineLocCount,
+      };
+    }
+  }
+
+  return { hasUpdate: false };
 }
 
 export async function deleteOfflineMap(gameSlug: string, mapSlug: string): Promise<void> {
-  try {
-    const db = await getOfflineDb();
-    const mapKey = `${gameSlug}_${mapSlug}`;
+  if (!gameSlug || !mapSlug) return;
 
-    // Delete map JSON and metadata
-    const tx = db.transaction([STORES.MAPS, STORES.METADATA], "readwrite");
-    tx.objectStore(STORES.MAPS).delete(mapKey);
-    tx.objectStore(STORES.METADATA).delete(mapKey);
-  } catch {}
+  if (isTauri()) {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("delete_map_folder", { gameSlug, mapSlug });
+    } catch (e) {
+      console.warn("Failed to delete map folder on disk:", e);
+    }
+  }
 }
 
 export async function clearOfflineMapTileCache(gameSlug?: string, mapSlug?: string): Promise<void> {
-  try {
-    const db = await getOfflineDb();
-    const tx = db.transaction(STORES.ASSETS, "readwrite");
-    const store = tx.objectStore(STORES.ASSETS);
-    const req = store.openCursor();
-    const prefix = gameSlug && mapSlug ? `tile_${gameSlug}_${mapSlug}` : gameSlug ? `tile_${gameSlug}` : "tile_";
-    const prefixV2 = gameSlug && mapSlug ? `tile_v2_${gameSlug}_${mapSlug}` : gameSlug ? `tile_v2_${gameSlug}` : "tile_v2_";
-
-    req.onsuccess = (event) => {
-      const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
-      if (cursor) {
-        const key = String(cursor.key);
-        if (key.startsWith(prefix) || key.startsWith(prefixV2)) {
-          cursor.delete();
-        }
-        cursor.continue();
-      }
-    };
-  } catch {}
+  if (isTauri() && gameSlug && mapSlug) {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("delete_map_folder", { gameSlug, mapSlug: `${mapSlug}/tiles` });
+    } catch (_) {}
+  }
 }
 
 export interface DownloadProgress {
@@ -265,7 +553,8 @@ export interface DownloadProgress {
 }
 
 /**
- * Downloads all tiles, styles, fonts, marker icons, and media images for a map.
+ * Downloads all tiles, styles, fonts, marker icons, and media images for a map
+ * and saves them as plain files in the "maps/" folder.
  */
 export async function downloadFullOfflineMap(
   gameSlug: string,
@@ -279,13 +568,11 @@ export async function downloadFullOfflineMap(
   const tileSets = (mapData as any)?.tile_sets || mapData?.map?.tile_sets || mapData?.mapConfig?.tile_sets || [];
   const primaryTileSet = (Array.isArray(tileSets) && tileSets[0]) || {};
 
-  // Always download zoom range from 8 to 15 (or wider if map defines it)
   const minZoom = Math.max(0, Math.min(8, primaryTileSet.min_zoom ?? 8));
   const maxZoom = Math.max(15, primaryTileSet.tiles_max_zoom ?? primaryTileSet.max_zoom ?? 15);
 
   const bounds = primaryTileSet.bounds || (mapData?.mapConfig?.tile_sets?.[0]?.bounds) || {};
 
-  // Helper to convert Lat/Lng to Tile coordinates
   const latLngToTile = (lat: number, lng: number, zoom: number): { x: number; y: number } => {
     const n = Math.pow(2, zoom);
     const x = Math.floor(((lng + 180) / 360) * n);
@@ -299,7 +586,6 @@ export async function downloadFullOfflineMap(
     };
   };
 
-  // Pre-calculate locations bounding box if available
   const locList = Array.isArray(mapData?.locations) ? mapData.locations : [];
   let locMinLat = Infinity, locMaxLat = -Infinity, locMinLng = Infinity, locMaxLng = -Infinity;
   let hasValidLocs = false;
@@ -364,7 +650,7 @@ export async function downloadFullOfflineMap(
 
     for (let x = minX; x <= maxX; x++) {
       for (let y = minY; y <= maxY; y++) {
-        const key = `tile_v2_${gameSlug}_${mapSlug}_${z}_${x}_${y}`;
+        const key = `tile_v3_${gameSlug}_${mapSlug}_${z}_${x}_${y}`;
         const rawUrls: string[] = [];
 
         if (mapData?.mapConfig?.tilePattern) {
@@ -432,6 +718,9 @@ export async function downloadFullOfflineMap(
       urls: [
         mapData?.mapConfig?.iconsCssUrl || "",
         `https://cdn.mapgenie.io/css/themes/icons/${gameSlug}-icons.css`,
+        `https://cdn.mapgenie.io/css/themes/games/${gameSlug}.css`,
+        `https://cdn.mapgenie.io/css/themes/${gameSlug}.css`,
+        `https://cdn.mapgenie.io/css/themes/icons/${gameSlug}.css`,
         `https://mapgenie.io/game-icons/${gameSlug}/icons.css`,
         `https://media.mapgenie.io/v2/assets/prod/games/${gameSlug}/theme/theme.css`,
         `https://media.mapgenie.io/v2/assets/prod/games/${gameSlug}/theme/v3/theme.css`,
@@ -446,7 +735,7 @@ export async function downloadFullOfflineMap(
     },
   ];
 
-  // 3. Collect Location Media URLs (Screenshots & previews)
+  // 3. Collect Location Media URLs
   locList.forEach((loc: any) => {
     if (Array.isArray(loc.media)) {
       loc.media.forEach((m: any) => {
@@ -466,10 +755,9 @@ export async function downloadFullOfflineMap(
   let current = 0;
   let totalBytes = 0;
 
-  // Save map JSON first
+  // Save map.json directly to disk in maps/<gameSlug>/<mapSlug>/map.json
   await saveOfflineMapData(gameSlug, mapSlug, mapData);
 
-  // Worker pool for parallel downloading (24 concurrent downloads)
   const CONCURRENCY = 24;
   let taskIndex = 0;
 
@@ -477,7 +765,7 @@ export async function downloadFullOfflineMap(
     while (taskIndex < allDownloadTasks.length) {
       if (abortSignal?.aborted) break;
       const task = allDownloadTasks[taskIndex++];
-      let saved = false;
+      if (!task) continue;
 
       for (const url of task.urls) {
         if (!url) continue;
@@ -486,10 +774,9 @@ export async function downloadFullOfflineMap(
           if (blob && blob.size > 0) {
             await saveOfflineAsset(task.key, blob);
             totalBytes += blob.size;
-            saved = true;
             break;
           }
-        } catch {}
+        } catch (_) {}
       }
 
       current++;
@@ -512,8 +799,7 @@ export async function downloadFullOfflineMap(
     return false;
   }
 
-  // Save metadata
-  const db = await getOfflineDb();
+  // Save metadata to disk in maps/<gameSlug>/<mapSlug>/meta.json
   const meta: OfflineMapMeta = {
     key: `${gameSlug}_${mapSlug}`,
     gameSlug,
@@ -521,14 +807,26 @@ export async function downloadFullOfflineMap(
     totalItems: current,
     totalBytes,
     downloadedAt: Date.now(),
+    locationsCount: locList.length,
+    categoriesCount: Array.isArray(mapData?.categories) ? mapData.categories.length : 0,
+    markerImagesUrl: mapData?.mapConfig?.markerImagesUrl,
+    markerImagesWidth: mapData?.mapConfig?.markerImagesWidth,
+    markerImagesHeight: mapData?.mapConfig?.markerImagesHeight,
+    spritePositionsCount: mapData?.mapConfig?.markerSpritePositions
+      ? Object.keys(mapData.mapConfig.markerSpritePositions).length
+      : 0,
+    tilePath: primaryTileSet?.path,
   };
 
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORES.METADATA, "readwrite");
-    const req = tx.objectStore(STORES.METADATA).put(meta);
-    req.onsuccess = () => resolve();
-    req.onerror = () => reject(req.error);
-  });
+  if (isTauri()) {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("save_map_text_file", {
+        relativePath: `${gameSlug}/${mapSlug}/meta.json`,
+        content: JSON.stringify(meta, null, 2),
+      });
+    } catch (_) {}
+  }
 
   return true;
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import { Game, ActiveTab, SortOption, ViewMode } from "../lib/types";
+import { Game, ActiveTab, SortOption, ViewMode, parseSizeToMB } from "../lib/types";
 import {
   getStoredGames,
   syncTauriLibraryData,
@@ -50,6 +50,7 @@ import {
   unsubscribeRepackSubscription,
 } from "../lib/repackSubscription";
 import { syncLibraryGamesWithLatestRepacks } from "../lib/gameLinker";
+import { useOverlayShortcuts } from "../lib/useOverlayShortcuts";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow, ProgressBarStatus } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
@@ -484,6 +485,8 @@ export default function Home() {
         "release-asc",
         "added-desc",
         "added-asc",
+        "size-desc",
+        "size-asc",
         "title-asc",
         "rating-desc",
       ].includes(savedSort)
@@ -706,6 +709,9 @@ export default function Home() {
   const sessionStartTimeRef = useRef<number | null>(null);
   const isStoppingSessionRef = useRef<boolean>(false);
   const [isDevMode, setIsDevMode] = useState<boolean>(false);
+
+  // Global Map Overlay Keyboard and Controller Shortcut Listener
+  useOverlayShortcuts({ activeGame });
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -1270,6 +1276,28 @@ export default function Home() {
           const dateA = a.dateAdded ? new Date(a.dateAdded).getTime() : 0;
           const dateB = b.dateAdded ? new Date(b.dateAdded).getTime() : 0;
           return dateA - dateB;
+        }
+        if (sortOption === "size-desc") {
+          const sizeA = parseSizeToMB(a.repackSize);
+          const sizeB = parseSizeToMB(b.repackSize);
+          if (sizeA === 0 && sizeB === 0) {
+            return a.title.localeCompare(b.title);
+          }
+          if (sizeA === 0) return 1;
+          if (sizeB === 0) return -1;
+          const diff = sizeB - sizeA;
+          return diff !== 0 ? diff : a.title.localeCompare(b.title);
+        }
+        if (sortOption === "size-asc") {
+          const sizeA = parseSizeToMB(a.repackSize);
+          const sizeB = parseSizeToMB(b.repackSize);
+          if (sizeA === 0 && sizeB === 0) {
+            return a.title.localeCompare(b.title);
+          }
+          if (sizeA === 0) return 1;
+          if (sizeB === 0) return -1;
+          const diff = sizeA - sizeB;
+          return diff !== 0 ? diff : a.title.localeCompare(b.title);
         }
         if (sortOption === "title-asc") {
           return a.title.localeCompare(b.title);
@@ -1883,6 +1911,8 @@ export default function Home() {
                             },
                             { label: "Recently Added", value: "added-desc" },
                             { label: "First Added", value: "added-asc" },
+                            { label: "Size (Largest)", value: "size-desc" },
+                            { label: "Size (Smallest)", value: "size-asc" },
                             { label: "Title (A-Z)", value: "title-asc" },
                             { label: "Highest Rated", value: "rating-desc" },
                           ]}
@@ -2192,7 +2222,7 @@ export default function Home() {
           coverUrl={torrentModalData.coverUrl}
           repackSize={torrentModalData.repackSize}
           onDownloadStarted={() => {
-            setActiveTab("downloads");
+            handleTabChange("downloads");
           }}
         />
       )}

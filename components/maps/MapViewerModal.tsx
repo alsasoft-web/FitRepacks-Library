@@ -10,11 +10,15 @@ import {
   getMapGenieGameBySlug,
   fetchRawMapGenieMapFull,
   fetchRawMapGenieHtml,
+  getLastOpenedMapSlug,
+  saveLastOpenedMapSlug,
+  resolveCanonicalMapGenieSlug,
 } from "../../lib/gameMaps";
 import {
   getOfflineMapData,
   saveOfflineMapData,
   fetchAndCacheOfflineAsset,
+  isMapOfflineReady,
 } from "../../lib/offlineMapStore";
 import { openMapOverlay } from "../../lib/mapOverlay";
 
@@ -31,7 +35,12 @@ export function MapViewerModal({
   minZoom,
   maxZoom,
 }: MapViewerModalProps) {
-  const [activeMapSlug, setActiveMapSlug] = useState<string>(mapSlug || "default");
+  const cleanGameSlug = resolveCanonicalMapGenieSlug(gameSlug, gameTitle);
+
+  const [activeMapSlug, setActiveMapSlug] = useState<string>(() => {
+    const saved = getLastOpenedMapSlug(cleanGameSlug);
+    return saved || mapSlug || "default";
+  });
   const [availableMaps, setAvailableMaps] = useState<MapItem[]>([]);
   const [loadedMapData, setLoadedMapData] = useState<MapData | null>(initialMapData || null);
   const [isLoading, setIsLoading] = useState(false);
@@ -40,16 +49,18 @@ export function MapViewerModal({
   useEffect(() => {
     setLoadedMapData(initialMapData || null);
     setAvailableMaps([]);
-    setActiveMapSlug(mapSlug || "default");
+    const saved = getLastOpenedMapSlug(cleanGameSlug);
+    setActiveMapSlug(saved || mapSlug || "default");
     setError(null);
     setIsLoading(false);
   }, [gameSlug, initialMapData]);
 
   useEffect(() => {
-    if (mapSlug) {
-      setActiveMapSlug(mapSlug);
+    if (mapSlug && mapSlug !== "default") {
+      const saved = getLastOpenedMapSlug(cleanGameSlug);
+      setActiveMapSlug(saved || mapSlug);
     }
-  }, [mapSlug]);
+  }, [mapSlug, cleanGameSlug]);
 
   useEffect(() => {
     if (initialMapData) {
@@ -62,12 +73,8 @@ export function MapViewerModal({
     let isMounted = true;
 
     async function fetchOnlineMapData() {
-      const cleanGameSlug = gameSlug
-        ? gameSlug.includes("--")
-          ? gameSlug.split("--")[0]
-          : gameSlug
-        : "";
-      let resolvedMapSlug = activeMapSlug || mapSlug || "default";
+      const savedMap = getLastOpenedMapSlug(cleanGameSlug);
+      let resolvedMapSlug = activeMapSlug && activeMapSlug !== "default" ? activeMapSlug : (savedMap || mapSlug || "default");
 
       let hadOfflineData = false;
       let offlineCached: any = null;
@@ -82,9 +89,16 @@ export function MapViewerModal({
             (await getOfflineMapData(cleanGameSlug, "empire-bay"));
         }
         if (offlineCached && isMounted) {
+          const hasLocations =
+            Array.isArray(offlineCached.locations) &&
+            offlineCached.locations.length > 0;
           hadOfflineData = true;
           setLoadedMapData(offlineCached);
-          setIsLoading(false);
+          if (hasLocations) {
+            setIsLoading(false);
+          } else {
+            setIsLoading(true);
+          }
         }
       } catch (_) {}
 
@@ -125,18 +139,30 @@ export function MapViewerModal({
           if (mapItemsMap.size > 0) {
             const items = Array.from(mapItemsMap.values());
             setAvailableMaps(items);
-            if (
-              (resolvedMapSlug === "default" || !items.some((i) => i.slug === resolvedMapSlug)) &&
-              items.length > 0 &&
-              items[0].slug
-            ) {
-              resolvedMapSlug = items[0].slug;
-              setActiveMapSlug(resolvedMapSlug);
+            const isCurrentSlugValid = items.some(
+              (i) => i.slug.toLowerCase() === resolvedMapSlug.toLowerCase(),
+            );
+            if (!isCurrentSlugValid || resolvedMapSlug === "default") {
+              const savedLast = getLastOpenedMapSlug(cleanGameSlug);
+              if (
+                savedLast &&
+                items.some((i) => i.slug.toLowerCase() === savedLast.toLowerCase())
+              ) {
+                resolvedMapSlug = savedLast;
+              } else if (items.length > 0 && items[0].slug) {
+                resolvedMapSlug = items[0].slug;
+              }
+              if (resolvedMapSlug !== activeMapSlug) {
+                setActiveMapSlug(resolvedMapSlug);
+              }
             }
           }
         }
 
         const targetMapSlug = resolvedMapSlug;
+        if (cleanGameSlug && targetMapSlug && targetMapSlug !== "default") {
+          saveLastOpenedMapSlug(cleanGameSlug, targetMapSlug);
+        }
 
         // Identify Map ID
         const currentMapItem =
@@ -249,7 +275,7 @@ export function MapViewerModal({
         // Categories
         const categories: any[] = [];
         const rawCategories =
-          (Array.isArray(rawData.categories) && rawData.categories.length > 0)
+          (Array.isArray(rawData?.categories) && rawData.categories.length > 0)
             ? rawData.categories
             : (Array.isArray(htmlMapData?.categories) && htmlMapData.categories.length > 0)
               ? htmlMapData.categories
@@ -257,6 +283,8 @@ export function MapViewerModal({
 
         if (rawCategories) {
           categories.push(...rawCategories);
+        } else if (htmlMapData?.categories && typeof htmlMapData.categories === "object") {
+          categories.push(...Object.values(htmlMapData.categories));
         } else if (groups.length > 0) {
           for (const g of groups) {
             if (Array.isArray(g.categories)) {
@@ -269,7 +297,11 @@ export function MapViewerModal({
 
         // Locations
         const locations: any[] = [];
-        if (categories.length > 0) {
+        if (Array.isArray(rawData?.locations) && rawData.locations.length > 0) {
+          locations.push(...rawData.locations);
+        } else if (Array.isArray(htmlMapData?.locations) && htmlMapData.locations.length > 0) {
+          locations.push(...htmlMapData.locations);
+        } else if (categories.length > 0) {
           for (const cat of categories) {
             if (Array.isArray(cat.locations)) {
               for (const loc of cat.locations) {
@@ -277,11 +309,6 @@ export function MapViewerModal({
               }
             }
           }
-        }
-        if (locations.length === 0 && Array.isArray(rawData.locations)) {
-          locations.push(...rawData.locations);
-        } else if (locations.length === 0 && Array.isArray(htmlMapData?.locations)) {
-          locations.push(...htmlMapData.locations);
         }
 
         const tileSets =
@@ -363,6 +390,7 @@ export function MapViewerModal({
             start_lat: startLat,
             start_lng: startLng,
             tile_sets: tileSets,
+            config: mapConfig,
           },
           categories,
           groups,
@@ -371,8 +399,32 @@ export function MapViewerModal({
           regions: rawData.regions || [],
         };
 
-        // Always save fresh online map data to offline IndexedDB
-        saveOfflineMapData(cleanGameSlug, targetMapSlug, finalMapData).catch(() => {});
+        // Only pre-cache map.json if the map has not been downloaded for offline use yet.
+        // If the user already downloaded the map, preserve the offline snapshot until they choose to update.
+        isMapOfflineReady(cleanGameSlug, targetMapSlug).then(async (ready) => {
+          if (!ready) {
+            saveOfflineMapData(cleanGameSlug, targetMapSlug, finalMapData).catch(() => {});
+          } else {
+            // Auto-repair offline maps that were previously saved with 0 locations
+            const localData = await getOfflineMapData(cleanGameSlug, targetMapSlug);
+            const localLocsCount = Array.isArray(localData?.locations) ? localData.locations.length : 0;
+            const finalLocs = finalMapData.locations || [];
+            if (localLocsCount === 0 && finalLocs.length > 0) {
+              const repairedData = {
+                ...localData,
+                locations: finalLocs,
+                categories: (finalMapData.categories && finalMapData.categories.length > 0) ? finalMapData.categories : localData.categories,
+                groups: (finalMapData.groups && finalMapData.groups.length > 0) ? finalMapData.groups : localData.groups,
+                regions: (finalMapData.regions && finalMapData.regions.length > 0) ? finalMapData.regions : localData.regions,
+                mapConfig: {
+                  ...(localData.mapConfig || {}),
+                  ...(finalMapData.mapConfig || {}),
+                },
+              };
+              saveOfflineMapData(cleanGameSlug, targetMapSlug, repairedData).catch(() => {});
+            }
+          }
+        });
 
         // Pre-cache fonts, CSS, and sprite sheet in the background
         if (mapConfig.markerImagesUrl) {
@@ -520,7 +572,12 @@ export function MapViewerModal({
           currentMapSlug={activeMapSlug}
           minZoom={minZoom}
           maxZoom={maxZoom}
-          onSelectMap={(newSlug) => setActiveMapSlug(newSlug)}
+          onSelectMap={(newSlug) => {
+            setActiveMapSlug(newSlug);
+            if (cleanGameSlug) {
+              saveLastOpenedMapSlug(cleanGameSlug, newSlug);
+            }
+          }}
           onOpenOverlay={() => {
             openMapOverlay({
               gameSlug: gameSlug || "",

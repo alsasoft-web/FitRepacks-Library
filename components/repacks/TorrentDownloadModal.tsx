@@ -565,26 +565,10 @@ export const TorrentDownloadModal: React.FC<TorrentDownloadModalProps> = ({
       if (f.isSelected) selectedIndices.push(idx);
     });
 
-    let resolvedHash = magnetInfo.hash;
+    const resolvedHash = magnetInfo.hash;
 
-    if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
-      try {
-        const { invoke } = await import("@tauri-apps/api/core");
-        const infoHash = await invoke<string>("start_torrent_download", {
-          magnetUrl,
-          downloadDir: effectiveDownloadDir,
-          selectedFileIndices:
-            selectedIndices.length < files.length ? selectedIndices : null,
-        });
-        if (infoHash && infoHash !== "list_only") {
-          resolvedHash = infoHash;
-        }
-      } catch (err) {
-        console.error("Failed to start native torrent download:", err);
-      }
-    }
-
-    addMagnetDownload({
+    // Immediately add download to queue store so UI responds instantaneously
+    const downloadId = addMagnetDownload({
       title: title || magnetInfo.name,
       magnetUrl,
       size: selectedStats.size,
@@ -594,26 +578,58 @@ export const TorrentDownloadModal: React.FC<TorrentDownloadModalProps> = ({
       infoHash: resolvedHash,
     });
 
-    // Automatically set Windows custom folder cover icon in the background if enabled
-    const torrentSettings = getTorrentSettings();
-    if (
-      torrentSettings.applyFolderCoverIcon &&
-      coverUrl &&
-      typeof window !== "undefined" &&
-      "__TAURI_INTERNALS__" in window
-    ) {
-      import("@tauri-apps/api/core").then(({ invoke }) => {
-        invoke("set_folder_cover_icon", {
-          folderPath: effectiveDownloadDir,
-          coverUrl,
-        }).catch((err) => console.warn("Failed to set folder cover icon:", err));
-      });
-    }
-
+    // Close modal and transition immediately without waiting on network/metadata resolution
     onClose();
 
     if (openDownloadsTab && onDownloadStarted) {
       onDownloadStarted();
+    }
+
+    // Asynchronously initiate native torrent session and folder cover icon in background
+    if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+      import("@tauri-apps/api/core")
+        .then(({ invoke }) => {
+          invoke<string>("start_torrent_download", {
+            magnetUrl,
+            downloadDir: effectiveDownloadDir,
+            selectedFileIndices:
+              selectedIndices.length < files.length ? selectedIndices : null,
+          })
+            .then((infoHash) => {
+              if (infoHash && infoHash !== "list_only" && infoHash !== resolvedHash) {
+                useDownloadQueueStore.setState((prev) => ({
+                  magnetDownloads: prev.magnetDownloads.map((item) =>
+                    item.id === downloadId || (item.infoHash && item.infoHash === resolvedHash)
+                      ? { ...item, infoHash }
+                      : item,
+                  ),
+                }));
+              }
+            })
+            .catch((err) => {
+              console.error("Failed to start native torrent download:", err);
+              useDownloadQueueStore.setState((prev) => ({
+                magnetDownloads: prev.magnetDownloads.map((item) =>
+                  item.id === downloadId
+                    ? {
+                        ...item,
+                        status: "error" as const,
+                        eta: `Error: ${err?.message || err}`,
+                      }
+                    : item,
+                ),
+              }));
+            });
+
+          const torrentSettings = getTorrentSettings();
+          if (torrentSettings.applyFolderCoverIcon && coverUrl) {
+            invoke("set_folder_cover_icon", {
+              folderPath: effectiveDownloadDir,
+              coverUrl,
+            }).catch((err) => console.warn("Failed to set folder cover icon:", err));
+          }
+        })
+        .catch((err) => console.error("Failed to load Tauri core invoke:", err));
     }
   };
 

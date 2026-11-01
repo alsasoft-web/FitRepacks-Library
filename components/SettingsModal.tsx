@@ -41,6 +41,11 @@ import {
   Sparkles,
   CheckCircle2,
   AlertCircle,
+  Gamepad2,
+  Keyboard,
+  PictureInPicture2,
+  MapPin,
+  Layers,
 } from "lucide-react";
 import { useAppUpdater } from "../lib/updater";
 import { invoke } from "@tauri-apps/api/core";
@@ -53,6 +58,10 @@ import {
   saveTorrentSettings,
   getNotificationSettings,
   saveNotificationSettings,
+  getMapOverlayShortcutSettings,
+  saveMapOverlayShortcutSettings,
+  DEFAULT_MAP_OVERLAY_SHORTCUT_SETTINGS,
+  MapOverlayShortcutSettings,
   getExcludedGenres,
   saveExcludedGenres,
   getCarouselVideoPosition,
@@ -64,6 +73,7 @@ import {
   getCloseToTraySetting,
   saveCloseToTraySetting,
 } from "../lib/db";
+import { toggleMapOverlay } from "../lib/mapOverlay";
 import {
   sendDesktopNotification,
   requestNotificationPermission,
@@ -501,6 +511,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [isCloseToTrayLoading, setIsCloseToTrayLoading] =
     useState<boolean>(false);
 
+  const [overlayShortcutSettings, setOverlayShortcutSettings] =
+    useState<MapOverlayShortcutSettings>(DEFAULT_MAP_OVERLAY_SHORTCUT_SETTINGS);
+  const [connectedGamepadName, setConnectedGamepadName] = useState<string | null>(null);
+  const [isTestingOverlay, setIsTestingOverlay] = useState<boolean>(false);
+  const [overlayTestSuccess, setOverlayTestSuccess] = useState<boolean>(false);
+
   const {
     status: updaterStatus,
     currentVersion,
@@ -529,6 +545,31 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           }
         })
         .catch(() => {});
+
+      setOverlayShortcutSettings(getMapOverlayShortcutSettings());
+      getAppSetting("map_overlay_shortcuts")
+        .then((saved) => {
+          if (saved) {
+            try {
+              const parsed = JSON.parse(saved);
+              setOverlayShortcutSettings((prev) => ({ ...prev, ...parsed }));
+            } catch (_) {}
+          }
+        })
+        .catch(() => {});
+
+      if (typeof navigator !== "undefined" && typeof navigator.getGamepads === "function") {
+        const gamepads = navigator.getGamepads();
+        let foundName: string | null = null;
+        for (let i = 0; i < gamepads.length; i++) {
+          const gp = gamepads[i];
+          if (gp && gp.connected) {
+            foundName = gp.id || "Gamepad Controller";
+            break;
+          }
+        }
+        setConnectedGamepadName(foundName);
+      }
 
       setDownloadDir(getDefaultDownloadDir());
       setPreferredLangs(getPreferredLanguages());
@@ -615,6 +656,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       }
     }
   }, [opened]);
+
+  const updateOverlaySetting = <K extends keyof MapOverlayShortcutSettings>(
+    key: K,
+    value: MapOverlayShortcutSettings[K],
+  ) => {
+    const updated = { ...overlayShortcutSettings, [key]: value };
+    setOverlayShortcutSettings(updated);
+    saveMapOverlayShortcutSettings(updated).catch(console.error);
+  };
+
+  const handleTestOverlayToggle = async () => {
+    setIsTestingOverlay(true);
+    try {
+      await toggleMapOverlay();
+      setOverlayTestSuccess(true);
+      setTimeout(() => setOverlayTestSuccess(false), 2500);
+    } catch (err) {
+      console.error("Failed to toggle map overlay:", err);
+    } finally {
+      setIsTestingOverlay(false);
+    }
+  };
 
   const updateLinuxSetting = <K extends keyof LinuxCompatibilitySettings>(
     key: K,
@@ -805,6 +868,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               }
             >
               Downloads
+            </Tabs.Tab>
+            <Tabs.Tab
+              value="overlay"
+              leftSection={
+                <PictureInPicture2 size={15} color="var(--mantine-color-indigo-4)" />
+              }
+            >
+              Map Overlay
             </Tabs.Tab>
             {isLinux && (
               <Tabs.Tab
@@ -1283,6 +1354,73 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </Stack>
               </Paper>
 
+              {/* In-Game Map Overlay Shortcut */}
+              <Paper
+                p="md"
+                radius="md"
+                bg="var(--mantine-color-default)"
+                style={{
+                  border: "1px solid var(--mantine-color-default-border)",
+                }}
+              >
+                <Stack gap="sm">
+                  <Group justify="space-between" align="center">
+                    <Group gap="xs">
+                      <PictureInPicture2
+                        size={16}
+                        color="var(--mantine-color-indigo-4)"
+                      />
+                      <Text size="sm" fw={700}>
+                        In-Game Map Overlay Shortcut
+                      </Text>
+                    </Group>
+                    <Group gap="xs">
+                      <Badge color="blue" size="xs" variant="light">
+                        Key: {overlayShortcutSettings.keyboardShortcut}
+                      </Badge>
+                      <Badge color="teal" size="xs" variant="light">
+                        Pad: {overlayShortcutSettings.controllerShortcut}
+                      </Badge>
+                    </Group>
+                  </Group>
+
+                  <Text size="xs" c="dimmed">
+                    Toggle the interactive map overlay on top of your running game using keyboard or controller shortcuts.
+                  </Text>
+
+                  <Group justify="space-between" align="center">
+                    <Switch
+                      label="Enable Overlay Shortcuts"
+                      description="Toggle HUD overlay while gaming"
+                      checked={overlayShortcutSettings.enabled}
+                      onChange={(e) =>
+                        updateOverlaySetting("enabled", e.currentTarget.checked)
+                      }
+                      color="indigo"
+                      size="sm"
+                    />
+
+                    <Button
+                      variant="light"
+                      color={overlayTestSuccess ? "teal" : "indigo"}
+                      size="xs"
+                      radius="md"
+                      loading={isTestingOverlay}
+                      leftSection={
+                        overlayTestSuccess ? (
+                          <Check size={14} />
+                        ) : (
+                          <PictureInPicture2 size={14} />
+                        )
+                      }
+                      onClick={handleTestOverlayToggle}
+                    >
+                      {overlayTestSuccess ? "Toggled!" : "Test Overlay"}
+                    </Button>
+                  </Group>
+                </Stack>
+              </Paper>
+
               {/* Feed Genre Blacklist (Hidden Genres) */}
               <Paper
                 p="md"
@@ -1611,6 +1749,241 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         size="sm"
                       />
                     </Stack>
+                  </Group>
+                </Stack>
+              </Paper>
+            </Stack>
+          </Tabs.Panel>
+
+          {/* MAP OVERLAY TAB */}
+          <Tabs.Panel value="overlay">
+            <Stack gap="md">
+              {/* Master Overlay Shortcut Settings */}
+              <Paper
+                p="md"
+                radius="md"
+                bg="var(--mantine-color-default)"
+                style={{
+                  border: "1px solid var(--mantine-color-default-border)",
+                }}
+              >
+                <Stack gap="md">
+                  <Group justify="space-between" align="center">
+                    <Group gap="xs">
+                      <PictureInPicture2
+                        size={18}
+                        color="var(--mantine-color-indigo-4)"
+                      />
+                      <Text size="sm" fw={700}>
+                        In-Game Map Overlay Shortcut
+                      </Text>
+                    </Group>
+                    <Badge color="indigo" size="xs" variant="light">
+                      In-Game HUD
+                    </Badge>
+                  </Group>
+
+                  <Text size="xs" c="dimmed">
+                    Open and close the floating interactive map overlay on top of
+                    your running game using customizable keyboard hotkeys or controller
+                    button combinations.
+                  </Text>
+
+                  <Switch
+                    label="Enable Map Overlay In-Game Shortcuts"
+                    description="Listen for keyboard and controller inputs to toggle the map overlay window"
+                    checked={overlayShortcutSettings.enabled}
+                    onChange={(e) =>
+                      updateOverlaySetting("enabled", e.currentTarget.checked)
+                    }
+                    color="indigo"
+                    size="sm"
+                  />
+
+                  {overlayShortcutSettings.enabled && (
+                    <Paper
+                      p="sm"
+                      radius="md"
+                      bg="var(--mantine-color-body)"
+                      style={{
+                        border: "1px solid var(--mantine-color-default-border)",
+                      }}
+                    >
+                      <Stack gap="md">
+                        {/* Keyboard Shortcut Selection */}
+                        <Group justify="space-between" align="flex-start" wrap="nowrap">
+                          <Stack gap={2} style={{ flex: 1 }}>
+                            <Group gap="xs">
+                              <Keyboard
+                                size={16}
+                                color="var(--mantine-color-blue-4)"
+                              />
+                              <Text size="xs" fw={700}>
+                                Keyboard Shortcut
+                              </Text>
+                            </Group>
+                            <Text size="xs" c="dimmed">
+                              Press this key while playing to toggle the map overlay
+                            </Text>
+                          </Stack>
+                          <Select
+                            data={[
+                              { value: "F9", label: "F9 (Recommended - Default)" },
+                              { value: "F8", label: "F8" },
+                              { value: "F10", label: "F10" },
+                              { value: "F11", label: "F11" },
+                              { value: "Ctrl+M", label: "Ctrl + M" },
+                              { value: "Alt+M", label: "Alt + M" },
+                              { value: "Ctrl+Shift+M", label: "Ctrl + Shift + M" },
+                              { value: "Disabled", label: "Disabled" },
+                            ]}
+                            value={overlayShortcutSettings.keyboardShortcut}
+                            onChange={(val) => {
+                              if (val) updateOverlaySetting("keyboardShortcut", val);
+                            }}
+                            size="xs"
+                            radius="md"
+                            style={{ width: 220 }}
+                          />
+                        </Group>
+
+                        <Divider my={2} />
+
+                        {/* Controller Shortcut Selection */}
+                        <Group justify="space-between" align="flex-start" wrap="nowrap">
+                          <Stack gap={2} style={{ flex: 1 }}>
+                            <Group gap="xs">
+                              <Gamepad2
+                                size={16}
+                                color="var(--mantine-color-teal-4)"
+                              />
+                              <Text size="xs" fw={700}>
+                                Controller Shortcut
+                              </Text>
+                            </Group>
+                            <Text size="xs" c="dimmed">
+                              Gamepad button combination to toggle the map overlay
+                            </Text>
+                          </Stack>
+                          <Select
+                            data={[
+                              {
+                                value: "Select+Start",
+                                label: "Options + Share / Select + Start (Recommended)",
+                              },
+                              {
+                                value: "Guide",
+                                label: "Guide Button (Xbox / PlayStation Home)",
+                              },
+                              {
+                                value: "LB+RB+Down",
+                                label: "LB + RB + D-Pad Down",
+                              },
+                              {
+                                value: "LT+RT+Down",
+                                label: "LT + RT + D-Pad Down",
+                              },
+                              {
+                                value: "Disabled",
+                                label: "Disabled",
+                              },
+                            ]}
+                            value={overlayShortcutSettings.controllerShortcut}
+                            onChange={(val) => {
+                              if (val) updateOverlaySetting("controllerShortcut", val);
+                            }}
+                            size="xs"
+                            radius="md"
+                            style={{ width: 260 }}
+                          />
+                        </Group>
+
+                        <Divider my={2} />
+
+                        {/* Auto-detect active game */}
+                        <Switch
+                          label="Auto-match Running Game Map"
+                          description="Automatically open the interactive map matching your active running game session or live memory tracker"
+                          checked={overlayShortcutSettings.autoOpenForActiveGame}
+                          onChange={(e) =>
+                            updateOverlaySetting(
+                              "autoOpenForActiveGame",
+                              e.currentTarget.checked,
+                            )
+                          }
+                          color="indigo"
+                          size="sm"
+                        />
+                      </Stack>
+                    </Paper>
+                  )}
+                </Stack>
+              </Paper>
+
+              {/* Gamepad Status & Quick Tester */}
+              <Paper
+                p="md"
+                radius="md"
+                bg="var(--mantine-color-default)"
+                style={{
+                  border: "1px solid var(--mantine-color-default-border)",
+                }}
+              >
+                <Stack gap="sm">
+                  <Group justify="space-between" align="center">
+                    <Group gap="xs">
+                      <Gamepad2
+                        size={16}
+                        color="var(--mantine-color-teal-4)"
+                      />
+                      <Text size="sm" fw={700}>
+                        Controller Status & Testing
+                      </Text>
+                    </Group>
+                    {connectedGamepadName ? (
+                      <Badge color="teal" size="xs" variant="filled">
+                        Controller Connected
+                      </Badge>
+                    ) : (
+                      <Badge color="gray" size="xs" variant="light">
+                        No Controller Detected
+                      </Badge>
+                    )}
+                  </Group>
+
+                  <Text size="xs" c="dimmed">
+                    {connectedGamepadName
+                      ? `Active Device: ${connectedGamepadName}. Press your configured shortcut (${overlayShortcutSettings.controllerShortcut}) or keyboard hotkey (${overlayShortcutSettings.keyboardShortcut}) at any time.`
+                      : `Connect an Xbox, PlayStation, or generic controller. You can also use your configured keyboard shortcut (${overlayShortcutSettings.keyboardShortcut}).`}
+                  </Text>
+
+                  <Group justify="space-between" align="center" mt="xs">
+                    <Group gap="xs">
+                      <Badge variant="outline" color="blue" size="sm">
+                        Key: {overlayShortcutSettings.keyboardShortcut}
+                      </Badge>
+                      <Badge variant="outline" color="teal" size="sm">
+                        Pad: {overlayShortcutSettings.controllerShortcut}
+                      </Badge>
+                    </Group>
+
+                    <Button
+                      variant="light"
+                      color={overlayTestSuccess ? "teal" : "indigo"}
+                      size="xs"
+                      radius="md"
+                      loading={isTestingOverlay}
+                      leftSection={
+                        overlayTestSuccess ? (
+                          <Check size={14} />
+                        ) : (
+                          <PictureInPicture2 size={14} />
+                        )
+                      }
+                      onClick={handleTestOverlayToggle}
+                    >
+                      {overlayTestSuccess ? "Toggled!" : "Test Toggle Overlay"}
+                    </Button>
                   </Group>
                 </Stack>
               </Paper>

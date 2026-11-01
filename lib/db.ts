@@ -62,6 +62,8 @@ async function getDatabase(): Promise<Database> {
           linked_fitgirl_url TEXT,
           linked_steamrip_url TEXT,
           repack_size TEXT,
+          fitgirl_size TEXT,
+          steamrip_size TEXT,
           repack_url TEXT,
           source TEXT,
           mirror_groups TEXT,
@@ -93,6 +95,8 @@ async function getDatabase(): Promise<Database> {
           ["steamrip_upload_date", "steamrip_upload_date TEXT"],
           ["game_updates", "game_updates TEXT"],
           ["repack_size", "repack_size TEXT"],
+          ["fitgirl_size", "fitgirl_size TEXT"],
+          ["steamrip_size", "steamrip_size TEXT"],
           ["repack_url", "repack_url TEXT"],
           ["source", "source TEXT"],
           ["mirror_groups", "mirror_groups TEXT"],
@@ -126,6 +130,46 @@ async function getDatabase(): Promise<Database> {
           post_id TEXT PRIMARY KEY,
           read_at TEXT NOT NULL
         );
+      `);
+
+      await db.execute(`
+        CREATE TABLE IF NOT EXISTS map_found_locations (
+          game_slug TEXT NOT NULL,
+          map_slug TEXT NOT NULL,
+          location_id TEXT NOT NULL,
+          found_at TEXT NOT NULL,
+          PRIMARY KEY (game_slug, map_slug, location_id)
+        );
+      `);
+
+      await db.execute(`
+        CREATE TABLE IF NOT EXISTS steamrip_repacks (
+          id TEXT PRIMARY KEY,
+          repack_id TEXT,
+          title TEXT NOT NULL,
+          url TEXT NOT NULL,
+          cover_url TEXT,
+          repack_size TEXT,
+          original_size TEXT,
+          genres TEXT,
+          companies TEXT,
+          languages TEXT,
+          description TEXT,
+          screenshots TEXT,
+          videos TEXT,
+          mirror_groups TEXT,
+          game_updates TEXT,
+          post_date TEXT,
+          scraped_at TEXT,
+          source TEXT DEFAULT 'steamrip'
+        );
+      `);
+
+      await db.execute(`
+        CREATE INDEX IF NOT EXISTS idx_steamrip_post_date ON steamrip_repacks(post_date DESC);
+      `);
+      await db.execute(`
+        CREATE INDEX IF NOT EXISTS idx_steamrip_title ON steamrip_repacks(title);
       `);
 
       dbInstance = db;
@@ -178,6 +222,26 @@ export interface NotificationSettings {
   libraryGameUpdates: boolean;
   showUpdateBadge: boolean;
 }
+
+export interface MapOverlayShortcutSettings {
+  enabled: boolean;
+  keyboardShortcut: string;
+  controllerShortcut: string;
+  autoOpenForActiveGame: boolean;
+  notifyOnToggle: boolean;
+}
+
+export const DEFAULT_MAP_OVERLAY_SHORTCUT_SETTINGS: MapOverlayShortcutSettings = {
+  enabled: true,
+  keyboardShortcut: "F9",
+  controllerShortcut: "Select+Start",
+  autoOpenForActiveGame: true,
+  notifyOnToggle: false,
+};
+
+let cachedMapOverlayShortcutSettings: MapOverlayShortcutSettings = {
+  ...DEFAULT_MAP_OVERLAY_SHORTCUT_SETTINGS,
+};
 
 let cachedNotificationSettings: NotificationSettings = {
   masterEnabled: true,
@@ -276,6 +340,8 @@ async function loadGamesFromSQLite(): Promise<Game[]> {
           linkedFitgirlUrl: r.linked_fitgirl_url || undefined,
           linkedSteamripUrl: r.linked_steamrip_url || undefined,
           repackSize: r.repack_size || undefined,
+          fitgirlSize: r.fitgirl_size || undefined,
+          steamripSize: r.steamrip_size || undefined,
           repackUrl: r.repack_url || undefined,
           source: r.source || undefined,
           mirrorGroups:
@@ -296,9 +362,10 @@ async function loadGamesFromSQLite(): Promise<Game[]> {
         };
       });
       const sanitized = parsed.map(sanitizeGameRecord);
-      persistCachedGames(sanitized);
+      const deduplicated = deduplicateGamesList(sanitized);
+      persistCachedGames(deduplicated);
       isInitialized = true;
-      return sanitized;
+      return deduplicated;
     }
   } catch (err) {
     console.error("Error loading games from SQLite via plugin-sql:", err);
@@ -316,12 +383,14 @@ async function upsertGameToSQLite(g: Game, db: Database): Promise<void> {
       is_wishlisted, is_installed, is_completed, completed_at, added_at, tags, notes, version,
       installed_version, installed_last_modified, fitgirl_version, steamrip_version, fitgirl_upload_date,
       steamrip_upload_date, linked_fitgirl_url, linked_steamrip_url, repack_size,
+      fitgirl_size, steamrip_size,
       repack_url, source, mirror_groups, game_updates, has_update, update_info, install_directory,
       ignored_update_date
     ) VALUES (
       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
       $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32,
-      $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47
+      $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47,
+      $48, $49
     ) ON CONFLICT(id) DO UPDATE SET
       title = excluded.title,
       exe_path = excluded.exe_path,
@@ -361,6 +430,8 @@ async function upsertGameToSQLite(g: Game, db: Database): Promise<void> {
       linked_fitgirl_url = excluded.linked_fitgirl_url,
       linked_steamrip_url = excluded.linked_steamrip_url,
       repack_size = excluded.repack_size,
+      fitgirl_size = excluded.fitgirl_size,
+      steamrip_size = excluded.steamrip_size,
       repack_url = excluded.repack_url,
       source = excluded.source,
       mirror_groups = excluded.mirror_groups,
@@ -411,6 +482,8 @@ async function upsertGameToSQLite(g: Game, db: Database): Promise<void> {
     g.linkedFitgirlUrl || null,
     g.linkedSteamripUrl || null,
     g.repackSize || null,
+    g.fitgirlSize || null,
+    g.steamripSize || null,
     g.repackUrl || null,
     g.source || null,
     JSON.stringify(g.mirrorGroups || []),
@@ -620,6 +693,40 @@ export async function syncTauriLibraryData(): Promise<Game[]> {
         try {
           const { invoke } = await import("@tauri-apps/api/core");
           await invoke("set_close_to_tray", { enabled: cachedCloseToTray });
+        } catch (_) {}
+      }
+
+      const mapOverlayShortcutsJson = await getAppSetting("map_overlay_shortcuts");
+      if (mapOverlayShortcutsJson) {
+        try {
+          const parsed = JSON.parse(mapOverlayShortcutsJson);
+          cachedMapOverlayShortcutSettings = {
+            ...DEFAULT_MAP_OVERLAY_SHORTCUT_SETTINGS,
+            ...parsed,
+          };
+        } catch (_) {}
+      } else if (typeof window !== "undefined") {
+        try {
+          const localSaved = localStorage.getItem("fitrepacks_map_overlay_shortcuts");
+          if (localSaved) {
+            cachedMapOverlayShortcutSettings = {
+              ...DEFAULT_MAP_OVERLAY_SHORTCUT_SETTINGS,
+              ...JSON.parse(localSaved),
+            };
+          }
+        } catch (_) {}
+      }
+
+      if (isTauri()) {
+        try {
+          const { invoke } = await import("@tauri-apps/api/core");
+          await invoke("update_overlay_shortcut_config", {
+            config: {
+              enabled: cachedMapOverlayShortcutSettings.enabled,
+              keyboard_shortcut: cachedMapOverlayShortcutSettings.keyboardShortcut || "F9",
+              controller_shortcut: cachedMapOverlayShortcutSettings.controllerShortcut || "Select+Start",
+            },
+          });
         } catch (_) {}
       }
 
@@ -895,6 +1002,62 @@ export async function saveNotificationSettings(
   }
 }
 
+export function getMapOverlayShortcutSettings(): MapOverlayShortcutSettings {
+  if (typeof window !== "undefined") {
+    try {
+      const localSaved = localStorage.getItem("fitrepacks_map_overlay_shortcuts");
+      if (localSaved) {
+        cachedMapOverlayShortcutSettings = {
+          ...DEFAULT_MAP_OVERLAY_SHORTCUT_SETTINGS,
+          ...cachedMapOverlayShortcutSettings,
+          ...JSON.parse(localSaved),
+        };
+      }
+    } catch (_) {}
+  }
+  return { ...cachedMapOverlayShortcutSettings };
+}
+
+export async function saveMapOverlayShortcutSettings(
+  settings: Partial<MapOverlayShortcutSettings>,
+): Promise<void> {
+  cachedMapOverlayShortcutSettings = {
+    ...cachedMapOverlayShortcutSettings,
+    ...settings,
+  };
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.setItem(
+        "fitrepacks_map_overlay_shortcuts",
+        JSON.stringify(cachedMapOverlayShortcutSettings),
+      );
+      queueMicrotask(() => {
+        window.dispatchEvent(
+          new CustomEvent("fitrepacks-overlay-shortcut-updated", {
+            detail: cachedMapOverlayShortcutSettings,
+          }),
+        );
+      });
+    } catch (_) {}
+  }
+  if (isTauri()) {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("update_overlay_shortcut_config", {
+        config: {
+          enabled: cachedMapOverlayShortcutSettings.enabled,
+          keyboard_shortcut: cachedMapOverlayShortcutSettings.keyboardShortcut || "F9",
+          controller_shortcut: cachedMapOverlayShortcutSettings.controllerShortcut || "Select+Start",
+        },
+      });
+    } catch (_) {}
+  }
+  await saveAppSetting(
+    "map_overlay_shortcuts",
+    JSON.stringify(cachedMapOverlayShortcutSettings),
+  );
+}
+
 export function getRepackNotificationsEnabled(): boolean {
   return cachedNotificationSettings.masterEnabled;
 }
@@ -1024,6 +1187,83 @@ export function findMatchingGameInLibrary(
   }
 
   return null;
+}
+
+/**
+ * Automatically merges duplicate entries representing the same installed/library game
+ * (e.g. sharing identical exePath, or matching IGDB ID / normalized title).
+ */
+export function deduplicateGamesList(games: Game[]): Game[] {
+  if (!Array.isArray(games) || games.length <= 1) return games;
+
+  const result: Game[] = [];
+  const removedIds: string[] = [];
+
+  for (const game of games) {
+    const matchIndex = result.findIndex((existing) => {
+      // 1. Same non-empty executable path
+      if (
+        game.exePath &&
+        game.exePath.trim() &&
+        existing.exePath &&
+        existing.exePath.trim() &&
+        game.exePath.trim().toLowerCase() === existing.exePath.trim().toLowerCase()
+      ) {
+        return true;
+      }
+      // 2. Same IGDB ID
+      if (game.igdbId && existing.igdbId && game.igdbId === existing.igdbId) {
+        return true;
+      }
+      // 3. Exact normalized title match if paths don't conflict
+      const normGame = normalizeGameTitle(game.title);
+      const normExisting = normalizeGameTitle(existing.title);
+      if (normGame && normExisting && normGame === normExisting) {
+        if (
+          game.exePath &&
+          existing.exePath &&
+          game.exePath.trim().toLowerCase() !== existing.exePath.trim().toLowerCase()
+        ) {
+          return false;
+        }
+        return true;
+      }
+      return false;
+    });
+
+    if (matchIndex === -1) {
+      result.push(game);
+    } else {
+      const existing = result[matchIndex];
+      // Prefer repack ID (repack-...) if one of them is repack-linked so downloads & links stay intact
+      const keepExisting = existing.id.startsWith("repack-") || !game.id.startsWith("repack-");
+      const baseGame = keepExisting ? existing : game;
+      const incomingGame = keepExisting ? game : existing;
+      const redundantId = incomingGame.id;
+
+      const merged = mergeGameRecords(baseGame, incomingGame);
+      result[matchIndex] = merged;
+      if (redundantId && redundantId !== baseGame.id && !removedIds.includes(redundantId)) {
+        removedIds.push(redundantId);
+      }
+    }
+  }
+
+  // Purge any redundant records from SQLite
+  if (removedIds.length > 0 && isTauri()) {
+    sqliteWriteQueue = sqliteWriteQueue
+      .then(async () => {
+        const db = await getDatabase();
+        for (const id of removedIds) {
+          await db.execute("DELETE FROM games WHERE id = $1", [id]);
+        }
+      })
+      .catch((err) => {
+        console.error("Error purging duplicate games from SQLite:", err);
+      });
+  }
+
+  return result;
 }
 
 /**
@@ -1298,13 +1538,24 @@ export function updateGameInStorage(game: Game): Game[] {
   }
 
   const games = getStoredGames();
-  const updated = games.map((g) => (g.id === game.id ? { ...g, ...game } : g));
+  let targetId = game.id;
+  const directExists = games.some((g) => g.id === game.id);
+  if (!directExists) {
+    const matched = findMatchingGameInLibrary(game, games);
+    if (matched) {
+      targetId = matched.id;
+      game = { ...game, id: matched.id };
+    }
+  }
+
+  const updated = games.map((g) => (g.id === targetId ? { ...g, ...game } : g));
+  const targetGame = updated.find((g) => g.id === targetId) || game;
   persistCachedGames(updated);
   if (isTauri()) {
     sqliteWriteQueue = sqliteWriteQueue
       .then(async () => {
         const db = await getDatabase();
-        await upsertGameToSQLite(game, db);
+        await upsertGameToSQLite(targetGame, db);
       })
       .catch((err) => {
         console.error("Error updating game in SQLite:", err);
@@ -2187,10 +2438,32 @@ const matchingCandidatesCache = new Map<
 >();
 const CANDIDATES_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
-function invalidateRepacksCache(): void {
+export function invalidateRepacksCache(): void {
   paginationCache.clear();
   matchingCandidatesCache.clear();
   datasetStatsCache.clear();
+}
+
+/**
+ * Retrieve latest SteamRIP repack IDs/URLs from local SQLite database
+ */
+export async function getSteamRipExistingIds(): Promise<Set<string>> {
+  if (!isTauri()) return new Set();
+  try {
+    const db = await getDatabase();
+    const rows = await db.select<{ id: string; url: string }[]>(
+      "SELECT id, url FROM steamrip_repacks ORDER BY post_date DESC, id DESC LIMIT 500;"
+    );
+    const set = new Set<string>();
+    for (const r of rows || []) {
+      if (r.id) set.add(String(r.id).trim());
+      if (r.url) set.add(String(r.url).trim());
+    }
+    return set;
+  } catch (err) {
+    console.error("Error fetching steamrip existing IDs:", err);
+    return new Set();
+  }
 }
 
 export const ADULT_KEYWORDS = [
@@ -2294,7 +2567,245 @@ export function computeSearchRelevance(
 }
 
 /**
- * Load paginated repacks on-demand directly from AlsaBase (or local JSON fallback)
+ * Save scraped SteamRIP posts directly into local SQLite database
+ */
+export async function saveSteamRipPosts(
+  posts: RepackPost[],
+): Promise<{ inserted: number; updated: number }> {
+  if (!posts || posts.length === 0) return { inserted: 0, updated: 0 };
+  if (!isTauri()) {
+    return { inserted: 0, updated: 0 };
+  }
+  const db = await getDatabase();
+  let inserted = 0;
+
+  const CHUNK_SIZE = 25;
+  for (let i = 0; i < posts.length; i += CHUNK_SIZE) {
+    const chunk = posts.slice(i, i + CHUNK_SIZE);
+    const valuePlaceholders: string[] = [];
+    const params: any[] = [];
+    let pIdx = 1;
+
+    for (const p of chunk) {
+      const id = p.id || p.url;
+      if (!id || !p.title) continue;
+      const repackId = p.id || "";
+      const coverUrl = p.coverUrl || "";
+      const repackSize = p.repackSize || "N/A";
+      const originalSize = p.originalSize || "N/A";
+      const genres = JSON.stringify(p.genres || []);
+      const companies = p.companies || "SteamRIP";
+      const languages = p.languages || "English";
+      const description = p.description || "";
+      const screenshots = JSON.stringify(p.screenshots || []);
+      const videos = JSON.stringify(p.videos || []);
+      const mirrorGroups = JSON.stringify(p.mirrorGroups || []);
+      const gameUpdates = JSON.stringify(p.gameUpdates || []);
+      const postDate = p.date || new Date().toISOString();
+      const scrapedAt = p.scrapedAt || new Date().toISOString();
+
+      valuePlaceholders.push(
+        `($${pIdx}, $${pIdx + 1}, $${pIdx + 2}, $${pIdx + 3}, $${pIdx + 4}, $${pIdx + 5}, $${pIdx + 6}, $${pIdx + 7}, $${pIdx + 8}, $${pIdx + 9}, $${pIdx + 10}, $${pIdx + 11}, $${pIdx + 12}, $${pIdx + 13}, $${pIdx + 14}, $${pIdx + 15}, $${pIdx + 16}, 'steamrip')`
+      );
+      params.push(
+        id,
+        repackId,
+        p.title,
+        p.url,
+        coverUrl,
+        repackSize,
+        originalSize,
+        genres,
+        companies,
+        languages,
+        description,
+        screenshots,
+        videos,
+        mirrorGroups,
+        gameUpdates,
+        postDate,
+        scrapedAt,
+      );
+      pIdx += 17;
+      inserted++;
+    }
+
+    if (valuePlaceholders.length > 0) {
+      await db.execute(
+        `INSERT INTO steamrip_repacks (
+          id, repack_id, title, url, cover_url, repack_size, original_size,
+          genres, companies, languages, description, screenshots, videos,
+          mirror_groups, game_updates, post_date, scraped_at, source
+        ) VALUES ${valuePlaceholders.join(", ")}
+        ON CONFLICT(id) DO UPDATE SET
+          repack_id = excluded.repack_id,
+          title = excluded.title,
+          url = excluded.url,
+          cover_url = excluded.cover_url,
+          repack_size = excluded.repack_size,
+          original_size = excluded.original_size,
+          genres = excluded.genres,
+          companies = excluded.companies,
+          languages = excluded.languages,
+          description = excluded.description,
+          screenshots = excluded.screenshots,
+          videos = excluded.videos,
+          mirror_groups = excluded.mirror_groups,
+          game_updates = excluded.game_updates,
+          post_date = excluded.post_date,
+          scraped_at = excluded.scraped_at;`,
+        params,
+      );
+    }
+  }
+
+  paginationCache.clear();
+  datasetStatsCache.delete("steamrip");
+
+  return { inserted, updated: 0 };
+}
+
+/**
+ * Load paginated SteamRIP repacks from local SQLite database
+ */
+async function loadSteamRipFromSQLite(
+  options: RepackPaginationOptions,
+  cleanSearch: string,
+  cacheKey: string,
+): Promise<PaginatedRepacksResult> {
+  const {
+    page = 1,
+    perPage = 10,
+    sortBy = "newest",
+    selectedCategories = ["All"],
+    readFilter = "all",
+  } = options;
+
+  if (!isTauri()) {
+    return { items: [], totalItems: 0, totalPages: 1, page, perPage };
+  }
+
+  const db = await getDatabase();
+  const whereClauses: string[] = ["1=1"];
+  const params: any[] = [];
+  let paramIdx = 1;
+
+  if (cleanSearch) {
+    const tokens = cleanSearch
+      .split(/[\s:,\-_/\\|.]+/)
+      .map((t) => t.trim())
+      .filter((t) => t.length > 0);
+    for (const token of tokens) {
+      whereClauses.push(
+        `(title LIKE $${paramIdx} OR companies LIKE $${paramIdx})`,
+      );
+      params.push(`%${token}%`);
+      paramIdx++;
+    }
+  }
+
+  if (
+    selectedCategories &&
+    selectedCategories.length > 0 &&
+    !selectedCategories.includes("All")
+  ) {
+    const catClauses = selectedCategories.map((cat) => {
+      params.push(`%${cat}%`);
+      const p = `$${paramIdx++}`;
+      return `genres LIKE ${p}`;
+    });
+    whereClauses.push(`(${catClauses.join(" OR ")})`);
+  }
+
+  const allReadAt = allReadAtMap["steamrip"];
+  if (readFilter === "unread") {
+    whereClauses.push(`id NOT IN (SELECT post_id FROM read_posts)`);
+    if (allReadAt) {
+      const markTime = parseDateSafe(allReadAt);
+      if (markTime) {
+        const isoDate = new Date(markTime).toISOString();
+        whereClauses.push(`post_date > $${paramIdx++}`);
+        params.push(isoDate);
+      }
+    }
+  } else if (readFilter === "read") {
+    if (allReadAt) {
+      const markTime = parseDateSafe(allReadAt);
+      if (markTime) {
+        const isoDate = new Date(markTime).toISOString();
+        whereClauses.push(
+          `(id IN (SELECT post_id FROM read_posts) OR post_date <= $${paramIdx++})`,
+        );
+        params.push(isoDate);
+      } else {
+        whereClauses.push(`id IN (SELECT post_id FROM read_posts)`);
+      }
+    } else {
+      whereClauses.push(`id IN (SELECT post_id FROM read_posts)`);
+    }
+  }
+
+  let orderClause = "ORDER BY post_date DESC";
+  if (sortBy === "oldest") {
+    orderClause = "ORDER BY post_date ASC";
+  } else if (sortBy === "title") {
+    orderClause = "ORDER BY title ASC";
+  }
+
+  const whereSql = whereClauses.join(" AND ");
+  const countSql = `SELECT COUNT(*) as total FROM steamrip_repacks WHERE ${whereSql}`;
+  const countRows = await db.select<{ total: number }[]>(countSql, params);
+  const totalItems = countRows?.[0]?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(totalItems / perPage));
+
+  const offset = (page - 1) * perPage;
+  const dataSql = `SELECT * FROM steamrip_repacks WHERE ${whereSql} ${orderClause} LIMIT $${paramIdx++} OFFSET $${paramIdx++}`;
+  const dataParams = [...params, perPage, offset];
+  const rows = await db.select<any[]>(dataSql, dataParams);
+
+  const items: RepackPost[] = (rows || []).map((r) => ({
+    id: r.id,
+    title: r.title,
+    url: r.url,
+    coverUrl: r.cover_url,
+    repackSize: r.repack_size || "N/A",
+    originalSize: r.original_size || "N/A",
+    genres:
+      typeof r.genres === "string"
+        ? JSON.parse(r.genres || "[]")
+        : r.genres || [],
+    companies: r.companies || "SteamRIP",
+    languages: r.languages || "English",
+    description: r.description || "",
+    screenshots:
+      typeof r.screenshots === "string"
+        ? JSON.parse(r.screenshots || "[]")
+        : r.screenshots || [],
+    videos:
+      typeof r.videos === "string"
+        ? JSON.parse(r.videos || "[]")
+        : r.videos || [],
+    mirrorGroups:
+      typeof r.mirror_groups === "string"
+        ? JSON.parse(r.mirror_groups || "[]")
+        : r.mirror_groups || [],
+    gameUpdates:
+      typeof r.game_updates === "string"
+        ? JSON.parse(r.game_updates || "[]")
+        : r.game_updates || [],
+    date: r.post_date,
+    scrapedAt: r.scraped_at,
+    isRead: isPostReadInStorage(r.id, r.post_date, "steamrip"),
+    source: "steamrip",
+  }));
+
+  const result = { items, totalItems, totalPages, page, perPage };
+  paginationCache.set(cacheKey, { result, timestamp: Date.now() });
+  return result;
+}
+
+/**
+ * Load paginated repacks on-demand directly from AlsaBase (or local SQLite for SteamRIP)
  */
 export async function loadRepacksPaginated(
   options: RepackPaginationOptions = {},
@@ -2341,8 +2852,13 @@ export async function loadRepacksPaginated(
     return { ...cached.result, items: freshItems };
   }
 
-  // AlsaBase on-demand pagination for FitGirl and SteamRIP
-  const collectionName = dataSource === "steamrip" ? "steamrip" : "repacks";
+  // Route SteamRIP directly to local SQLite
+  if (dataSource === "steamrip") {
+    return await loadSteamRipFromSQLite(options, cleanSearch, cacheKey);
+  }
+
+  // AlsaBase on-demand pagination for FitGirl
+  const collectionName = "repacks";
   try {
     const filterParts: string[] = [];
     const filterParams: Record<string, any> = {};
@@ -2392,7 +2908,7 @@ export async function loadRepacksPaginated(
         filterParams[key] = cat;
         return `genres ~ {:${key}}`;
       });
-      filterParts.push(catClauses.join(" || "));
+      filterParts.push(`(${catClauses.join(" || ")})`);
     }
 
     const userExcluded = getExcludedGenres();
@@ -2471,6 +2987,36 @@ export async function loadRepacksPaginated(
         let candidates = (allMatching || []).filter(
           (p) => !isIgnoredRepackTitle(p.title),
         );
+
+        if (
+          selectedCategories &&
+          selectedCategories.length > 0 &&
+          !selectedCategories.includes("All")
+        ) {
+          candidates = candidates.filter((p) => {
+            const rawGenres = Array.isArray(p.genres)
+              ? p.genres
+              : typeof p.genres === "string"
+                ? (() => {
+                    try {
+                      const parsed = JSON.parse(p.genres);
+                      return Array.isArray(parsed) ? parsed : [p.genres];
+                    } catch (_) {
+                      return [p.genres];
+                    }
+                  })()
+                : [];
+            const postGenres = rawGenres.map((g: any) =>
+              String(g).toLowerCase().trim(),
+            );
+            return selectedCategories.some((cat) => {
+              const cLower = cat.toLowerCase().trim();
+              return postGenres.some(
+                (pg: string) => pg === cLower || pg.includes(cLower) || cLower.includes(pg),
+              );
+            });
+          });
+        }
 
         if (!isAdultSelected) {
           candidates = candidates.filter(
@@ -2625,13 +3171,11 @@ export async function loadRepacksPaginated(
         !selectedCategories.includes("All")
       ) {
         enriched = enriched.filter((p) => {
-          const postGenres = (p.genres || []).map((g) => g.toLowerCase());
-          const postTitle = (p.title || "").toLowerCase();
+          const postGenres = (p.genres || []).map((g) => g.toLowerCase().trim());
           return selectedCategories.some((cat) => {
-            const cLower = cat.toLowerCase();
-            return (
-              postGenres.some((pg) => pg.includes(cLower) || cLower.includes(pg)) ||
-              postTitle.includes(cLower)
+            const cLower = cat.toLowerCase().trim();
+            return postGenres.some(
+              (pg) => pg === cLower || pg.includes(cLower) || cLower.includes(pg),
             );
           });
         });
@@ -3163,6 +3707,71 @@ export async function getRepackDatasetStats(
     return cached.stats;
   }
 
+  if (dataSource === "steamrip") {
+    if (!isTauri()) {
+      return {
+        totalCount: 0,
+        unreadCount: 0,
+        readCount: 0,
+        topMonthCount: 0,
+        topYearCount: 0,
+      };
+    }
+    try {
+      const db = await getDatabase();
+      const countRows = await db.select<{ total: number }[]>(
+        "SELECT COUNT(*) as total FROM steamrip_repacks",
+      );
+      const totalCount = countRows?.[0]?.total ?? 0;
+
+      let unreadCount = 0;
+      let readCount = 0;
+      const allReadAt = allReadAtMap["steamrip"];
+      if (allReadAt) {
+        const markTime = parseDateSafe(allReadAt);
+        if (markTime) {
+          const isoDate = new Date(markTime).toISOString();
+          const unreadRows = await db.select<{ unread: number }[]>(
+            "SELECT COUNT(*) as unread FROM steamrip_repacks WHERE id NOT IN (SELECT post_id FROM read_posts) AND post_date > $1",
+            [isoDate],
+          );
+          unreadCount = unreadRows?.[0]?.unread ?? 0;
+          readCount = Math.max(0, totalCount - unreadCount);
+        } else {
+          const readRows = await db.select<{ read_cnt: number }[]>(
+            "SELECT COUNT(*) as read_cnt FROM steamrip_repacks WHERE id IN (SELECT post_id FROM read_posts)",
+          );
+          readCount = readRows?.[0]?.read_cnt ?? 0;
+          unreadCount = Math.max(0, totalCount - readCount);
+        }
+      } else {
+        const readRows = await db.select<{ read_cnt: number }[]>(
+          "SELECT COUNT(*) as read_cnt FROM steamrip_repacks WHERE id IN (SELECT post_id FROM read_posts)",
+        );
+        readCount = readRows?.[0]?.read_cnt ?? 0;
+        unreadCount = Math.max(0, totalCount - readCount);
+      }
+
+      const stats: RepackDatasetStats = {
+        totalCount,
+        unreadCount,
+        readCount,
+        topMonthCount: 0,
+        topYearCount: 0,
+      };
+      datasetStatsCache.set("steamrip", { stats, timestamp: Date.now() });
+      return stats;
+    } catch (_) {
+      return {
+        totalCount: 0,
+        unreadCount: 0,
+        readCount: 0,
+        topMonthCount: 0,
+        topYearCount: 0,
+      };
+    }
+  }
+
   let totalCount = 0;
   let topMonthCount = 0;
   let topYearCount = 0;
@@ -3302,3 +3911,130 @@ export function togglePinnedGame(id: string): string[] {
 export function isGamePinned(id: string): boolean {
   return getPinnedGameIds().includes(id);
 }
+
+/**
+ * Map Found Locations / Progress Database API
+ */
+
+export async function getMapFoundLocationIds(
+  gameSlug: string,
+  mapSlug: string = "default",
+): Promise<string[]> {
+  if (!gameSlug) return [];
+  const cleanGame = gameSlug.trim().toLowerCase();
+  const cleanMap = (mapSlug || "default").trim().toLowerCase();
+
+  try {
+    const db = await getDatabase();
+    // Match the specific mapSlug, or fallback 'default'
+    const rows = await db.select<{ location_id: string }[]>(
+      "SELECT location_id FROM map_found_locations WHERE LOWER(game_slug) = $1 AND (LOWER(map_slug) = $2 OR LOWER(map_slug) = 'default' OR $2 = 'default');",
+      [cleanGame, cleanMap],
+    );
+    if (Array.isArray(rows) && rows.length > 0) {
+      return Array.from(new Set(rows.map((r) => String(r.location_id))));
+    }
+  } catch (err) {
+    console.warn("[DB] Failed to load map found locations:", err);
+  }
+
+  // Fallback to localStorage cache if DB query failed
+  if (typeof window !== "undefined") {
+    try {
+      const keys = [
+        `map_progress_${cleanGame}_${cleanMap}`,
+        `map_progress_${cleanGame}_default`,
+        `map_progress_${cleanGame}`,
+      ];
+      for (const k of keys) {
+        const raw = localStorage.getItem(k);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            return Array.from(new Set(parsed.map(String)));
+          }
+        }
+      }
+    } catch (_) {}
+  }
+  return [];
+}
+
+export async function toggleMapFoundLocation(
+  gameSlug: string,
+  mapSlug: string = "default",
+  locationId: string | number,
+  isFound: boolean,
+): Promise<void> {
+  if (!gameSlug || locationId == null) return;
+  const cleanGame = gameSlug.trim().toLowerCase();
+  const cleanMap = (mapSlug || "default").trim().toLowerCase();
+  const locIdStr = String(locationId).trim();
+
+  try {
+    const db = await getDatabase();
+    if (isFound) {
+      await db.execute(
+        "INSERT OR REPLACE INTO map_found_locations (game_slug, map_slug, location_id, found_at) VALUES ($1, $2, $3, $4);",
+        [cleanGame, cleanMap, locIdStr, new Date().toISOString()],
+      );
+    } else {
+      await db.execute(
+        "DELETE FROM map_found_locations WHERE LOWER(game_slug) = $1 AND location_id = $2;",
+        [cleanGame, locIdStr],
+      );
+    }
+  } catch (err) {
+    console.warn("[DB] Failed to toggle map found location:", err);
+  }
+}
+
+export async function setMapFoundLocationsBatch(
+  gameSlug: string,
+  mapSlug: string = "default",
+  locationIds: (string | number)[],
+): Promise<void> {
+  if (!gameSlug) return;
+  const cleanGame = gameSlug.trim().toLowerCase();
+  const cleanMap = (mapSlug || "default").trim().toLowerCase();
+
+  try {
+    const db = await getDatabase();
+    await db.execute(
+      "DELETE FROM map_found_locations WHERE LOWER(game_slug) = $1 AND (LOWER(map_slug) = $2 OR LOWER(map_slug) = 'default');",
+      [cleanGame, cleanMap],
+    );
+    const now = new Date().toISOString();
+    for (const id of locationIds) {
+      const locIdStr = String(id).trim();
+      if (locIdStr) {
+        await db.execute(
+          "INSERT OR REPLACE INTO map_found_locations (game_slug, map_slug, location_id, found_at) VALUES ($1, $2, $3, $4);",
+          [cleanGame, cleanMap, locIdStr, now],
+        );
+      }
+    }
+  } catch (err) {
+    console.warn("[DB] Failed to set map found locations batch:", err);
+  }
+}
+
+export async function clearMapFoundLocations(
+  gameSlug: string,
+  mapSlug: string = "default",
+): Promise<void> {
+  if (!gameSlug) return;
+  const cleanGame = gameSlug.trim().toLowerCase();
+  const cleanMap = (mapSlug || "default").trim().toLowerCase();
+
+  try {
+    const db = await getDatabase();
+    await db.execute(
+      "DELETE FROM map_found_locations WHERE LOWER(game_slug) = $1 AND (LOWER(map_slug) = $2 OR LOWER(map_slug) = 'default');",
+      [cleanGame, cleanMap],
+    );
+  } catch (err) {
+    console.warn("[DB] Failed to clear map found locations:", err);
+  }
+}
+

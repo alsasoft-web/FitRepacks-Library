@@ -81,11 +81,13 @@ export interface MapData {
     start_lat?: number;
     start_lng?: number;
     tile_sets?: MapTileSet[];
+    config?: any;
   };
   categories?: MapCategory[];
   groups?: MapGroup[];
   locations?: MapLocation[];
   mapConfig?: MapConfig;
+  maps?: MapItem[];
   regions?: any[];
 }
 
@@ -111,7 +113,6 @@ export interface MapViewerProps {
   minZoom?: number;
   maxZoom?: number;
   isOverlay?: boolean;
-  overlayShape?: "rounded" | "square" | "circle";
   isSidebarOpen?: boolean;
   onSelectMap?: (slug: string) => void;
   onOpenOverlay?: () => void;
@@ -132,40 +133,4 @@ export interface MapViewerModalProps {
   height?: string | number;
   minZoom?: number;
   maxZoom?: number;
-}
-
-export interface PlayerPointerCandidate {
-  id: string;
-  label: string;
-  address_hex: string;
-  x: number;
-  y: number;
-  z: number;
-  rotation?: number | null;
-  heading_degrees?: number | null;
-  map_lat: number;
-  map_lng: number;
-  district?: string | null;
-}
-
-export interface LivePlayerPosition {
-  supported: boolean;
-  game_running: boolean;
-  tracked: boolean;
-  game_title: string;
-  game_slug: string;
-  map_slug: string;
-  process_name?: string | null;
-  pid?: number | null;
-  x: number;
-  y: number;
-  z: number;
-  rotation?: number | null;
-  heading_degrees?: number | null;
-  map_lat?: number | null;
-  map_lng?: number | null;
-  status_message: string;
-  district?: string | null;
-  candidates: PlayerPointerCandidate[];
-  selected_candidate_id?: string | null;
 }

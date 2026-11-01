@@ -622,26 +622,50 @@ export const GameCard = React.memo<GameCardProps>(
 
           {/* Update Available Badge - Only displayed when installed & update exists */}
           {updateData && !isPlaying && (
-            <Badge
-              color="yellow"
-              variant="filled"
-              size="xs"
+            <Group
+              gap={4}
+              wrap="nowrap"
               pos="absolute"
               bottom={8}
               left={8}
-              title={updateData.title}
-              leftSection={<Sparkles size={10} />}
-              style={{
-                zIndex: 2,
-                boxShadow:
-                  "0 2px 10px rgba(250, 1, 0.45), 0 2px 5px rgba(0, 0, 0, 0.5)",
-                fontWeight: 700,
-                letterSpacing: "0.4px",
-                pointerEvents: "none",
-              }}
+              style={{ zIndex: 3 }}
+              onClick={(e) => e.stopPropagation()}
             >
-              UPDATE AVAILABLE
-            </Badge>
+              <Badge
+                color="yellow"
+                variant="filled"
+                size="xs"
+                title={updateData.title}
+                leftSection={<Sparkles size={10} />}
+                style={{
+                  boxShadow:
+                    "0 2px 10px rgba(250, 176, 5, 0.45), 0 2px 5px rgba(0, 0, 0, 0.5)",
+                  fontWeight: 700,
+                  letterSpacing: "0.4px",
+                }}
+              >
+                UPDATE AVAILABLE
+              </Badge>
+              <Tooltip label="Ignore this update version" withArrow>
+                <ActionIcon
+                  size={20}
+                  variant="filled"
+                  color="dark.6"
+                  radius="xl"
+                  title="Ignore this update version"
+                  style={{
+                    boxShadow: "0 2px 6px rgba(0,0,0,0.4)",
+                    border: "1px solid rgba(255,255,255,0.2)",
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleIgnoreUpdate(updateData.postDate);
+                  }}
+                >
+                  <EyeOff size={11} color="#fcc419" />
+                </ActionIcon>
+              </Tooltip>
+            </Group>
           )}
 
           {/* Bottom-Right Interactive Map Button Overlay on Cover */}
@@ -692,31 +716,49 @@ export const GameCard = React.memo<GameCardProps>(
             >
               {cleanGameTitle(game.title)}
             </Text>
-            <Group justify="space-between" mt={4} wrap="nowrap" align="center">
+            <Group justify="space-between" mt={4} wrap="nowrap" align="center" gap={6}>
               <Text
                 size="xs"
                 c="dimmed"
                 truncate
-                style={{ maxWidth: "125px", fontSize: "11px" }}
+                style={{ flex: 1, minWidth: 0, fontSize: "11px" }}
               >
                 {game.genres?.slice(0, 2).join(", ") || "Game"}
               </Text>
-              {game.releaseYear ? (
-                <Badge
-                  size="xs"
-                  variant="light"
-                  color="gray"
-                  radius="xs"
-                  style={{
-                    fontSize: "10px",
-                    height: 18,
-                    padding: "0 4px",
-                    fontWeight: 600,
-                  }}
-                >
-                  {game.releaseYear}
-                </Badge>
-              ) : null}
+              <Group gap={4} wrap="nowrap" style={{ flexShrink: 0 }}>
+                {(game.fitgirlSize || (game.source !== "steamrip" && game.repackSize)) && (
+                  <Badge
+                    size="xs"
+                    variant="outline"
+                    color="grape"
+                    radius="xs"
+                    style={{
+                      fontSize: "10px",
+                      height: 18,
+                      padding: "0 5px",
+                      fontWeight: 600,
+                    }}
+                  >
+                    {game.fitgirlSize || game.repackSize}
+                  </Badge>
+                )}
+                {game.releaseYear ? (
+                  <Badge
+                    size="xs"
+                    variant="light"
+                    color="gray"
+                    radius="xs"
+                    style={{
+                      fontSize: "10px",
+                      height: 18,
+                      padding: "0 4px",
+                      fontWeight: 600,
+                    }}
+                  >
+                    {game.releaseYear}
+                  </Badge>
+                ) : null}
+              </Group>
             </Group>
           </Box>
 

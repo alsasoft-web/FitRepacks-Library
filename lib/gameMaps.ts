@@ -1871,7 +1871,10 @@ export async function fetchRawMapGenieMapFull(mapId: number | string): Promise<a
       if (cached) {
         const parsed = JSON.parse(cached);
         if (parsed && (parsed.map || parsed.categories || parsed.locations)) {
-          return parsed;
+          // Only reuse cached data if it actually contains non-empty locations
+          if (Array.isArray(parsed.locations) && parsed.locations.length > 0) {
+            return parsed;
+          }
         }
       }
     } catch (_) {}
@@ -1888,29 +1891,45 @@ export async function fetchRawMapGenieMapFull(mapId: number | string): Promise<a
     } catch (tauriErr) {
       try {
         const { fetch: tauriFetch } = await import("@tauri-apps/plugin-http");
-        const res = await tauriFetch(`https://mapgenie.io/api/v1/maps/${mapId}/full`, {
+        let res = await tauriFetch(`https://mapgenie.io/api/v1/maps/${mapId}/data`, {
           headers: {
             "Accept": "application/json",
             "Referer": "https://mapgenie.io/",
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
           },
         });
+        if (!res.ok) {
+          res = await tauriFetch(`https://mapgenie.io/api/v1/maps/${mapId}/full`, {
+            headers: {
+              "Accept": "application/json",
+              "Referer": "https://mapgenie.io/",
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            },
+          });
+        }
         if (res.ok) result = await res.json();
       } catch (_) {}
     }
   }
 
   if (!result) {
-    const res = await fetch(`https://mapgenie.io/api/v1/maps/${mapId}/full`, {
+    let res = await fetch(`https://mapgenie.io/api/v1/maps/${mapId}/data`, {
       headers: { "Accept": "application/json", "Referer": "https://mapgenie.io/" },
     });
+    if (!res.ok) {
+      res = await fetch(`https://mapgenie.io/api/v1/maps/${mapId}/full`, {
+        headers: { "Accept": "application/json", "Referer": "https://mapgenie.io/" },
+      });
+    }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     result = await res.json();
   }
 
   if (result && typeof window !== "undefined") {
     try {
-      localStorage.setItem(cacheKey, JSON.stringify(result));
+      if (Array.isArray(result.locations) && result.locations.length > 0) {
+        localStorage.setItem(cacheKey, JSON.stringify(result));
+      }
     } catch (_) {}
   }
 
@@ -1919,10 +1938,18 @@ export async function fetchRawMapGenieMapFull(mapId: number | string): Promise<a
 
 export async function fetchRawMapGenieHtml(gameSlug: string, mapSlug: string): Promise<string> {
   const cacheKey = `mapgenie_page_html_${gameSlug}_${mapSlug}`;
+  const cacheTsKey = `mapgenie_page_html_ts_${gameSlug}_${mapSlug}`;
+  const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+  let cached: string | null = null;
+
   if (typeof window !== "undefined") {
     try {
-      const cached = localStorage.getItem(cacheKey);
-      if (cached && cached.length > 50) return cached;
+      cached = localStorage.getItem(cacheKey);
+      const ts = localStorage.getItem(cacheTsKey);
+      const age = ts ? Date.now() - parseInt(ts, 10) : Infinity;
+      if (cached && cached.length > 50 && age < CACHE_TTL_MS) {
+        return cached;
+      }
     } catch (_) {}
   }
 
@@ -1956,13 +1983,18 @@ export async function fetchRawMapGenieHtml(gameSlug: string, mapSlug: string): P
     } catch (_) {}
   }
 
-  if (html && html.length > 50 && typeof window !== "undefined") {
-    try {
-      localStorage.setItem(cacheKey, html);
-    } catch (_) {}
+  if (html && html.length > 50) {
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem(cacheKey, html);
+        localStorage.setItem(cacheTsKey, Date.now().toString());
+      } catch (_) {}
+    }
+    return html;
   }
 
-  return html;
+  // Graceful offline fallback
+  return cached || "";
 }
 
 export async function loadMapsFromMapGenie(): Promise<GameMapInfo[]> {
@@ -2060,34 +2092,110 @@ export function getMapGenieGameBySlug(slug: string): MapGenieGameData | undefine
 }
 
 export const KNOWN_GAME_ALIASES: Record<string, string[]> = {
-  skyrim: ["elder scrolls 5", "the elder scrolls 5", "the elder scrolls v", "tes 5", "tes v", "skyrim", "the elder scrolls 5 skyrim", "the elder scrolls v skyrim"],
-  oblivion: ["elder scrolls 4", "the elder scrolls 4", "the elder scrolls iv", "tes 4", "tes iv", "oblivion"],
-  morrowind: ["elder scrolls 3", "the elder scrolls 3", "the elder scrolls iii", "tes 3", "tes iii", "morrowind"],
-  "fallout-nv": ["fallout new vegas", "new vegas", "fallout nv"],
-  "fallout-new-vegas": ["fallout new vegas", "new vegas", "fallout nv"],
-  "fallout-4": ["fallout 4", "fallout iv"],
-  "fallout-3": ["fallout 3", "fallout iii"],
-  "fallout-76": ["fallout 76"],
-  gtasa: ["grand theft auto san andreas", "gta san andreas", "san andreas"],
-  "gta-sa": ["grand theft auto san andreas", "gta san andreas", "san andreas", "grand theft auto: san andreas"],
-  "grand-theft-auto-san-andreas": ["grand theft auto san andreas", "gta san andreas", "san andreas", "grand theft auto: san andreas"],
-  gtavc: ["grand theft auto vice city", "gta vice city", "vice city"],
-  "gta-vc": ["grand theft auto vice city", "gta vice city", "vice city", "grand theft auto: vice city"],
-  "grand-theft-auto-vice-city": ["grand theft auto vice city", "gta vice city", "vice city", "grand theft auto: vice city"],
-  "grand-theft-auto-v": ["grand theft auto 5", "grand theft auto v", "gta 5", "gta v", "gta5"],
-  "grand-theft-auto-iv": ["grand theft auto 4", "grand theft auto iv", "gta 4", "gta iv", "gta4"],
-  rdr2: ["red dead redemption 2", "red dead 2", "rdr 2", "rdr2"],
-  "rdr-2": ["red dead redemption 2", "red dead 2", "rdr 2", "rdr2"],
-  "red-dead-redemption-2": ["red dead redemption 2", "red dead 2", "rdr 2", "rdr2"],
-  witcher3: ["the witcher 3", "witcher 3", "the witcher 3 wild hunt", "witcher 3 wild hunt", "the witcher iii"],
-  "the-witcher-3": ["the witcher 3", "witcher 3", "the witcher 3 wild hunt", "the witcher iii"],
-  "the-witcher-3-wild-hunt": ["the witcher 3", "witcher 3", "the witcher 3 wild hunt", "the witcher iii"],
-  "witcher-3": ["the witcher 3", "witcher 3", "the witcher 3 wild hunt", "the witcher iii"],
-  "cyberpunk-2077": ["cyberpunk", "cyberpunk 2077", "cyberpunk2077"],
-  "elden-ring": ["elden ring", "shadow of the erdtree"],
-  "mafia-2": ["mafia 2", "mafia ii", "mafia 2 definitive edition", "mafia ii: definitive edition", "mafia ii definitive edition"],
-  "mafia-3": ["mafia 3", "mafia iii", "mafia 3 definitive edition", "mafia iii definitive edition"],
-  "mafia": ["mafia 1", "mafia definitive edition", "mafia: definitive edition", "mafia i"],
+  "witcher-3": [
+    "the witcher 3",
+    "witcher 3",
+    "the witcher 3 wild hunt",
+    "witcher 3 wild hunt",
+    "the witcher iii",
+    "the witcher 3 - wild hunt",
+    "witcher3",
+    "the-witcher-3",
+    "the-witcher-3-wild-hunt",
+    "witcher-3-wild-hunt",
+  ],
+  "skyrim": [
+    "elder scrolls 5",
+    "the elder scrolls 5",
+    "the elder scrolls v",
+    "tes 5",
+    "tes v",
+    "skyrim",
+    "the elder scrolls 5 skyrim",
+    "the elder scrolls v skyrim",
+    "the-elder-scrolls-v-skyrim",
+    "the-elder-scrolls-5-skyrim",
+  ],
+  "oblivion": [
+    "elder scrolls 4",
+    "the elder scrolls 4",
+    "the elder scrolls iv",
+    "tes 4",
+    "tes iv",
+    "oblivion",
+    "the-elder-scrolls-iv-oblivion",
+  ],
+  "morrowind": [
+    "elder scrolls 3",
+    "the elder scrolls 3",
+    "the elder scrolls iii",
+    "tes 3",
+    "tes iii",
+    "morrowind",
+    "the-elder-scrolls-iii-morrowind",
+  ],
+  "fallout-new-vegas": [
+    "fallout new vegas",
+    "new vegas",
+    "fallout nv",
+    "fallout-nv",
+    "fallout-new-vegas",
+    "fnv",
+  ],
+  "fallout-4": ["fallout 4", "fallout iv", "fallout4", "fallout-iv"],
+  "fallout-3": ["fallout 3", "fallout iii", "fallout3", "fallout-iii"],
+  "fallout-76": ["fallout 76", "fallout76"],
+  "grand-theft-auto-san-andreas": [
+    "grand theft auto san andreas",
+    "gta san andreas",
+    "san andreas",
+    "grand theft auto: san andreas",
+    "gtasa",
+    "gta-sa",
+    "gta-san-andreas",
+  ],
+  "grand-theft-auto-vice-city": [
+    "grand theft auto vice city",
+    "gta vice city",
+    "vice city",
+    "grand theft auto: vice city",
+    "gtavc",
+    "gta-vc",
+    "gta-vice-city",
+  ],
+  "grand-theft-auto-v": [
+    "grand theft auto 5",
+    "grand theft auto v",
+    "gta 5",
+    "gta v",
+    "gta5",
+    "gtav",
+    "gta-5",
+    "gta-v",
+  ],
+  "grand-theft-auto-iv": [
+    "grand theft auto 4",
+    "grand theft auto iv",
+    "gta 4",
+    "gta iv",
+    "gta4",
+    "gtaiv",
+    "gta-4",
+    "gta-iv",
+  ],
+  "red-dead-redemption-2": [
+    "red dead redemption 2",
+    "red dead 2",
+    "rdr 2",
+    "rdr2",
+    "rdr-2",
+    "red-dead-2",
+  ],
+  "cyberpunk-2077": ["cyberpunk", "cyberpunk 2077", "cyberpunk2077", "cyberpunk-2077-phantom-liberty"],
+  "elden-ring": ["elden ring", "shadow of the erdtree", "elden-ring-shadow-of-the-erdtree"],
+  "mafia-2": ["mafia 2", "mafia ii", "mafia 2 definitive edition", "mafia ii: definitive edition", "mafia ii definitive edition", "mafia-ii"],
+  "mafia-3": ["mafia 3", "mafia iii", "mafia 3 definitive edition", "mafia iii definitive edition", "mafia-iii"],
+  "mafia": ["mafia 1", "mafia definitive edition", "mafia: definitive edition", "mafia i", "mafia-definitive-edition"],
   "assassins-creed-origins": ["ac origins", "assassins creed origins", "assassin's creed origins", "assassins creed egypt"],
   "assassins-creed-odyssey": ["ac odyssey", "assassins creed odyssey", "assassin's creed odyssey", "assassins creed greece"],
   "assassins-creed-valhalla": ["ac valhalla", "assassins creed valhalla", "assassin's creed valhalla"],
@@ -2239,6 +2347,83 @@ export function useAllGameMaps() {
   }, [refresh]);
 
   return { maps, isLoading, refresh };
+}
+
+export function getLastOpenedMapSlug(gameSlug: string): string | null {
+  if (!gameSlug || typeof window === "undefined") return null;
+  const clean = gameSlug.includes("--") ? gameSlug.split("--")[0] : gameSlug;
+  try {
+    const direct = localStorage.getItem(`fitrepacks_last_map_${clean}`);
+    if (direct) return direct;
+    for (const [key, aliases] of Object.entries(KNOWN_GAME_ALIASES)) {
+      if (key === clean || aliases.includes(clean)) {
+        const aliasVal = localStorage.getItem(`fitrepacks_last_map_${key}`);
+        if (aliasVal) return aliasVal;
+        for (const a of aliases) {
+          const v = localStorage.getItem(`fitrepacks_last_map_${a}`);
+          if (v) return v;
+        }
+      }
+    }
+    return null;
+  } catch (_) {
+    return null;
+  }
+}
+
+export function saveLastOpenedMapSlug(gameSlug: string, mapSlug: string): void {
+  if (!gameSlug || !mapSlug || mapSlug === "default" || typeof window === "undefined") return;
+  const clean = gameSlug.includes("--") ? gameSlug.split("--")[0] : gameSlug;
+  try {
+    localStorage.setItem(`fitrepacks_last_map_${clean}`, mapSlug);
+    for (const [key, aliases] of Object.entries(KNOWN_GAME_ALIASES)) {
+      if (key === clean || aliases.includes(clean)) {
+        localStorage.setItem(`fitrepacks_last_map_${key}`, mapSlug);
+      }
+    }
+  } catch (_) {}
+}
+
+export function resolveCanonicalMapGenieSlug(gameSlug?: string, gameTitle?: string): string {
+  if (!gameSlug && !gameTitle) return "";
+  const raw = (gameSlug || "").includes("--") ? (gameSlug || "").split("--")[0] : (gameSlug || "");
+  const clean = raw.toLowerCase().trim();
+  const title = (gameTitle || "").toLowerCase().trim();
+  const normClean = normalizeString(clean);
+  const normTitle = normalizeString(title);
+
+  // 1. Direct key match in KNOWN_GAME_ALIASES
+  if (clean && KNOWN_GAME_ALIASES[clean]) {
+    return clean;
+  }
+
+  // 2. Check matched maps from static or cache
+  const matched = findMatchingMap(gameTitle, gameSlug);
+  if (matched) {
+    const s = matched.game_slug || (matched.slug.includes("--") ? matched.slug.split("--")[0] : matched.slug);
+    if (s) return s;
+  }
+
+  // 3. Check known aliases
+  for (const [canonicalKey, aliases] of Object.entries(KNOWN_GAME_ALIASES)) {
+    if (
+      clean === canonicalKey.toLowerCase() ||
+      aliases.includes(clean) ||
+      (title && (title === canonicalKey.toLowerCase() || aliases.includes(title)))
+    ) {
+      return canonicalKey;
+    }
+    if (
+      aliases.some((a) => {
+        const normA = normalizeString(a);
+        return (normClean && normClean === normA) || (normTitle && normTitle === normA);
+      })
+    ) {
+      return canonicalKey;
+    }
+  }
+
+  return clean;
 }
 
 if (typeof window !== "undefined") {

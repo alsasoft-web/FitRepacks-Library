@@ -15,8 +15,6 @@ use tauri::{
     Emitter, Manager,
 };
 
-pub mod tracker;
-
 pub struct AppState {}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -38,9 +36,101 @@ pub struct TrayDownloadItem {
 }
 
 static CLOSE_TO_TRAY: AtomicBool = AtomicBool::new(false);
-static RUNNING_GAMES: Mutex<Option<std::collections::HashMap<String, String>>> = Mutex::new(None);
+static IS_QUITTING: AtomicBool = AtomicBool::new(false);
+
+#[derive(Clone, Debug, Default)]
+struct RunningGameTrack {
+    active_exe: String,
+    candidate_exes: Vec<String>,
+    tracked_pids: Vec<u32>,
+}
+
+static RUNNING_GAMES: Mutex<Option<std::collections::HashMap<String, RunningGameTrack>>> = Mutex::new(None);
 static RECENT_GAMES: Mutex<Vec<RecentGameItem>> = Mutex::new(Vec::new());
 static TRAY_DOWNLOADS: Mutex<Vec<TrayDownloadItem>> = Mutex::new(Vec::new());
+
+#[cfg(target_os = "windows")]
+struct SystemProcessSnapshot {
+    running_names: std::collections::HashSet<String>,
+    parent_to_children: std::collections::HashMap<u32, Vec<u32>>,
+    active_pids: std::collections::HashSet<u32>,
+}
+
+#[cfg(target_os = "windows")]
+fn capture_system_process_snapshot() -> Option<SystemProcessSnapshot> {
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+    use windows::Win32::Foundation::INVALID_HANDLE_VALUE;
+
+    unsafe {
+        let snapshot = match CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) {
+            Ok(h) if h != INVALID_HANDLE_VALUE => h,
+            _ => return None,
+        };
+
+        let mut entry = PROCESSENTRY32W {
+            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
+
+        let mut running_names = std::collections::HashSet::new();
+        let mut parent_to_children = std::collections::HashMap::new();
+        let mut active_pids = std::collections::HashSet::new();
+
+        if Process32FirstW(snapshot, &mut entry).is_ok() {
+            loop {
+                let pid = entry.th32ProcessID;
+                let parent_pid = entry.th32ParentProcessID;
+                active_pids.insert(pid);
+                parent_to_children.entry(parent_pid).or_insert_with(Vec::new).push(pid);
+
+                let len = entry.szExeFile.iter().position(|&ch| ch == 0).unwrap_or(entry.szExeFile.len());
+                let exe_name = String::from_utf16_lossy(&entry.szExeFile[..len]).to_lowercase();
+                if !exe_name.is_empty() {
+                    running_names.insert(exe_name);
+                }
+
+                if Process32NextW(snapshot, &mut entry).is_err() {
+                    break;
+                }
+            }
+        }
+
+        use windows::Win32::Foundation::CloseHandle;
+        let _ = CloseHandle(snapshot);
+
+        Some(SystemProcessSnapshot {
+            running_names,
+            parent_to_children,
+            active_pids,
+        })
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn is_pid_alive(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, GetExitCodeProcess};
+    unsafe {
+        if let Ok(handle) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
+            let mut exit_code: u32 = 0;
+            let ok = GetExitCodeProcess(handle, &mut exit_code);
+            let _ = CloseHandle(handle);
+            return ok.is_ok() && exit_code == 259;
+        }
+    }
+    false
+}
+
+#[cfg(not(target_os = "windows"))]
+fn is_pid_alive(_pid: u32) -> bool {
+    false
+}
 
 #[cfg(target_os = "windows")]
 fn is_process_running_by_name(exe_name: &str) -> bool {
@@ -107,34 +197,166 @@ fn is_process_running_by_name(exe_name: &str) -> bool {
     false
 }
 
-fn set_game_running(gid: &str, exe_path: &str, is_running: bool) {
+fn scan_folder_for_game_exes(
+    dir: &Path,
+    current_depth: usize,
+    max_depth: usize,
+    ignored: &[&str],
+    candidates: &mut Vec<String>,
+) {
+    if current_depth > max_depth {
+        return;
+    }
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(ext) = path.extension() {
+                    if ext.to_string_lossy().eq_ignore_ascii_case("exe") {
+                        if let Some(name) = path.file_name().and_then(|f| f.to_str()) {
+                            let lower = name.to_lowercase();
+                            if !ignored.contains(&lower.as_str()) && !candidates.contains(&lower) {
+                                candidates.push(lower);
+                            }
+                        }
+                    }
+                }
+            } else if path.is_dir() && current_depth < max_depth {
+                let dir_name = path.file_name().and_then(|f| f.to_str()).unwrap_or("").to_lowercase();
+                if dir_name != "backup" && dir_name != "redist" && dir_name != "_redist" && dir_name != "__installer" {
+                    scan_folder_for_game_exes(&path, current_depth + 1, max_depth, ignored, candidates);
+                }
+            }
+        }
+    }
+}
+
+fn find_candidate_game_exes(exe_path: &str) -> Vec<String> {
+    let mut candidates = Vec::new();
+    let path = Path::new(exe_path);
+    let primary_name = path
+        .file_name()
+        .and_then(|f| f.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    if !primary_name.is_empty() {
+        candidates.push(primary_name.clone());
+    }
+
+    let mut search_dirs = Vec::new();
+    if let Some(parent) = path.parent() {
+        search_dirs.push(parent.to_path_buf());
+        if let Some(grandparent) = parent.parent() {
+            let parent_name = parent.file_name().and_then(|f| f.to_str()).unwrap_or("").to_lowercase();
+            if parent_name == "x64" || parent_name == "x64_plus" || parent_name == "x64_legacy" || parent_name == "bin" || parent_name == "win64" || parent_name == "shipping" {
+                search_dirs.push(grandparent.to_path_buf());
+                if let Some(ggrandparent) = grandparent.parent() {
+                    search_dirs.push(ggrandparent.to_path_buf());
+                }
+            }
+        }
+    }
+
+    let lower_path = exe_path.to_lowercase();
+    if primary_name.contains("launcher") || primary_name.contains("play") || primary_name.contains("start") {
+        if lower_path.contains("witcher") {
+            candidates.push("witcher3.exe".to_string());
+        }
+        if lower_path.contains("cyberpunk") {
+            candidates.push("cyberpunk2077.exe".to_string());
+        }
+        if lower_path.contains("gta") {
+            candidates.push("gta5.exe".to_string());
+        }
+        if lower_path.contains("rdr") {
+            candidates.push("rdr2.exe".to_string());
+        }
+        if lower_path.contains("baldur") || lower_path.contains("bg3") {
+            candidates.push("bg3.exe".to_string());
+            candidates.push("bg3_dx11.exe".to_string());
+        }
+    }
+
+    let ignored = [
+        "unins000.exe", "uninstall.exe", "uninstaller.exe", "setup.exe",
+        "dxsetup.exe", "dxwebsetup.exe", "vc_redist.x64.exe", "vc_redist.x86.exe",
+        "vcredist_x64.exe", "vcredist_x86.exe", "crashreporter.exe", "crashmailer.exe",
+        "redengineerrorreporter.exe", "rapidcrc.exe", "quicksfv.exe", "7za.exe"
+    ];
+
+    for dir in search_dirs {
+        scan_folder_for_game_exes(&dir, 0, 3, &ignored, &mut candidates);
+    }
+
+    candidates.dedup();
+    candidates
+}
+
+fn set_game_running_track(gid: &str, active_exe: &str, candidate_exes: Vec<String>, pids: Vec<u32>, is_running: bool) {
     if let Ok(mut lock) = RUNNING_GAMES.lock() {
         let map = lock.get_or_insert_with(std::collections::HashMap::new);
         if is_running {
-            map.insert(gid.to_string(), exe_path.to_string());
+            map.insert(gid.to_string(), RunningGameTrack {
+                active_exe: active_exe.to_string(),
+                candidate_exes,
+                tracked_pids: pids,
+            });
         } else {
             map.remove(gid);
         }
     }
 }
 
-#[command]
-fn is_game_running(game_id: String, exe_path: Option<String>) -> bool {
-    if let Some(ref path) = exe_path {
-        if !path.trim().is_empty() {
-            return is_process_running_by_name(path);
+fn update_active_game_exe(gid: &str, active_exe: &str) {
+    if let Ok(mut lock) = RUNNING_GAMES.lock() {
+        if let Some(ref mut map) = *lock {
+            if let Some(info) = map.get_mut(gid) {
+                info.active_exe = active_exe.to_string();
+            }
         }
     }
+}
+
+#[command]
+fn is_game_running(game_id: String, exe_path: Option<String>) -> bool {
+    // 1. Check RUNNING_GAMES registry for this game_id
     if let Ok(lock) = RUNNING_GAMES.lock() {
         if let Some(ref map) = *lock {
-            if let Some(stored_exe) = map.get(&game_id) {
-                if !stored_exe.is_empty() {
-                    return is_process_running_by_name(stored_exe);
+            if let Some(info) = map.get(&game_id) {
+                if !info.active_exe.is_empty() && is_process_running_by_name(&info.active_exe) {
+                    return true;
+                }
+                for candidate in &info.candidate_exes {
+                    if is_process_running_by_name(candidate) {
+                        return true;
+                    }
+                }
+                #[cfg(target_os = "windows")]
+                for &pid in &info.tracked_pids {
+                    if is_pid_alive(pid) {
+                        return true;
+                    }
                 }
                 return true;
             }
         }
     }
+
+    // 2. Fallback check using exe_path
+    if let Some(ref path) = exe_path {
+        if !path.trim().is_empty() {
+            if is_process_running_by_name(path) {
+                return true;
+            }
+            let candidates = find_candidate_game_exes(path);
+            for candidate in &candidates {
+                if is_process_running_by_name(candidate) {
+                    return true;
+                }
+            }
+        }
+    }
+
     false
 }
 
@@ -148,6 +370,12 @@ fn launch_game_exe(
     runner_args: Option<Vec<String>>,
     env_vars: Option<std::collections::HashMap<String, String>>,
 ) -> Result<String, String> {
+    if let Some(ref gid) = game_id {
+        if let Ok(mut lock) = ACTIVE_GAME_OVERLAY_INFO.lock() {
+            *lock = Some((gid.clone(), "default".to_string(), String::new()));
+        }
+    }
+
     let mut cmd = if let Some(ref runner) = runner_command {
         if !runner.trim().is_empty() {
             let mut c = Command::new(runner);
@@ -167,7 +395,11 @@ fn launch_game_exe(
         if !path.exists() {
             return Err(format!("Executable path does not exist: {}", exe_path));
         }
-        Command::new(&exe_path)
+        let mut c = Command::new(&exe_path);
+        if let Some(ref args) = runner_args {
+            c.args(args);
+        }
+        c
     };
 
     if let Some(ref envs) = env_vars {
@@ -293,10 +525,17 @@ fn launch_game_exe(
         Err(err) => return Err(format!("Failed launching process {}: {}", exe_path, err)),
     };
 
+    let initial_pid = child_proc.as_ref().map(|c| c.id());
+    let candidate_exes = find_candidate_game_exes(&exe_path);
+    let mut initial_pids = Vec::new();
+    if let Some(pid) = initial_pid {
+        initial_pids.push(pid);
+    }
+
     let gid = game_id.clone();
     let tracked_exe = exe_path.clone();
     if let Some(ref id) = gid {
-        set_game_running(id, &tracked_exe, true);
+        set_game_running_track(id, &tracked_exe, candidate_exes.clone(), initial_pids.clone(), true);
     }
 
     std::thread::spawn(move || {
@@ -304,28 +543,115 @@ fn launch_game_exe(
             .file_name()
             .and_then(|f| f.to_str())
             .unwrap_or("")
-            .to_string();
+            .to_lowercase();
 
-        // 1. Give the game process up to 20s startup grace window to appear in process list
-        let mut process_seen = false;
-        if !exe_file.is_empty() {
-            for _ in 0..20 {
-                if is_process_running_by_name(&exe_file) {
-                    process_seen = true;
-                    break;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(1000));
-            }
+        let mut tracked_pids: std::collections::HashSet<u32> = std::collections::HashSet::new();
+        for p in initial_pids {
+            tracked_pids.insert(p);
         }
 
-        // 2. Active monitoring: stay active as long as the game executable is running
+        // 1. Give the game process up to 35s startup grace window to appear in process list (covers launcher opening & launching game)
+        let mut process_seen = false;
+        let mut active_game_exe = exe_file.clone();
+
+        for _ in 0..35 {
+            // Check candidate exes
+            for candidate in &candidate_exes {
+                if is_process_running_by_name(candidate) {
+                    process_seen = true;
+                    // If a non-launcher candidate (e.g. witcher3.exe) is running, prioritize it!
+                    if !candidate.contains("launcher") && !candidate.contains("prelauncher") {
+                        active_game_exe = candidate.clone();
+                        if let Some(ref id) = gid {
+                            update_active_game_exe(id, &active_game_exe);
+                        }
+                    }
+                }
+            }
+
+            // Capture child processes spawned by initial launcher PID
+            #[cfg(target_os = "windows")]
+            {
+                let current_pids: Vec<u32> = tracked_pids.iter().cloned().collect();
+                for p in current_pids {
+                    let tree = get_own_process_tree_pids(p);
+                    for child in tree {
+                        tracked_pids.insert(child);
+                    }
+                }
+            }
+
+            if process_seen {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1000));
+        }
+
+        // 2. Active monitoring: stay active as long as ANY candidate game exe or child PID is running
         if process_seen {
             loop {
                 std::thread::sleep(std::time::Duration::from_secs(2));
-                if !is_process_running_by_name(&exe_file) {
-                    // Double check after 1.5s to prevent false positives on level transitions
-                    std::thread::sleep(std::time::Duration::from_millis(1500));
-                    if !is_process_running_by_name(&exe_file) {
+
+                #[cfg(target_os = "windows")]
+                let (any_candidate_running, any_pid_running) = {
+                    if let Some(snap) = capture_system_process_snapshot() {
+                        // Capture new child processes in tree
+                        let current_pids: Vec<u32> = tracked_pids.iter().cloned().collect();
+                        for p in current_pids {
+                            if let Some(children) = snap.parent_to_children.get(&p) {
+                                for &child in children {
+                                    tracked_pids.insert(child);
+                                }
+                            }
+                        }
+
+                        let mut cand_running = false;
+                        for candidate in &candidate_exes {
+                            if snap.running_names.contains(candidate) {
+                                cand_running = true;
+                                if candidate != &active_game_exe && !candidate.contains("launcher") && !candidate.contains("prelauncher") {
+                                    active_game_exe = candidate.clone();
+                                    if let Some(ref id) = gid {
+                                        update_active_game_exe(id, &active_game_exe);
+                                    }
+                                }
+                                break;
+                            }
+                        }
+
+                        // Prune dead PIDs and check if any tracked PID is still alive
+                        tracked_pids.retain(|pid| snap.active_pids.contains(pid));
+                        let pid_running = !tracked_pids.is_empty();
+
+                        (cand_running, pid_running)
+                    } else {
+                        (false, false)
+                    }
+                };
+
+                #[cfg(not(target_os = "windows"))]
+                let (any_candidate_running, any_pid_running) = (false, false);
+
+                if !any_candidate_running && !any_pid_running {
+                    // Double check after 3s to prevent false positives when launcher closes as game launches or on level load
+                    std::thread::sleep(std::time::Duration::from_millis(3000));
+
+                    #[cfg(target_os = "windows")]
+                    let still_alive = {
+                        if let Some(snap) = capture_system_process_snapshot() {
+                            let mut alive = candidate_exes.iter().any(|c| snap.running_names.contains(c));
+                            if !alive {
+                                alive = tracked_pids.iter().any(|pid| snap.active_pids.contains(pid));
+                            }
+                            alive
+                        } else {
+                            false
+                        }
+                    };
+                    #[cfg(not(target_os = "windows"))]
+                    let still_alive = false;
+
+                    if !still_alive {
                         break;
                     }
                 }
@@ -339,7 +665,7 @@ fn launch_game_exe(
         let elapsed_mins = (elapsed_secs / 60) as i64;
 
         if let Some(ref id) = gid {
-            set_game_running(id, "", false);
+            set_game_running_track(id, "", Vec::new(), Vec::new(), false);
 
             use tauri::Emitter;
             let _ = app_handle.emit(
@@ -357,7 +683,13 @@ fn launch_game_exe(
 }
 
 #[command]
-fn set_folder_cover_icon(folder_path: String, cover_url: String) -> Result<bool, String> {
+async fn set_folder_cover_icon(folder_path: String, cover_url: String) -> Result<bool, String> {
+    tokio::task::spawn_blocking(move || set_folder_cover_icon_sync(folder_path, cover_url))
+        .await
+        .map_err(|e| format!("Task error: {}", e))?
+}
+
+fn set_folder_cover_icon_sync(folder_path: String, cover_url: String) -> Result<bool, String> {
     use base64::Engine;
     println!("[FitRepacks Backend] [Folder Cover] Setting custom folder icon for: {}", folder_path);
     let dir = Path::new(&folder_path);
@@ -393,11 +725,22 @@ fn set_folder_cover_icon(folder_path: String, cover_url: String) -> Result<bool,
     let ico_path = dir.join("folder.ico");
     let ini_path = dir.join("desktop.ini");
 
-    // Remove old attributes if they exist
+    // Remove old attributes synchronously before writing
     #[cfg(target_os = "windows")]
     {
-        let _ = Command::new("attrib").args(["-h", "-s", "-r", &ini_path.to_string_lossy()]).spawn();
-        let _ = Command::new("attrib").args(["-h", "-s", "-r", &ico_path.to_string_lossy()]).spawn();
+        use std::os::windows::ffi::OsStrExt;
+        use std::ffi::OsStr;
+        extern "system" {
+            fn SetFileAttributesW(lpFileName: *const u16, dwFileAttributes: u32) -> i32;
+        }
+        if ini_path.exists() {
+            let ini_w: Vec<u16> = OsStr::new(&ini_path).encode_wide().chain(Some(0)).collect();
+            unsafe { SetFileAttributesW(ini_w.as_ptr(), 0x80); } // FILE_ATTRIBUTE_NORMAL = 0x80
+        }
+        if ico_path.exists() {
+            let ico_w: Vec<u16> = OsStr::new(&ico_path).encode_wide().chain(Some(0)).collect();
+            unsafe { SetFileAttributesW(ico_w.as_ptr(), 0x80); }
+        }
     }
 
     resized
@@ -560,7 +903,13 @@ fn format_bytes_to_str(bytes: u64) -> String {
 }
 
 #[command]
-fn fetch_torrent_metadata(magnet_or_hash: String) -> Result<RealTorrentMetadata, String> {
+async fn fetch_torrent_metadata(magnet_or_hash: String) -> Result<RealTorrentMetadata, String> {
+    tokio::task::spawn_blocking(move || fetch_torrent_metadata_sync(magnet_or_hash))
+        .await
+        .map_err(|e| format!("Task error: {}", e))?
+}
+
+fn fetch_torrent_metadata_sync(magnet_or_hash: String) -> Result<RealTorrentMetadata, String> {
     // 1. Extract hash (40-char hex)
     let hash = if magnet_or_hash.starts_with("magnet:") {
         let re_hash = magnet_or_hash
@@ -944,7 +1293,7 @@ async fn pause_torrent_download(info_hash: String) -> Result<bool, String> {
     if let Some(ref session) = *lock {
         let handle_opt = session.with_torrents(|iter| {
             for (_id, handle) in iter {
-                if handle.info_hash().as_string() == info_hash {
+                if handle.info_hash().as_string().eq_ignore_ascii_case(&info_hash) {
                     return Some(handle.clone());
                 }
             }
@@ -970,7 +1319,7 @@ async fn resume_torrent_download(info_hash: String) -> Result<bool, String> {
     if let Some(ref session) = *lock {
         let handle_opt = session.with_torrents(|iter| {
             for (_id, handle) in iter {
-                if handle.info_hash().as_string() == info_hash {
+                if handle.info_hash().as_string().eq_ignore_ascii_case(&info_hash) {
                     return Some(handle.clone());
                 }
             }
@@ -1053,7 +1402,7 @@ async fn recheck_torrent_download(
     if let Some(ref session) = *lock {
         let handle_opt = session.with_torrents(|iter| {
             for (_id, handle) in iter {
-                if handle.info_hash().as_string() == info_hash {
+                if handle.info_hash().as_string().eq_ignore_ascii_case(&info_hash) {
                     return Some(handle.clone());
                 }
             }
@@ -1473,7 +1822,7 @@ fn set_autostart(enabled: bool) -> Result<bool, String> {
 
         let ps_cmd = if enabled {
             format!(
-                r#"$p = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'; Set-ItemProperty -Path $p -Name 'FitRepacksLibrary' -Value '\"{}\"'"#,
+                r#"$p = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'; Set-ItemProperty -Path $p -Name 'FitRepacksLibrary' -Value '"{}"'"#,
                 exe_str
             )
         } else {
@@ -1780,7 +2129,7 @@ fn build_tray_menu(
     use tauri::menu::IconMenuItem;
 
     let show_item = MenuItem::with_id(app, "show", "Show FitRepacks Library", true, None::<&str>)?;
-    let quit_item = MenuItem::with_id(app, "quit", "Quit FitRepacks", true, None::<&str>)?;
+    let quit_item = PredefinedMenuItem::quit(app, Some("Quit FitRepacks"))?;
 
     let mut items: Vec<Box<dyn tauri::menu::IsMenuItem<tauri::Wry>>> = Vec::new();
     items.push(Box::new(show_item));
@@ -2015,7 +2364,9 @@ fn handle_tray_menu_event(app: &tauri::AppHandle, id_str: &str) {
         if let Some(window) = app.get_webview_window("main") {
             show_and_focus_window(&window);
         }
-    } else if id_str == "quit" {
+    } else if id_str == "quit" || id_str.eq_ignore_ascii_case("quit") || id_str.contains("quit") {
+        IS_QUITTING.store(true, Ordering::Relaxed);
+        app.exit(0);
         std::process::exit(0);
     } else if id_str == "open_downloads" || id_str.starts_with("open_download:") {
         let _ = app.emit("tray-open-downloads", ());
@@ -2049,24 +2400,6 @@ fn handle_tray_menu_event(app: &tauri::AppHandle, id_str: &str) {
             );
         }
     }
-}
-
-#[command]
-fn get_live_player_position(
-    game_slug: String,
-    map_slug: Option<String>,
-    selected_pointer_id: Option<String>,
-) -> tracker::LivePlayerPosition {
-    tracker::get_live_player_position_for_game(
-        &game_slug,
-        map_slug.as_deref(),
-        selected_pointer_id.as_deref(),
-    )
-}
-
-#[command]
-fn is_live_tracking_supported(game_slug: String) -> bool {
-    tracker::get_registry().is_supported(&game_slug)
 }
 
 #[command]
@@ -2112,13 +2445,24 @@ async fn fetch_mapgenie_map(map_id: u64) -> Result<String, String> {
             .build()
             .map_err(|e| e.to_string())?;
 
-        let url = format!("https://mapgenie.io/api/v1/maps/{}/full", map_id);
-        let resp = client
-            .get(&url)
+        let data_url = format!("https://mapgenie.io/api/v1/maps/{}/data", map_id);
+        let resp = match client
+            .get(&data_url)
             .header("Referer", "https://mapgenie.io/")
             .header("Accept", "application/json")
             .send()
-            .map_err(|e| e.to_string())?;
+        {
+            Ok(r) if r.status().is_success() => Ok(r),
+            _ => {
+                let full_url = format!("https://mapgenie.io/api/v1/maps/{}/full", map_id);
+                client
+                    .get(&full_url)
+                    .header("Referer", "https://mapgenie.io/")
+                    .header("Accept", "application/json")
+                    .send()
+            }
+        }
+        .map_err(|e| e.to_string())?;
 
         if !resp.status().is_success() {
             return Err(format!("MapGenie Map API error: HTTP {}", resp.status()));
@@ -2162,6 +2506,327 @@ async fn fetch_mapgenie_page(game_slug: String, map_slug: String) -> Result<Stri
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct HttpResponsePayload {
+    pub status: u16,
+    pub body: String,
+    pub headers: std::collections::HashMap<String, String>,
+}
+
+#[cfg(windows)]
+fn fetch_via_curl(
+    url: &str,
+    headers: Option<&std::collections::HashMap<String, String>>,
+) -> Result<HttpResponsePayload, String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    let mut cmd = std::process::Command::new("curl.exe");
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd.arg("-s");
+    cmd.arg("-i");
+    cmd.arg("-L");
+    cmd.arg("--compressed");
+    cmd.arg("-H").arg("User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36");
+    cmd.arg("-H").arg("Accept: application/json, text/plain, */*");
+    cmd.arg("-H").arg("Accept-Language: en-US,en;q=0.9");
+    cmd.arg("-H").arg("Referer: https://steamrip.com/");
+
+    if let Some(hdrs) = headers {
+        for (k, v) in hdrs {
+            cmd.arg("-H").arg(format!("{}: {}", k, v));
+        }
+    }
+
+    cmd.arg(url);
+
+    let output = cmd.output().map_err(|e| format!("curl execution error: {}", e))?;
+    let raw_bytes = output.stdout;
+    let text = String::from_utf8(raw_bytes.clone())
+        .unwrap_or_else(|_| String::from_utf8_lossy(&raw_bytes).to_string());
+
+    let (header_part, body_part) = if let Some(pos) = text.find("\r\n\r\n") {
+        let (h, b) = text.split_at(pos);
+        (h, &b[4..])
+    } else if let Some(pos) = text.find("\n\n") {
+        let (h, b) = text.split_at(pos);
+        (h, &b[2..])
+    } else {
+        ("", text.as_str())
+    };
+
+    let (final_headers_str, final_body) = if body_part.starts_with("HTTP/") {
+        let all_blocks: Vec<&str> = text.split("\r\n\r\n").collect();
+        if all_blocks.len() >= 2 {
+            (all_blocks[all_blocks.len() - 2], all_blocks[all_blocks.len() - 1])
+        } else {
+            (header_part, body_part)
+        }
+    } else {
+        (header_part, body_part)
+    };
+
+    let mut status = 200u16;
+    let mut headers_map = std::collections::HashMap::new();
+
+    for (idx, line) in final_headers_str.lines().enumerate() {
+        if idx == 0 {
+            let status_parts: Vec<&str> = line.split_whitespace().collect();
+            if status_parts.len() >= 2 {
+                if let Ok(code) = status_parts[1].parse::<u16>() {
+                    status = code;
+                }
+            }
+        } else if let Some((name, val)) = line.split_once(':') {
+            headers_map.insert(name.trim().to_lowercase(), val.trim().to_string());
+        }
+    }
+
+    Ok(HttpResponsePayload {
+        status,
+        body: final_body.to_string(),
+        headers: headers_map,
+    })
+}
+
+#[command]
+async fn fetch_http_url(
+    url: String,
+    headers: Option<std::collections::HashMap<String, String>>,
+) -> Result<HttpResponsePayload, String> {
+    tokio::task::spawn_blocking(move || {
+        #[cfg(windows)]
+        {
+            if let Ok(payload) = fetch_via_curl(&url, headers.as_ref()) {
+                if payload.status == 200 || !payload.body.trim().starts_with("<!DOCTYPE") {
+                    return Ok(payload);
+                }
+            }
+        }
+
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(35))
+            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
+            .gzip(true)
+            .brotli(true)
+            .deflate(true)
+            .build()
+            .map_err(|e| e.to_string())?;
+
+        let mut req = client.get(&url);
+
+        if let Some(hdrs) = headers {
+            for (k, v) in hdrs {
+                req = req.header(k, v);
+            }
+        }
+
+        let resp = req.send().map_err(|e| e.to_string())?;
+        let status = resp.status().as_u16();
+
+        let mut headers_map = std::collections::HashMap::new();
+        for (name, val) in resp.headers() {
+            if let Ok(v_str) = val.to_str() {
+                headers_map.insert(name.as_str().to_lowercase(), v_str.to_string());
+            }
+        }
+
+        let bytes = resp.bytes().map_err(|e| e.to_string())?;
+        let body = String::from_utf8(bytes.to_vec())
+            .unwrap_or_else(|_| String::from_utf8_lossy(&bytes).to_string());
+
+        Ok(HttpResponsePayload {
+            status,
+            body,
+            headers: headers_map,
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn get_maps_base_dir() -> PathBuf {
+    if cfg!(debug_assertions) {
+        if let Ok(curr) = std::env::current_dir() {
+            if curr.join("package.json").exists() || curr.join("src-tauri").exists() {
+                let p = curr.join("maps");
+                let _ = std::fs::create_dir_all(&p);
+                return p;
+            }
+            if let Some(parent) = curr.parent() {
+                if parent.join("package.json").exists() {
+                    let p = parent.join("maps");
+                    let _ = std::fs::create_dir_all(&p);
+                    return p;
+                }
+            }
+            let p = curr.join("maps");
+            let _ = std::fs::create_dir_all(&p);
+            return p;
+        }
+    }
+
+    let fallback = dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("FitRepacks Library")
+        .join("maps");
+    let _ = std::fs::create_dir_all(&fallback);
+    fallback
+}
+
+fn sanitize_map_subpath(base: &Path, rel: &str) -> Result<PathBuf, String> {
+    let clean = rel.replace('\\', "/");
+    let mut normalized = PathBuf::new();
+    for part in clean.split('/') {
+        let p = part.trim();
+        if p.is_empty() || p == "." {
+            continue;
+        }
+        if p == ".." || p.contains(':') {
+            return Err("Invalid path component: path traversal detected".to_string());
+        }
+        normalized.push(p);
+    }
+    if normalized.as_os_str().is_empty() {
+        return Err("Empty or invalid relative path".to_string());
+    }
+    Ok(base.join(normalized))
+}
+
+fn sanitize_slug(slug: &str) -> Result<String, String> {
+    let s = slug.trim();
+    if s.is_empty() || s.contains("..") || s.contains('/') || s.contains('\\') || s.contains(':') {
+        return Err("Invalid slug identifier".to_string());
+    }
+    Ok(s.to_string())
+}
+
+#[command]
+fn get_maps_folder() -> Result<String, String> {
+    let dir = get_maps_base_dir();
+    Ok(dir.to_string_lossy().to_string())
+}
+
+#[command]
+fn save_map_file(relative_path: String, data: Vec<u8>) -> Result<bool, String> {
+    let base = get_maps_base_dir();
+    let full_path = sanitize_map_subpath(&base, &relative_path)?;
+    if let Some(parent) = full_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
+    }
+    std::fs::write(&full_path, data).map_err(|e| format!("Failed to write map file: {}", e))?;
+    Ok(true)
+}
+
+#[command]
+fn save_map_text_file(relative_path: String, content: String) -> Result<bool, String> {
+    let base = get_maps_base_dir();
+    let full_path = sanitize_map_subpath(&base, &relative_path)?;
+    if let Some(parent) = full_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
+    }
+    std::fs::write(&full_path, content.as_bytes()).map_err(|e| format!("Failed to write map file: {}", e))?;
+    Ok(true)
+}
+
+#[command]
+fn read_map_file(relative_path: String) -> Result<Vec<u8>, String> {
+    let base = get_maps_base_dir();
+    let full_path = sanitize_map_subpath(&base, &relative_path)?;
+    std::fs::read(&full_path).map_err(|e| format!("Failed to read map file: {}", e))
+}
+
+#[command]
+fn read_map_text_file(relative_path: String) -> Result<String, String> {
+    let base = get_maps_base_dir();
+    let full_path = sanitize_map_subpath(&base, &relative_path)?;
+    std::fs::read_to_string(&full_path).map_err(|e| format!("Failed to read map text file: {}", e))
+}
+
+#[command]
+fn map_file_exists(relative_path: String) -> Result<bool, String> {
+    let base = get_maps_base_dir();
+    let full_path = sanitize_map_subpath(&base, &relative_path)?;
+    Ok(full_path.exists())
+}
+
+#[command]
+fn get_map_absolute_path(relative_path: String) -> Result<String, String> {
+    let base = get_maps_base_dir();
+    let full_path = sanitize_map_subpath(&base, &relative_path)?;
+    Ok(full_path.to_string_lossy().to_string())
+}
+
+#[command]
+fn delete_map_folder(game_slug: String, map_slug: Option<String>) -> Result<bool, String> {
+    let base = get_maps_base_dir();
+    let safe_game = sanitize_slug(&game_slug)?;
+    let target = match map_slug {
+        Some(ref ms) if !ms.trim().is_empty() => {
+            let safe_map = sanitize_slug(ms)?;
+            base.join(&safe_game).join(safe_map)
+        }
+        _ => base.join(&safe_game),
+    };
+    if target.exists() {
+        std::fs::remove_dir_all(&target).map_err(|e| format!("Failed to delete map folder: {}", e))?;
+    }
+
+    // If game folder now has no remaining map directories with map.json or meta.json, clean up the whole game directory (including assets)
+    let game_dir = base.join(&safe_game);
+    if game_dir.exists() {
+        let has_other_maps = if let Ok(entries) = std::fs::read_dir(&game_dir) {
+            entries.flatten().any(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                if name == "assets" || name == "media" {
+                    false
+                } else if e.path().is_dir() {
+                    e.path().join("map.json").exists() || e.path().join("meta.json").exists()
+                } else {
+                    false
+                }
+            })
+        } else {
+            false
+        };
+
+        if !has_other_maps {
+            let _ = std::fs::remove_dir_all(&game_dir);
+        }
+    }
+
+    Ok(true)
+}
+
+#[command]
+fn list_downloaded_maps() -> Result<Vec<String>, String> {
+    let base = get_maps_base_dir();
+    let mut downloaded = Vec::new();
+    if !base.exists() {
+        return Ok(downloaded);
+    }
+    if let Ok(entries) = std::fs::read_dir(&base) {
+        for game_entry in entries.flatten() {
+            if game_entry.path().is_dir() {
+                let game_name = game_entry.file_name().to_string_lossy().to_string();
+                if let Ok(map_entries) = std::fs::read_dir(game_entry.path()) {
+                    for map_entry in map_entries.flatten() {
+                        if map_entry.path().is_dir() {
+                            let map_name = map_entry.file_name().to_string_lossy().to_string();
+                            if map_name != "assets" && map_name != "media" {
+                                if map_entry.path().join("meta.json").exists() {
+                                    downloaded.push(format!("{}_{}", game_name, map_name));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(downloaded)
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -2403,6 +3068,548 @@ fn kill_processes(pids: Vec<u32>) -> Result<usize, String> {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct OverlayShortcutConfig {
+    pub enabled: bool,
+    pub keyboard_shortcut: String,
+    pub controller_shortcut: String,
+}
+
+static OVERLAY_SHORTCUT_CONFIG: Mutex<Option<OverlayShortcutConfig>> = Mutex::new(None);
+
+#[command]
+fn update_overlay_shortcut_config(config: OverlayShortcutConfig) {
+    println!(
+        "[Overlay Backend] Shortcut config updated: enabled={}, keyboard='{}', controller='{}'",
+        config.enabled, config.keyboard_shortcut, config.controller_shortcut
+    );
+    if let Ok(mut lock) = OVERLAY_SHORTCUT_CONFIG.lock() {
+        *lock = Some(config);
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn force_bring_window_to_top(window: &tauri::WebviewWindow) {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId,
+        SetForegroundWindow, SetWindowPos, ShowWindow, HWND_TOPMOST,
+        SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SW_RESTORE, SW_SHOW,
+    };
+    use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+    use windows::Win32::UI::Input::KeyboardAndMouse::{SetActiveWindow, SetFocus, keybd_event, KEYEVENTF_KEYUP, VK_MENU};
+
+    println!("[Overlay Backend] Bringing window '{}' to top and focusing...", window.label());
+    let _ = window.show();
+    let _ = window.set_always_on_top(true);
+    let _ = window.unminimize();
+    let _ = window.set_focus();
+
+    if let Ok(h) = window.hwnd() {
+        let hwnd = windows::Win32::Foundation::HWND(h.0 as _);
+        unsafe {
+            let fg_hwnd = GetForegroundWindow();
+            let fg_thread_id = GetWindowThreadProcessId(fg_hwnd, None);
+            let current_thread_id = GetCurrentThreadId();
+
+            let attached = if fg_thread_id != 0 && fg_thread_id != current_thread_id {
+                AttachThreadInput(current_thread_id, fg_thread_id, true).as_bool()
+            } else {
+                false
+            };
+
+            // Press and release ALT key to bypass Windows focus stealing lock if active
+            keybd_event(VK_MENU.0 as u8, 0, Default::default(), 0);
+            keybd_event(VK_MENU.0 as u8, 0, KEYEVENTF_KEYUP, 0);
+
+            let _ = ShowWindow(hwnd, SW_RESTORE);
+            let _ = ShowWindow(hwnd, SW_SHOW);
+            let _ = SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+            let _ = BringWindowToTop(hwnd);
+            let _ = SetForegroundWindow(hwnd);
+            let _ = SetActiveWindow(hwnd);
+            let _ = SetFocus(hwnd);
+
+            if attached {
+                let _ = AttachThreadInput(current_thread_id, fg_thread_id, false);
+            }
+        }
+    }
+}
+
+static ACTIVE_GAME_OVERLAY_INFO: Mutex<Option<(String, String, String)>> = Mutex::new(None);
+static LAST_OVERLAY_TOGGLE_TS: Mutex<Option<Instant>> = Mutex::new(None);
+static SAVED_OVERLAY_SIZE: Mutex<Option<(f64, f64)>> = Mutex::new(None);
+
+fn show_or_create_overlay(
+    app_handle: &tauri::AppHandle,
+    toggle_if_visible: bool,
+    new_info: Option<(String, String, String)>,
+) {
+    if let Some((slug, map, title)) = new_info {
+        if let Ok(mut lock) = ACTIVE_GAME_OVERLAY_INFO.lock() {
+            *lock = Some((slug, map, title));
+        }
+    }
+
+    let (game_slug, map_slug, game_title) = {
+        if let Ok(lock) = ACTIVE_GAME_OVERLAY_INFO.lock() {
+            lock.clone().unwrap_or_else(|| {
+                ("mafia-2".into(), "empire-bay".into(), "Mafia II".into())
+            })
+        } else {
+            ("mafia-2".into(), "empire-bay".into(), "Mafia II".into())
+        }
+    };
+
+    if let Some(overlay_win) = app_handle.get_webview_window("map-overlay") {
+        let is_vis = overlay_win.is_visible().unwrap_or(false);
+        let is_min = overlay_win.is_minimized().unwrap_or(false);
+        if toggle_if_visible && is_vis && !is_min {
+            let _ = overlay_win.hide();
+            return;
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            force_bring_window_to_top(&overlay_win);
+            let win_clone = overlay_win.clone();
+            std::thread::spawn(move || {
+                for delay in [60, 180] {
+                    std::thread::sleep(std::time::Duration::from_millis(delay));
+                    force_bring_window_to_top(&win_clone);
+                }
+            });
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = overlay_win.show();
+            let _ = overlay_win.unminimize();
+            let _ = overlay_win.set_focus();
+        }
+
+        use tauri::Emitter;
+        let _ = app_handle.emit("map-overlay-change", serde_json::json!({
+            "gameSlug": game_slug,
+            "mapSlug": map_slug,
+            "gameTitle": game_title
+        }));
+        return;
+    }
+
+    let (init_w, init_h) = {
+        if let Ok(lock) = SAVED_OVERLAY_SIZE.lock() {
+            lock.unwrap_or((780.0, 560.0))
+        } else {
+            (780.0, 560.0)
+        }
+    };
+
+    let target_url: tauri::WebviewUrl = if cfg!(debug_assertions) {
+        tauri::WebviewUrl::External(
+            tauri::Url::parse("http://localhost:3000/map-overlay").expect("Valid dev overlay url"),
+        )
+    } else {
+        tauri::WebviewUrl::App("map-overlay.html".into())
+    };
+
+    let builder = tauri::WebviewWindowBuilder::new(
+        app_handle,
+        "map-overlay",
+        target_url,
+    )
+    .title(if game_title.is_empty() { "Game Map Overlay" } else { &game_title })
+    .inner_size(init_w, init_h)
+    .min_inner_size(160.0, 160.0)
+    .resizable(true)
+    .always_on_top(true)
+    .decorations(false)
+    .transparent(false)
+    .shadow(false)
+    .center()
+    .focused(true);
+
+    if let Ok(win) = builder.build() {
+        #[cfg(target_os = "windows")]
+        {
+            force_bring_window_to_top(&win);
+            let win_clone = win.clone();
+            std::thread::spawn(move || {
+                for delay in [60, 180, 350] {
+                    std::thread::sleep(std::time::Duration::from_millis(delay));
+                    force_bring_window_to_top(&win_clone);
+                }
+            });
+        }
+    }
+}
+
+fn toggle_map_overlay_from_backend(app_handle: &tauri::AppHandle) {
+    if let Ok(mut lock) = LAST_OVERLAY_TOGGLE_TS.lock() {
+        if let Some(last) = *lock {
+            if last.elapsed().as_millis() < 400 {
+                return;
+            }
+        }
+        *lock = Some(Instant::now());
+    }
+    show_or_create_overlay(app_handle, true, None);
+}
+
+#[command]
+fn open_map_overlay_cmd(
+    app_handle: tauri::AppHandle,
+    game_slug: Option<String>,
+    map_slug: Option<String>,
+    game_title: Option<String>,
+) {
+    let new_info = game_slug.map(|s| {
+        (s, map_slug.unwrap_or_else(|| "default".to_string()), game_title.unwrap_or_default())
+    });
+    show_or_create_overlay(&app_handle, false, new_info);
+}
+
+#[command]
+fn toggle_map_overlay_cmd(app_handle: tauri::AppHandle) {
+    toggle_map_overlay_from_backend(&app_handle);
+}
+
+#[command]
+fn save_overlay_size(width: f64, height: f64) {
+    if width >= 160.0 && height >= 160.0 {
+        if let Ok(mut lock) = SAVED_OVERLAY_SIZE.lock() {
+            *lock = Some((width, height));
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ActiveOverlayGameInfo {
+    pub game_slug: String,
+    pub map_slug: String,
+    pub game_title: String,
+}
+
+#[command]
+fn get_active_overlay_game() -> ActiveOverlayGameInfo {
+    if let Ok(lock) = ACTIVE_GAME_OVERLAY_INFO.lock() {
+        if let Some(ref info) = *lock {
+            return ActiveOverlayGameInfo {
+                game_slug: info.0.clone(),
+                map_slug: info.1.clone(),
+                game_title: info.2.clone(),
+            };
+        }
+    }
+    ActiveOverlayGameInfo {
+        game_slug: "mafia-2".to_string(),
+        map_slug: "empire-bay".to_string(),
+        game_title: "Mafia II".to_string(),
+    }
+}
+
+#[command]
+fn set_active_overlay_game(game_slug: String, map_slug: Option<String>, game_title: Option<String>) {
+    if let Ok(mut lock) = ACTIVE_GAME_OVERLAY_INFO.lock() {
+        *lock = Some((
+            game_slug,
+            map_slug.unwrap_or_else(|| "default".to_string()),
+            game_title.unwrap_or_default(),
+        ));
+    }
+}
+
+#[command]
+fn force_overlay_focus(app_handle: tauri::AppHandle, label: Option<String>) {
+    let target_label = label.unwrap_or_else(|| "map-overlay".to_string());
+    if let Some(window) = app_handle.get_webview_window(&target_label) {
+        #[cfg(target_os = "windows")]
+        {
+            force_bring_window_to_top(&window);
+            let win_clone = window.clone();
+            std::thread::spawn(move || {
+                for delay in [50, 150] {
+                    std::thread::sleep(std::time::Duration::from_millis(delay));
+                    force_bring_window_to_top(&win_clone);
+                }
+            });
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = window.show();
+            let _ = window.unminimize();
+            let _ = window.set_focus();
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn start_global_overlay_shortcut_listener(app_handle: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
+
+        #[repr(C)]
+        #[derive(Clone, Copy, Default)]
+        struct XInputGamepad {
+            w_buttons: u16,
+            b_left_trigger: u8,
+            b_right_trigger: u8,
+            s_thumb_lx: i16,
+            s_thumb_ly: i16,
+            s_thumb_rx: i16,
+            s_thumb_ry: i16,
+        }
+
+        #[repr(C)]
+        #[derive(Clone, Copy, Default)]
+        struct XInputState {
+            dw_packet_number: u32,
+            gamepad: XInputGamepad,
+        }
+
+        type XInputGetStateFn = unsafe extern "system" fn(u32, *mut XInputState) -> u32;
+
+        #[repr(C)]
+        #[derive(Clone, Copy)]
+        struct JoyInfoEx {
+            dw_size: u32,
+            dw_flags: u32,
+            dw_xpos: u32,
+            dw_ypos: u32,
+            dw_zpos: u32,
+            dw_rpos: u32,
+            dw_upos: u32,
+            dw_vpos: u32,
+            dw_buttons: u32,
+            dw_button_number: u32,
+            dw_pov: u32,
+            dw_reserved1: u32,
+            dw_reserved2: u32,
+        }
+
+        impl Default for JoyInfoEx {
+            fn default() -> Self {
+                Self {
+                    dw_size: std::mem::size_of::<JoyInfoEx>() as u32,
+                    dw_flags: 0x000000FF, // JOY_RETURNALL
+                    dw_xpos: 0,
+                    dw_ypos: 0,
+                    dw_zpos: 0,
+                    dw_rpos: 0,
+                    dw_upos: 0,
+                    dw_vpos: 0,
+                    dw_buttons: 0,
+                    dw_button_number: 0,
+                    dw_pov: 0,
+                    dw_reserved1: 0,
+                    dw_reserved2: 0,
+                }
+            }
+        }
+
+        type JoyGetPosExFn = unsafe extern "system" fn(u32, *mut JoyInfoEx) -> u32;
+
+        let mut xinput_fn: Option<XInputGetStateFn> = None;
+        let mut joy_fn: Option<JoyGetPosExFn> = None;
+
+        unsafe {
+            use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryA};
+            use windows::core::PCSTR;
+
+            let dll_names = [
+                b"xinput1_4.dll\0".as_ptr(),
+                b"xinput1_3.dll\0".as_ptr(),
+                b"xinput9_1_0.dll\0".as_ptr(),
+                b"xinput1_2.dll\0".as_ptr(),
+                b"xinput1_1.dll\0".as_ptr(),
+            ];
+
+            for dll in dll_names {
+                let h = LoadLibraryA(PCSTR(dll));
+                if let Ok(handle) = h {
+                    if !handle.is_invalid() {
+                        // 1. Try Ordinal 100 (XInputGetStateEx) - provides global background controller state even when game is focused
+                        let proc_ex = GetProcAddress(handle, PCSTR(100 as usize as *const u8));
+                        if let Some(p) = proc_ex {
+                            xinput_fn = Some(std::mem::transmute(p));
+                            break;
+                        }
+                        // 2. Fallback to named XInputGetState
+                        let proc = GetProcAddress(handle, PCSTR(b"XInputGetState\0".as_ptr()));
+                        if let Some(p) = proc {
+                            xinput_fn = Some(std::mem::transmute(p));
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Also load winmm.dll for DirectInput / DualShock / generic controller fallback
+            let h_winmm = LoadLibraryA(PCSTR(b"winmm.dll\0".as_ptr()));
+            if let Ok(handle) = h_winmm {
+                if !handle.is_invalid() {
+                    let proc = GetProcAddress(handle, PCSTR(b"joyGetPosEx\0".as_ptr()));
+                    if let Some(p) = proc {
+                        joy_fn = Some(std::mem::transmute(p));
+                    }
+                }
+            }
+        }
+
+        let mut key_was_down = false;
+        let mut pad_was_down = false;
+        let mut last_trigger_time = std::time::Instant::now();
+
+        loop {
+            let config = {
+                if let Ok(lock) = OVERLAY_SHORTCUT_CONFIG.lock() {
+                    lock.clone().unwrap_or_else(|| OverlayShortcutConfig {
+                        enabled: true,
+                        keyboard_shortcut: "F9".to_string(),
+                        controller_shortcut: "Select+Start".to_string(),
+                    })
+                } else {
+                    OverlayShortcutConfig {
+                        enabled: true,
+                        keyboard_shortcut: "F9".to_string(),
+                        controller_shortcut: "Select+Start".to_string(),
+                    }
+                }
+            };
+
+            if !config.enabled {
+                key_was_down = false;
+                pad_was_down = false;
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                continue;
+            }
+
+            std::thread::sleep(std::time::Duration::from_millis(25));
+
+            // 1. Global Keyboard Check (GetAsyncKeyState)
+            let mut key_is_down = false;
+            let kb_shortcut = config.keyboard_shortcut.trim();
+            if !kb_shortcut.is_empty() && kb_shortcut != "Disabled" {
+                unsafe {
+                    let is_key_pressed = |vk: i32| (GetAsyncKeyState(vk) as u16 & 0x8000) != 0;
+
+                    let ctrl_down = is_key_pressed(0x11);
+                    let shift_down = is_key_pressed(0x10);
+                    let alt_down = is_key_pressed(0x12);
+                    let m_down = is_key_pressed(0x4D);
+
+                    if kb_shortcut.eq_ignore_ascii_case("F9") && is_key_pressed(0x78) {
+                        key_is_down = true;
+                    } else if kb_shortcut.eq_ignore_ascii_case("F8") && is_key_pressed(0x77) {
+                        key_is_down = true;
+                    } else if kb_shortcut.eq_ignore_ascii_case("F10") && is_key_pressed(0x79) {
+                        key_is_down = true;
+                    } else if kb_shortcut.eq_ignore_ascii_case("F11") && is_key_pressed(0x7A) {
+                        key_is_down = true;
+                    } else if kb_shortcut.eq_ignore_ascii_case("F7") && is_key_pressed(0x76) {
+                        key_is_down = true;
+                    } else if (kb_shortcut == "Ctrl+M" || kb_shortcut == "Ctrl + M") && ctrl_down && m_down && !shift_down && !alt_down {
+                        key_is_down = true;
+                    } else if (kb_shortcut == "Alt+M" || kb_shortcut == "Alt + M") && alt_down && m_down && !ctrl_down && !shift_down {
+                        key_is_down = true;
+                    } else if (kb_shortcut == "Ctrl+Shift+M" || kb_shortcut == "Ctrl + Shift + M") && ctrl_down && shift_down && m_down {
+                        key_is_down = true;
+                    }
+                }
+            }
+
+            // 2. Global Gamepad Check (XInput via Ordinal 100 / XInputGetStateEx)
+            let mut pad_is_down = false;
+            let pad_shortcut = config.controller_shortcut.trim();
+
+            if let Some(get_state) = xinput_fn {
+                if !pad_shortcut.is_empty() && pad_shortcut != "Disabled" {
+                    for user_idx in 0..4 {
+                        let mut state = XInputState::default();
+                        let res = unsafe { get_state(user_idx, &mut state) };
+                        if res == 0 {
+                            let btn = state.gamepad.w_buttons;
+                            let lt = state.gamepad.b_left_trigger;
+                            let rt = state.gamepad.b_right_trigger;
+
+                            if (pad_shortcut == "L3+R3" || pad_shortcut == "L3 + R3") && (btn & 0x0040 != 0) && (btn & 0x0080 != 0) {
+                                pad_is_down = true;
+                                break;
+                            } else if (pad_shortcut == "Select+Start" || pad_shortcut == "Select + Start") && (btn & 0x0020 != 0) && (btn & 0x0010 != 0) {
+                                pad_is_down = true;
+                                break;
+                            } else if (pad_shortcut == "LB+RB+Down" || pad_shortcut == "LB + RB + Down") && (btn & 0x0100 != 0) && (btn & 0x0200 != 0) && (btn & 0x0002 != 0) {
+                                pad_is_down = true;
+                                break;
+                            } else if (pad_shortcut == "LT+RT+Down" || pad_shortcut == "LT + RT + Down") && (lt > 120) && (rt > 120) && (btn & 0x0002 != 0) {
+                                pad_is_down = true;
+                                break;
+                            } else if pad_shortcut == "Guide" && (btn & 0x0400 != 0) {
+                                pad_is_down = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 3. Global Gamepad Fallback (DirectInput / PS4 / PS5 / Generic pads via winmm)
+            if !pad_is_down {
+                if let Some(get_joy) = joy_fn {
+                    if !pad_shortcut.is_empty() && pad_shortcut != "Disabled" {
+                        for joy_id in 0..16 {
+                            let mut info = JoyInfoEx::default();
+                            let res = unsafe { get_joy(joy_id, &mut info) };
+                            if res == 0 {
+                                let b = info.dw_buttons;
+                                if pad_shortcut == "L3+R3" || pad_shortcut == "L3 + R3" {
+                                    let l3_r3_standard = (b & (1 << 10) != 0) && (b & (1 << 11) != 0);
+                                    let l3_r3_fallback = (b & 0x0040 != 0) && (b & 0x0080 != 0);
+                                    if l3_r3_standard || l3_r3_fallback {
+                                        pad_is_down = true;
+                                        break;
+                                    }
+                                } else if pad_shortcut == "Select+Start" || pad_shortcut == "Select + Start" {
+                                    // Button 8 (Share / Back / Select) + Button 9 (Options / Start / Menu)
+                                    let sel_start = (b & (1 << 8) != 0) && (b & (1 << 9) != 0);
+                                    if sel_start {
+                                        pad_is_down = true;
+                                        break;
+                                    }
+                                } else if pad_shortcut == "LB+RB+Down" || pad_shortcut == "LB + RB + Down" {
+                                    let bumpers = (b & (1 << 4) != 0) && (b & (1 << 5) != 0);
+                                    let pov_down = info.dw_pov == 18000;
+                                    if bumpers && pov_down {
+                                        pad_is_down = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            let triggered_key = key_is_down && !key_was_down;
+            let triggered_pad = pad_is_down && !pad_was_down;
+
+            key_was_down = key_is_down;
+            pad_was_down = pad_is_down;
+
+            if (triggered_key || triggered_pad) && last_trigger_time.elapsed().as_millis() > 400 {
+                last_trigger_time = std::time::Instant::now();
+                println!(
+                    "[Overlay Listener] Triggered via: key={}, pad={}",
+                    triggered_key, triggered_pad
+                );
+                toggle_map_overlay_from_backend(&app_handle);
+            }
+        }
+    });
+}
+
+#[cfg(not(target_os = "windows"))]
+fn start_global_overlay_shortcut_listener(_app_handle: tauri::AppHandle) {}
+
 fn main() {
     #[cfg(target_os = "windows")]
     {
@@ -2435,6 +3642,8 @@ fn main() {
     builder
         .manage(Mutex::new(AppState {}))
         .setup(|app| {
+            start_global_overlay_shortcut_listener(app.handle().clone());
+
             let initial_games = {
                 if let Ok(lock) = RECENT_GAMES.lock() {
                     lock.clone()
@@ -2504,10 +3713,18 @@ fn main() {
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                // Never close to tray in development / debug mode
-                if !cfg!(debug_assertions) && CLOSE_TO_TRAY.load(Ordering::Relaxed) {
-                    api.prevent_close();
-                    let _ = window.hide();
+                if window.label() == "main" {
+                    // If close to tray is enabled (in release) and not quitting, prevent close and hide main window
+                    if !IS_QUITTING.load(Ordering::Relaxed) && !cfg!(debug_assertions) && CLOSE_TO_TRAY.load(Ordering::Relaxed) {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    } else {
+                        // Main window is closing: close the map-overlay window so app doesn't hang in background
+                        let app = window.app_handle();
+                        if let Some(overlay_win) = app.get_webview_window("map-overlay") {
+                            let _ = overlay_win.close();
+                        }
+                    }
                 }
             }
         })
@@ -2541,15 +3758,75 @@ fn main() {
             get_webview_url,
             close_webview,
             set_webview_bounds,
-            get_live_player_position,
-            is_live_tracking_supported,
             fetch_mapgenie_games,
             fetch_mapgenie_map,
             fetch_mapgenie_page,
             get_resource_processes,
-            kill_processes
+            kill_processes,
+            update_overlay_shortcut_config,
+            force_overlay_focus,
+            set_active_overlay_game,
+            get_active_overlay_game,
+            save_overlay_size,
+            open_map_overlay_cmd,
+            toggle_map_overlay_cmd,
+            get_maps_folder,
+            save_map_file,
+            save_map_text_file,
+            read_map_file,
+            read_map_text_file,
+            map_file_exists,
+            get_map_absolute_path,
+            delete_map_folder,
+            list_downloaded_maps,
+            fetch_http_url
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
 
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_sanitize_map_subpath_valid() {
+        let base = PathBuf::from("C:\\Games\\maps");
+        let safe = sanitize_map_subpath(&base, "cyberpunk/night-city/tiles/1/2/3.jpg").unwrap();
+        assert_eq!(safe, base.join("cyberpunk").join("night-city").join("tiles").join("1").join("2").join("3.jpg"));
+    }
+
+    #[test]
+    fn test_sanitize_map_subpath_traversal_rejected() {
+        let base = PathBuf::from("C:\\Games\\maps");
+        assert!(sanitize_map_subpath(&base, "../../windows/system32/cmd.exe").is_err());
+        assert!(sanitize_map_subpath(&base, "cyberpunk/../../secret").is_err());
+        assert!(sanitize_map_subpath(&base, "C:\\Windows\\System32").is_err());
+    }
+
+    #[test]
+    fn test_sanitize_slug() {
+        assert_eq!(sanitize_slug("witcher-3").unwrap(), "witcher-3");
+        assert_eq!(sanitize_slug("cyberpunk_2077").unwrap(), "cyberpunk_2077");
+        assert!(sanitize_slug("../etc").is_err());
+        assert!(sanitize_slug("foo/bar").is_err());
+        assert!(sanitize_slug("foo\\bar").is_err());
+    }
+
+    #[test]
+    fn test_kbps_to_bps() {
+        assert!(kbps_to_bps(0).is_none());
+        let val = kbps_to_bps(100).unwrap();
+        assert_eq!(val.get(), 102_400);
+    }
+
+    #[test]
+    fn test_torrent_hash_case_matching() {
+        let h1 = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678";
+        let h2 = "A1B2C3D4E5F60718293A4B5C6D7E8F9012345678";
+        assert!(h1.eq_ignore_ascii_case(h2));
+    }
+}

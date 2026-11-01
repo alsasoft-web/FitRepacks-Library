@@ -31,6 +31,9 @@ import {
   Center,
   useComputedColorScheme,
   Menu,
+  Progress,
+  ThemeIcon,
+  Modal,
 } from "@mantine/core";
 import { useDebouncedValue, useHover, useNetwork } from "@mantine/hooks";
 import {
@@ -61,9 +64,18 @@ import {
   RotateCcw,
   ChevronDown,
   Zap,
+  Square,
 } from "lucide-react";
 import { Carousel } from "@mantine/carousel";
 import { RepackPost } from "../../lib/repackTypes";
+import {
+  startSteamRipScrape,
+  stopSteamRipScrape,
+  subscribeSteamRipScrape,
+  getSteamRipScrapeState,
+  SteamRipScrapeProgress,
+  checkForNewSteamRipPosts,
+} from "../../lib/steamripScraper";
 import {
   loadRepacksPaginated,
   togglePostReadState,
@@ -77,7 +89,9 @@ import {
   toggleFavoriteRepack,
   setRepackStatus,
   getCarouselVideoPosition,
+  invalidateRepacksCache,
 } from "../../lib/db";
+import { sendDesktopNotification } from "../../lib/notification";
 import {
   cleanGameTitle,
   extractGameVersion,
@@ -736,12 +750,12 @@ const RepackGridCard: React.FC<{
               <Group gap={4}>
                 {post.topMonthlyRank && (
                   <Badge color="orange" variant="light" size="xs">
-                    🔥 #{post.topMonthlyRank} Month
+                    #{post.topMonthlyRank} Month
                   </Badge>
                 )}
                 {post.topYearlyRank && (
                   <Badge color="yellow" variant="light" size="xs">
-                    🏆 #{post.topYearlyRank} Year
+                    #{post.topYearlyRank} Year
                   </Badge>
                 )}
               </Group>
@@ -912,6 +926,20 @@ export const RepacksPostsView: React.FC<RepacksPostsViewProps> = ({
     topYearCount: 0,
   });
 
+  const [scrapeProgress, setScrapeProgress] = useState<SteamRipScrapeProgress>(
+    () => getSteamRipScrapeState(),
+  );
+  const [isPromptDismissed, setIsPromptDismissed] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        return Boolean(localStorage.getItem("steamrip_prompt_dismissed"));
+      } catch (_) {}
+    }
+    return false;
+  });
+  const [firstTimeModalOpened, setFirstTimeModalOpened] = useState(false);
+  const hasCheckedFirstTime = useRef(false);
+
   const topContainerRef = useRef<HTMLDivElement>(null);
   const isInitialMount = useRef(true);
 
@@ -974,6 +1002,33 @@ export const RepacksPostsView: React.FC<RepacksPostsViewProps> = ({
     }
   }, [currentPage, itemsPerPage, debouncedSearchQuery, sortBy, popularFilter, selectedCategories, readFilter, dataSource]);
 
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      invalidateRepacksCache();
+
+      if (dataSource === "steamrip") {
+        const { newCount } = await checkForNewSteamRipPosts();
+        if (newCount > 0) {
+          sendDesktopNotification({
+            title: "SteamRIP Catalog Updated",
+            body: `Discovered and added ${newCount} new game repack${newCount > 1 ? "s" : ""}!`,
+          }).catch(() => {});
+        }
+      }
+
+      await fetchRepacks();
+      await refreshGlobalStats();
+    } catch (err) {
+      console.error("Refresh error:", err);
+      await fetchRepacks();
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [dataSource, fetchRepacks, refreshGlobalStats]);
+
   useEffect(() => {
     fetchRepacks();
   }, [fetchRepacks]);
@@ -1021,6 +1076,52 @@ export const RepacksPostsView: React.FC<RepacksPostsViewProps> = ({
       window.removeEventListener("fitrepacks-post-read-updated", handlePostReadUpdated);
     };
   }, [dataSource, currentPage, fetchRepacks, refreshGlobalStats]);
+
+  // SteamRIP Scraper live updates & initial prompt trigger
+  useEffect(() => {
+    if (dataSource !== "steamrip") return;
+    const unsub = subscribeSteamRipScrape((st) => {
+      setScrapeProgress(st);
+    });
+    const handleDataUpdated = () => {
+      fetchRepacks();
+      refreshGlobalStats();
+    };
+    window.addEventListener("steamrip-data-updated", handleDataUpdated);
+    return () => {
+      unsub();
+      window.removeEventListener("steamrip-data-updated", handleDataUpdated);
+    };
+  }, [dataSource, fetchRepacks, refreshGlobalStats]);
+
+  // Check if opening SteamRIP and catalog is empty
+  useEffect(() => {
+    if (dataSource === "steamrip" && !isLoading && !hasCheckedFirstTime.current) {
+      if (totalItems === 0 && !scrapeProgress.isRunning && !isPromptDismissed) {
+        setFirstTimeModalOpened(true);
+      }
+      hasCheckedFirstTime.current = true;
+    }
+  }, [dataSource, isLoading, totalItems, scrapeProgress.isRunning, isPromptDismissed]);
+
+  const handleStartScraping = useCallback(() => {
+    setFirstTimeModalOpened(false);
+    startSteamRipScrape();
+  }, []);
+
+  const handleStopScraping = useCallback(() => {
+    stopSteamRipScrape();
+  }, []);
+
+  const handleDismissPrompt = useCallback(() => {
+    setIsPromptDismissed(true);
+    setFirstTimeModalOpened(false);
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem("steamrip_prompt_dismissed", "1");
+      } catch (_) {}
+    }
+  }, []);
 
   const handleToggleRead = (id: string, date?: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
@@ -1099,67 +1200,64 @@ export const RepacksPostsView: React.FC<RepacksPostsViewProps> = ({
 
   return (
     <Stack gap="md" ref={topContainerRef}>
-      {/* Header Banner */}
-      <Paper
-        p="md"
-        radius="lg"
-        bg="var(--mantine-color-default)"
-        style={{
-          border: "1px solid var(--mantine-color-default-border)",
-          boxShadow: "0 4px 20px rgba(0, 0, 0, 0.15)",
-        }}
-        mb="md"
-      >
-        <Group justify="space-between" align="center" wrap="wrap" gap="md">
-          <Group gap="xs">
-            <Box
-              p={8}
-              style={{
-                borderRadius: 10,
-                background:
-                  dataSource === "steamrip"
-                    ? "linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%)"
-                    : "linear-gradient(135deg, #ec4899 0%, #8b5cf6 100%)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              {dataSource === "steamrip" ? <Flame size={22} color="white" /> : <Sparkles size={22} color="white" />}
-            </Box>
-            <div>
-              <Title order={3} fw={800} style={{ letterSpacing: "-0.5px" }}>
-                {dataSource === "steamrip" ? "SteamRIP Games" : "FitGirl Repacks"}
-              </Title>
-              <Text size="xs" c="dimmed">
-                {dataSource === "steamrip"
-                  ? "Direct game downloads and pre-installed updates"
-                  : "Verified game repacks with fast search and selective downloads"}
-              </Text>
-            </div>
-          </Group>
+      {activeGameTitle && (
+        <Alert icon={<AlertCircle size={16} />} color="orange" radius="md" p="xs">
+          <Text size="xs" fw={700}>
+            Game Running ({activeGameTitle}): Background sync is paused while playing.
+          </Text>
+        </Alert>
+      )}
 
-          <Button
-            size="xs"
-            variant="light"
-            color="blue"
-            leftSection={<RefreshCw size={14} />}
-            onClick={fetchRepacks}
-            loading={isLoading}
-            radius="md"
-          >
-            Refresh
-          </Button>
-        </Group>
-
-        {activeGameTitle && (
-          <Alert icon={<AlertCircle size={16} />} color="orange" radius="md" mt="md" p="xs">
-            <Text size="xs" fw={700}>
-              Game Running ({activeGameTitle}): Background sync is paused while playing.
-            </Text>
-          </Alert>
-        )}
-      </Paper>
+      {/* SteamRIP Scraping Active Progress Bar */}
+      {dataSource === "steamrip" && scrapeProgress.isRunning && (
+        <Paper
+          p="sm"
+          radius="lg"
+          bg="var(--mantine-color-default)"
+          style={{
+            border: "1px solid var(--mantine-color-cyan-7)",
+            boxShadow: "0 2px 10px rgba(0, 0, 0, 0.1)",
+          }}
+        >
+          <Stack gap={8}>
+            <Group justify="space-between" align="center" wrap="wrap" gap="xs">
+              <Group gap="xs">
+                <Loader size={14} color="cyan" />
+                <Text size="xs" fw={700} c="cyan">
+                  {scrapeProgress.statusMessage}
+                </Text>
+              </Group>
+              <Button
+                size="xs"
+                variant="light"
+                color="red"
+                leftSection={<Square size={12} fill="currentColor" />}
+                onClick={handleStopScraping}
+                radius="md"
+              >
+                Stop Scraping
+              </Button>
+            </Group>
+            <Progress
+              value={
+                scrapeProgress.totalPages > 0
+                  ? Math.min(
+                      100,
+                      Math.round(
+                        (scrapeProgress.currentPage / scrapeProgress.totalPages) * 100,
+                      ),
+                    )
+                  : 0
+              }
+              animated
+              striped
+              color="cyan"
+              radius="md"
+              size="sm"
+            />
+          </Stack>
+        </Paper>
+      )}
 
       {/* Controls & Filter Toolbar */}
       <Paper
@@ -1249,6 +1347,44 @@ export const RepacksPostsView: React.FC<RepacksPostsViewProps> = ({
                 bg="var(--mantine-color-body)"
                 size="xs"
               />
+
+              <Button
+                size="xs"
+                variant="light"
+                color="blue"
+                leftSection={<RefreshCw size={14} className={isRefreshing ? "animate-spin" : ""} />}
+                onClick={handleRefresh}
+                loading={isRefreshing || isLoading}
+                radius="md"
+              >
+                Refresh
+              </Button>
+
+              {dataSource === "steamrip" && (
+                scrapeProgress.isRunning ? (
+                  <Button
+                    size="xs"
+                    variant="light"
+                    color="red"
+                    leftSection={<Square size={12} fill="currentColor" />}
+                    onClick={handleStopScraping}
+                    radius="md"
+                  >
+                    Stop Scraping
+                  </Button>
+                ) : (
+                  <Button
+                    size="xs"
+                    variant="light"
+                    color="cyan"
+                    leftSection={<DownloadCloud size={14} />}
+                    onClick={handleStartScraping}
+                    radius="md"
+                  >
+                    {totalItems === 0 ? "Start Scraping" : "Scrape SteamRIP"}
+                  </Button>
+                )
+              )}
 
               {isLoading ? (
                 <Badge size="sm" color="brandCyan" variant="light" radius="md" leftSection={<Loader size={10} color="brandCyan" />}>
@@ -1578,6 +1714,61 @@ export const RepacksPostsView: React.FC<RepacksPostsViewProps> = ({
             </Group>
           )}
         </Box>
+      ) : dataSource === "steamrip" && totalItems === 0 && !scrapeProgress.isRunning ? (
+        <Paper
+          p={40}
+          radius="lg"
+          className="repack-glass-card"
+          style={{
+            textAlign: "center",
+            border: "1px dashed var(--mantine-color-cyan-7)",
+            background: "rgba(6, 182, 212, 0.04)",
+          }}
+        >
+          <Box
+            w={64}
+            h={64}
+            bg="var(--mantine-color-default)"
+            style={{
+              borderRadius: "50%",
+              margin: "0 auto",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              border: "1px solid var(--mantine-color-default-border)",
+            }}
+          >
+            <DownloadCloud size={32} color="#00adb5" />
+          </Box>
+
+          <Title order={3} mt="md" className="heading-font">
+            SteamRIP Needs Scraping
+          </Title>
+
+          <Text size="xs" c="dimmed" mt={6} style={{ maxWidth: 480, margin: "6px auto 0" }}>
+            SteamRIP games are now saved and indexed directly in your local database for fast access. SteamRIP needs to be scraped to show its games.
+          </Text>
+
+          <Group justify="center" gap="sm" mt="md">
+            <Button
+              color="cyan"
+              radius="md"
+              size="sm"
+              leftSection={<DownloadCloud size={16} />}
+              onClick={handleStartScraping}
+            >
+              Start Scraping Now
+            </Button>
+            <Button
+              variant="default"
+              radius="md"
+              size="sm"
+              onClick={handleDismissPrompt}
+            >
+              Later
+            </Button>
+          </Group>
+        </Paper>
       ) : (
         <Paper p={60} radius="lg" className="repack-glass-card" style={{ textAlign: "center" }}>
           <Box
@@ -1616,6 +1807,42 @@ export const RepacksPostsView: React.FC<RepacksPostsViewProps> = ({
         onToggleRead={(id, date) => handleToggleRead(id, date || selectedPost?.date)}
         onOpenTorrentDownload={onOpenTorrentDownload}
       />
+
+      {/* First-Time SteamRIP Scraping Modal */}
+      <Modal
+        opened={firstTimeModalOpened}
+        onClose={handleDismissPrompt}
+        title={
+          <Group gap="xs">
+            <ThemeIcon size={28} radius="md" color="cyan" variant="light">
+              <DownloadCloud size={16} />
+            </ThemeIcon>
+            <Text fw={700}>SteamRIP Catalog</Text>
+          </Group>
+        }
+        radius="lg"
+        centered
+        overlayProps={{ backgroundOpacity: 0.55, blur: 3 }}
+      >
+        <Stack gap="md">
+          <Text size="sm" c="dimmed">
+            SteamRIP games are now stored directly in your local database for maximum speed and privacy. SteamRIP needs to be scraped to show its games.
+          </Text>
+          <Group justify="flex-end" gap="sm" mt="xs">
+            <Button variant="default" radius="md" onClick={handleDismissPrompt}>
+              Later
+            </Button>
+            <Button
+              color="cyan"
+              radius="md"
+              leftSection={<DownloadCloud size={16} />}
+              onClick={handleStartScraping}
+            >
+              Start Scraping Now
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </Stack>
   );
 };

@@ -2,7 +2,7 @@
 
 [class^="icon-"],
 [class*=" icon-"] {
-  font-family: "icomoon" !important;
+  font-family: "icomoon", "mg-icons" !important;
   speak: never;
   font-style: normal;
   font-weight: normal;
@@ -12,61 +12,6 @@
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   display: inline-block;
-}
-
-.icon-outfit:before {
-  content: "\e900";
-}
-.icon-stunt_jump:before {
-  content: "\e901";
-}
-.icon-wanted_poster:before {
-  content: "\e902";
-}
-.icon-character:before {
-  content: "\e903";
-}
-.icon-comic:before {
-  content: "\e904";
-}
-.icon-easter_egg:before {
-  content: "\e905";
-}
-.icon-hidden_car:before {
-  content: "\e906";
-}
-.icon-miscellaneous:before {
-  content: "\e907";
-}
-.icon-mystery_fox:before {
-  content: "\e908";
-}
-.icon-point_of_interest:before {
-  content: "\e909";
-}
-.icon-post_card:before {
-  content: "\e90a";
-}
-.icon-pulp:before {
-  content: "\e90b";
-}
-.icon-story_mission:before {
-  content: "\e90c";
-}
-.icon-cigarette_card:before {
-  content: "\e90d";
-}
-.icon-gas_station:before {
-  content: "\e90e";
-}
-.icon-note:before {
-  content: "\e90f";
-}
-.icon-meds:before {
-  content: "\e910";
-}
-.icon-side_mission:before {
-  content: "\e911";
 }
 
 html,
@@ -82,8 +27,8 @@ body {
 /* Mantine sets data-mantine-color-scheme on <html> — override background once applied */
 html[data-mantine-color-scheme="dark"],
 html[data-mantine-color-scheme="dark"] body {
-  background-color: #18191c;
-  --mantine-color-body: #18191c;
+  background-color: #121316;
+  --mantine-color-body: #121316;
 }
 
 html[data-mantine-color-scheme],
@@ -268,4 +213,3 @@ h3,
 .library-grid-container {
   contain: content;
 }
-

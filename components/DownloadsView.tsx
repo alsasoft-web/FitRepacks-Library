@@ -44,7 +44,7 @@ import {
   FolderOpen,
   RotateCw,
 } from "lucide-react";
-import { addGameToStorage } from "../lib/db";
+import { addGameToStorage, findMatchingGameInLibrary } from "../lib/db";
 import { linkGameToIgdb } from "../lib/gameLinker";
 import { Game } from "../lib/types";
 import {
@@ -215,8 +215,10 @@ export const DownloadsView: React.FC = () => {
                 tags: ["Auto-Installed"],
               };
 
-              addGameToStorage(newGame);
-              linkGameToIgdb(newGame).catch(() => {});
+              const updatedList = addGameToStorage(newGame);
+              const savedGame =
+                findMatchingGameInLibrary(newGame, updatedList) || newGame;
+              linkGameToIgdb(savedGame).catch(() => {});
               window.dispatchEvent(new CustomEvent("fitrepacks-games-updated"));
 
               setInstallStatusMsg({

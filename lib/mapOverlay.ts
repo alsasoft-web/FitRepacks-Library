@@ -10,9 +10,37 @@ export function isTauriEnvironment(): boolean {
   return typeof window !== "undefined" && Boolean((window as any).__TAURI_INTERNALS__);
 }
 
-export async function openMapOverlay(options: OpenMapOverlayOptions): Promise<boolean> {
-  const { gameSlug, mapSlug = "default", gameTitle = "", minZoom, maxZoom } = options;
+import { getLastOpenedMapSlug } from "./gameMaps";
 
+export async function openMapOverlay(options: OpenMapOverlayOptions): Promise<boolean> {
+  const { gameSlug, gameTitle = "", minZoom, maxZoom } = options;
+  let mapSlug = options.mapSlug || "default";
+
+  if ((!mapSlug || mapSlug === "default") && gameSlug) {
+    const lastMap = getLastOpenedMapSlug(gameSlug);
+    if (lastMap) {
+      mapSlug = lastMap;
+    }
+  }
+
+  if (isTauriEnvironment()) {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("open_map_overlay_cmd", {
+        gameSlug: gameSlug || null,
+        mapSlug: mapSlug || "default",
+        gameTitle: gameTitle || null,
+      });
+      setTimeout(() => {
+        invoke("force_overlay_focus", { label: "map-overlay" }).catch(() => {});
+      }, 50);
+      return true;
+    } catch (err) {
+      console.warn("Tauri open_map_overlay_cmd error:", err);
+    }
+  }
+
+  // Web / Browser Fallback
   const queryParams = new URLSearchParams();
   if (gameSlug) queryParams.set("gameSlug", gameSlug);
   if (mapSlug) queryParams.set("mapSlug", mapSlug);
@@ -20,114 +48,7 @@ export async function openMapOverlay(options: OpenMapOverlayOptions): Promise<bo
   if (minZoom !== undefined) queryParams.set("minZoom", String(minZoom));
   if (maxZoom !== undefined) queryParams.set("maxZoom", String(maxZoom));
 
-  const queryString = queryParams.toString();
-
-  if (isTauriEnvironment()) {
-    try {
-      const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-
-      const existingOverlay = await WebviewWindow.getByLabel("map-overlay");
-      if (existingOverlay) {
-        // Overlay window is already open: bring it to focus and update route
-        await existingOverlay.show();
-        if (await existingOverlay.isMinimized()) {
-          await existingOverlay.unminimize();
-        }
-        await existingOverlay.setFocus();
-        await existingOverlay.setAlwaysOnTop(true);
-
-        const targetPath = `/map-overlay?${queryString}`;
-        try {
-          // Send navigation event or navigate directly
-          const { emit } = await import("@tauri-apps/api/event");
-          await emit("map-overlay-change", {
-            gameSlug,
-            mapSlug,
-            gameTitle,
-            minZoom,
-            maxZoom,
-          });
-        } catch (_) {}
-
-        return true;
-      }
-
-      const cleanSlug = gameSlug.includes("--") ? gameSlug.split("--")[0] : gameSlug;
-      let initialWidth = 780;
-      let initialHeight = 560;
-      let initialX: number | undefined;
-      let initialY: number | undefined;
-
-      if (typeof window !== "undefined") {
-        try {
-          const savedShape =
-            (cleanSlug && localStorage.getItem(`fitrepacks_overlay_${cleanSlug}_shape`)) ||
-            localStorage.getItem("fitrepacks_overlay_shape") ||
-            "rounded";
-          const savedSizeStr =
-            (cleanSlug && localStorage.getItem(`fitrepacks_overlay_${cleanSlug}_${savedShape}_size`)) ||
-            (cleanSlug && localStorage.getItem(`fitrepacks_overlay_${cleanSlug}_size`)) ||
-            localStorage.getItem(`fitrepacks_overlay_${savedShape}_size`) ||
-            localStorage.getItem("fitrepacks_overlay_size");
-
-          if (savedSizeStr) {
-            const s = JSON.parse(savedSizeStr);
-            if (s.width && s.height) {
-              initialWidth = s.width;
-              initialHeight = s.height;
-            }
-          } else if (savedShape === "circle") {
-            initialWidth = 500;
-            initialHeight = 500;
-          }
-
-          const savedPosStr =
-            (cleanSlug && localStorage.getItem(`fitrepacks_overlay_${cleanSlug}_pos`)) ||
-            localStorage.getItem("fitrepacks_overlay_pos");
-          if (savedPosStr) {
-            const p = JSON.parse(savedPosStr);
-            if (typeof p.x === "number" && typeof p.y === "number") {
-              initialX = p.x;
-              initialY = p.y;
-            }
-          }
-        } catch (_) {}
-      }
-
-      const isDev = window.location.port === "3000" || window.location.hostname === "localhost";
-      const targetUrl = isDev
-        ? `/map-overlay?${queryString}`
-        : `map-overlay.html?${queryString}`;
-
-      const overlay = new WebviewWindow("map-overlay", {
-        url: targetUrl,
-        title: gameTitle ? `${gameTitle} - Map Overlay` : "Game Map Overlay",
-        width: initialWidth,
-        height: initialHeight,
-        x: initialX,
-        y: initialY,
-        minWidth: 160,
-        minHeight: 160,
-        resizable: true,
-        alwaysOnTop: true,
-        decorations: false,
-        transparent: true,
-        shadow: false,
-        focus: true,
-      });
-
-      overlay.once("tauri://error", (e) => {
-        console.error("Failed to create map overlay window:", e);
-      });
-
-      return true;
-    } catch (err) {
-      console.warn("Tauri WebviewWindow creation failed, falling back to popup window:", err);
-    }
-  }
-
-  // Web / Browser Fallback
-  const popupUrl = `/map-overlay?${queryString}`;
+  const popupUrl = `/map-overlay?${queryParams.toString()}`;
   const popup = window.open(
     popupUrl,
     "map-overlay",
@@ -140,3 +61,116 @@ export async function openMapOverlay(options: OpenMapOverlayOptions): Promise<bo
 
   return false;
 }
+
+export async function isMapOverlayOpen(): Promise<boolean> {
+  if (isTauriEnvironment()) {
+    try {
+      const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+      const existingOverlay = await WebviewWindow.getByLabel("map-overlay");
+      return existingOverlay !== null && existingOverlay !== undefined;
+    } catch (_) {}
+  }
+  return false;
+}
+
+export async function closeMapOverlay(): Promise<boolean> {
+  if (isTauriEnvironment()) {
+    try {
+      const { WebviewWindow, getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+      try {
+        const currentWin = getCurrentWebviewWindow();
+        if (currentWin && currentWin.label === "map-overlay") {
+          await currentWin.close();
+          return true;
+        }
+      } catch (_) {}
+
+      const existingOverlay = await WebviewWindow.getByLabel("map-overlay");
+      if (existingOverlay) {
+        await existingOverlay.close();
+        return true;
+      }
+    } catch (_) {}
+  }
+  return false;
+}
+
+export async function toggleMapOverlay(
+  options?: Partial<OpenMapOverlayOptions>
+): Promise<boolean> {
+  const now = Date.now();
+  if (typeof window !== "undefined") {
+    try {
+      const lastTs = Number(localStorage.getItem("fitrepacks_last_overlay_toggle_ts") || 0);
+      if (now - lastTs < 350) {
+        return false;
+      }
+      localStorage.setItem("fitrepacks_last_overlay_toggle_ts", String(now));
+    } catch (_) {}
+  }
+
+  if (isTauriEnvironment()) {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      if (options?.gameSlug) {
+        let targetMapSlug = options.mapSlug || "default";
+        if (!options.mapSlug || options.mapSlug === "default") {
+          const lastMap = getLastOpenedMapSlug(options.gameSlug);
+          if (lastMap) targetMapSlug = lastMap;
+        }
+        await invoke("set_active_overlay_game", {
+          gameSlug: options.gameSlug,
+          mapSlug: targetMapSlug,
+          gameTitle: options.gameTitle || "",
+        }).catch(() => {});
+      }
+      await invoke("toggle_map_overlay_cmd");
+      setTimeout(() => {
+        invoke("force_overlay_focus", { label: "map-overlay" }).catch(() => {});
+      }, 50);
+      return true;
+    } catch (err) {
+      console.warn("Tauri toggle_map_overlay_cmd error:", err);
+    }
+  }
+
+  // Web / Browser Fallback
+  let resolvedGameSlug = options?.gameSlug;
+  let resolvedMapSlug = options?.mapSlug;
+  let resolvedGameTitle = options?.gameTitle;
+
+  if (!resolvedGameSlug && typeof window !== "undefined") {
+    try {
+      const activeSlug = localStorage.getItem("fitrepacks_active_game_slug");
+      const activeTitle = localStorage.getItem("fitrepacks_active_game_title");
+      if (activeSlug || activeTitle) {
+        const { findMatchingMap } = await import("./gameMaps");
+        const matched = findMatchingMap(activeTitle || undefined, activeSlug || undefined);
+        if (matched) {
+          resolvedGameSlug = matched.game_slug || matched.slug;
+          resolvedMapSlug = matched.map_slug || "default";
+          resolvedGameTitle = matched.game_title || matched.title;
+        } else if (activeSlug) {
+          resolvedGameSlug = activeSlug;
+          resolvedMapSlug = "default";
+          resolvedGameTitle = activeTitle || activeSlug;
+        }
+      }
+    } catch (_) {}
+  }
+
+  if (!resolvedGameSlug) {
+    resolvedGameSlug = "mafia-2";
+    resolvedMapSlug = "empire-bay";
+    resolvedGameTitle = "Mafia II";
+  }
+
+  return await openMapOverlay({
+    gameSlug: resolvedGameSlug,
+    mapSlug: resolvedMapSlug || "default",
+    gameTitle: resolvedGameTitle,
+    minZoom: options?.minZoom,
+    maxZoom: options?.maxZoom,
+  });
+}
+

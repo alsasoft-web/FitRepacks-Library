@@ -21,7 +21,54 @@ export type SortOption =
   | "added-desc"
   | "recent"
   | "added-asc"
-  | "rating-desc";
+  | "rating-desc"
+  | "size-desc"
+  | "size-asc";
+
+/**
+ * Helper to parse file size string (e.g. "45.2 GB", "850 MB", "12.4 GB ~ 28.1 GB") to MB
+ */
+export function parseSizeToMB(sizeStr?: string | null): number {
+  if (!sizeStr) return 0;
+  const matches = Array.from(
+    sizeStr.matchAll(/([\d.,]+)\s*(TB|GB|MB|KB|B)\b/gi)
+  );
+  if (matches.length > 0) {
+    let maxMB = 0;
+    for (const m of matches) {
+      const cleaned = m[1].trim();
+      let num = NaN;
+      if (cleaned.includes(",") && cleaned.includes(".")) {
+        if (cleaned.lastIndexOf(",") > cleaned.lastIndexOf(".")) {
+          num = parseFloat(cleaned.replace(/\./g, "").replace(",", "."));
+        } else {
+          num = parseFloat(cleaned.replace(/,/g, ""));
+        }
+      } else if (cleaned.includes(",")) {
+        const parts = cleaned.split(",");
+        if (parts.length === 2 && parts[1].length !== 3) {
+          num = parseFloat(cleaned.replace(",", "."));
+        } else {
+          num = parseFloat(cleaned.replace(/,/g, ""));
+        }
+      } else {
+        num = parseFloat(cleaned);
+      }
+      if (isNaN(num)) continue;
+      const unit = m[2].toUpperCase();
+      let mb = num;
+      if (unit === "TB") mb = num * 1024 * 1024;
+      else if (unit === "GB") mb = num * 1024;
+      else if (unit === "MB") mb = num;
+      else if (unit === "KB") mb = num / 1024;
+      else if (unit === "B") mb = num / (1024 * 1024);
+      if (mb > maxMB) maxMB = mb;
+    }
+    return maxMB;
+  }
+  const numOnly = parseFloat(sizeStr.replace(/,/g, ""));
+  return isNaN(numOnly) ? 0 : numOnly;
+}
 
 export interface IgdbGameMetadata {
   id: number;
@@ -101,6 +148,8 @@ export interface Game {
   mirrorGroups?: RepackMirrorGroup[];
   gameUpdates?: RepackUpdateLink[];
   repackSize?: string;
+  fitgirlSize?: string;
+  steamripSize?: string;
   repackUrl?: string;
   linkedFitgirlUrl?: string;
   linkedSteamripUrl?: string;

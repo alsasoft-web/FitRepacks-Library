@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import {
   Modal,
   Box,
@@ -30,11 +30,13 @@ import {
   Layers,
   Map as MapIcon,
   PictureInPicture2,
+  Check,
 } from "lucide-react";
 import { GameMapInfo, useAllGameMaps } from "../../lib/gameMaps";
 import { MapViewerModal } from "./MapViewerModal";
 import { openInBrowser } from "../../lib/openUrl";
 import { openMapOverlay } from "../../lib/mapOverlay";
+import { listOfflineMaps, checkOfflineMapUpdateAvailable } from "../../lib/offlineMapStore";
 
 interface MapsBrowserModalProps {
   opened: boolean;
@@ -57,11 +59,15 @@ interface GameGroupItem {
 interface GameMapGridCardProps {
   group: GameGroupItem;
   onOpenMap: (gameSlug: string, mapSlug: string, gameTitle: string) => void;
+  downloadedMaps?: string[];
+  updatedMaps?: Set<string>;
 }
 
 const GameMapGridCard = React.memo(function GameMapGridCard({
   group,
   onOpenMap,
+  downloadedMaps,
+  updatedMaps,
 }: GameMapGridCardProps) {
   const { gameTitle, gameSlug, maps, primaryMap, totalLocations } = group;
   const primaryMSlug = primaryMap.map_slug || "default";
@@ -91,6 +97,22 @@ const GameMapGridCard = React.memo(function GameMapGridCard({
   }, [imgIdx, imageCandidates.length]);
 
   const hasMultipleMaps = maps.length > 1;
+
+  const isAnyMapUpdated = useMemo(() => {
+    if (!updatedMaps) return false;
+    return maps.some((m) => {
+      const s = m.map_slug || "default";
+      return updatedMaps.has(`${gameSlug}_${s}`);
+    });
+  }, [maps, gameSlug, updatedMaps]);
+
+  const isAnyMapDownloaded = useMemo(() => {
+    if (!downloadedMaps) return false;
+    return maps.some((m) => {
+      const s = m.map_slug || "default";
+      return downloadedMaps.includes(`${gameSlug}_${s}`);
+    });
+  }, [maps, gameSlug, downloadedMaps]);
 
   return (
     <Card
@@ -191,6 +213,41 @@ const GameMapGridCard = React.memo(function GameMapGridCard({
             {maps.length} Maps
           </Badge>
         )}
+
+        {/* Offline / Update Status Badge */}
+        {isAnyMapUpdated ? (
+          <Badge
+            size="xs"
+            variant="filled"
+            leftSection={<RefreshCw size={10} />}
+            style={{
+              position: "absolute",
+              bottom: 8,
+              left: 8,
+              backgroundColor: "#d97706",
+              color: "#ffffff",
+              fontWeight: 700,
+            }}
+          >
+            UPDATE AVAILABLE
+          </Badge>
+        ) : isAnyMapDownloaded ? (
+          <Badge
+            size="xs"
+            variant="filled"
+            leftSection={<Check size={10} />}
+            style={{
+              position: "absolute",
+              bottom: 8,
+              left: 8,
+              backgroundColor: "rgba(22, 101, 52, 0.9)",
+              color: "#4ade80",
+              fontWeight: 700,
+            }}
+          >
+            OFFLINE READY
+          </Badge>
+        ) : null}
       </Box>
 
       {/* Card Content */}
@@ -234,16 +291,29 @@ const GameMapGridCard = React.memo(function GameMapGridCard({
                 {maps.map((m) => {
                   const mSlug = m.map_slug || "default";
                   const cleanName = m.title.replace(new RegExp(`^${gameTitle}\\s*-\\s*`, "i"), "");
+                  const isDownloaded = downloadedMaps?.includes(`${gameSlug}_${mSlug}`);
+                  const hasUpdate = updatedMaps?.has(`${gameSlug}_${mSlug}`);
                   return (
                     <Menu.Item
                       key={mSlug}
                       onClick={() => onOpenMap(gameSlug, mSlug, gameTitle)}
                       rightSection={
-                        m.locations_count ? (
-                          <Text size="xs" c="dimmed">
-                            {m.locations_count}
-                          </Text>
-                        ) : null
+                        <Group gap={6}>
+                          {hasUpdate ? (
+                            <Badge size="xs" color="yellow" variant="filled" style={{ fontSize: 9 }}>
+                              UPDATE
+                            </Badge>
+                          ) : isDownloaded ? (
+                            <Badge size="xs" color="green" variant="light" style={{ fontSize: 9 }}>
+                              OFFLINE
+                            </Badge>
+                          ) : null}
+                          {m.locations_count ? (
+                            <Text size="xs" c="dimmed">
+                              {m.locations_count}
+                            </Text>
+                          ) : null}
+                        </Group>
                       }
                       style={{ color: "#e2e8f0", fontSize: 12, fontWeight: 600 }}
                     >
@@ -315,6 +385,39 @@ export function MapsBrowserModal({ opened, onClose, onSelectMap }: MapsBrowserMo
     mapSlug: string;
     gameTitle: string;
   } | null>(null);
+
+  const [downloadedMaps, setDownloadedMaps] = useState<string[]>([]);
+  const [updatedMaps, setUpdatedMaps] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!opened) return;
+    let isMounted = true;
+    listOfflineMaps().then(async (list) => {
+      if (!isMounted) return;
+      setDownloadedMaps(list);
+
+      const updates = new Set<string>();
+      for (const item of list) {
+        const idx = item.indexOf("_");
+        if (idx > 0) {
+          const gSlug = item.substring(0, idx);
+          const mSlug = item.substring(idx + 1);
+          try {
+            const res = await checkOfflineMapUpdateAvailable(gSlug, mSlug);
+            if (res.hasUpdate) {
+              updates.add(item);
+            }
+          } catch (_) {}
+        }
+      }
+      if (isMounted) {
+        setUpdatedMaps(updates);
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [opened]);
 
   // Group maps by game
   const gameGroups = useMemo(() => {
@@ -502,7 +605,13 @@ export function MapsBrowserModal({ opened, onClose, onSelectMap }: MapsBrowserMo
           ) : (
             <SimpleGrid cols={{ base: 1, sm: 2, md: 3, lg: 4 }} spacing="md">
               {filteredGroups.map((group) => (
-                <GameMapGridCard key={group.gameSlug} group={group} onOpenMap={handleOpenMap} />
+                <GameMapGridCard
+                  key={group.gameSlug}
+                  group={group}
+                  onOpenMap={handleOpenMap}
+                  downloadedMaps={downloadedMaps}
+                  updatedMaps={updatedMaps}
+                />
               ))}
             </SimpleGrid>
           )}
