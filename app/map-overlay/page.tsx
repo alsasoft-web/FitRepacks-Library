@@ -156,19 +156,48 @@ function MapOverlayContent() {
             info,
           );
           if (info?.game_slug) {
-            const gSlug = info.game_slug.includes("--")
+            const rawSlug = info.game_slug.includes("--")
               ? info.game_slug.split("--")[0]
               : info.game_slug;
-            const savedMap = getLastOpenedMapSlug(gSlug);
-            setGameSlug((prev) => prev || gSlug);
-            setActiveMapSlug((prev) =>
-              prev === "default" || !prev
-                ? info.map_slug && info.map_slug !== "default"
+            const matched = findMatchingMap(info.game_title, rawSlug);
+            if (matched) {
+              const gSlug =
+                matched.game_slug ||
+                (matched.slug.includes("--")
+                  ? matched.slug.split("--")[0]
+                  : matched.slug);
+              const savedMap = getLastOpenedMapSlug(gSlug);
+              setGameSlug(gSlug);
+              setActiveMapSlug(
+                info.map_slug && info.map_slug !== "default"
                   ? info.map_slug
-                  : savedMap || "default"
-                : prev,
-            );
-            setGameTitle((prev) => prev || info.game_title);
+                  : savedMap || matched.map_slug || "default",
+              );
+              setGameTitle(matched.game_title || info.game_title || gSlug);
+            } else {
+              const lastValid =
+                typeof window !== "undefined"
+                  ? localStorage.getItem("fitrepacks_last_valid_map_game")
+                  : null;
+              const fallbackMatch = lastValid
+                ? findMatchingMap(undefined, lastValid)
+                : null;
+              const target =
+                fallbackMatch ||
+                findMatchingMap(undefined, "witcher-3") ||
+                STATIC_POPULAR_MAPS[0];
+              if (target) {
+                const gSlug =
+                  target.game_slug ||
+                  (target.slug.includes("--")
+                    ? target.slug.split("--")[0]
+                    : target.slug);
+                const savedMap = getLastOpenedMapSlug(gSlug);
+                setGameSlug(gSlug);
+                setActiveMapSlug(savedMap || target.map_slug || "default");
+                setGameTitle(target.game_title || target.title);
+              }
+            }
           }
         } catch (err) {
           console.error("[MapOverlayPage] get_active_overlay_game error:", err);
@@ -189,13 +218,26 @@ function MapOverlayContent() {
           const clean = storedSlug.includes("--")
             ? storedSlug.split("--")[0]
             : storedSlug;
-          const savedMap = getLastOpenedMapSlug(clean);
-          setGameSlug((prev) => prev || clean);
-          setGameTitle((prev) => prev || storedTitle || storedSlug);
-          if (savedMap) {
-            setActiveMapSlug((prev) =>
-              prev === "default" || !prev ? savedMap : prev,
-            );
+          const matched = findMatchingMap(storedTitle || undefined, clean);
+          if (matched) {
+            const gSlug = matched.game_slug || (matched.slug.includes("--") ? matched.slug.split("--")[0] : matched.slug);
+            const savedMap = getLastOpenedMapSlug(gSlug);
+            setGameSlug(gSlug);
+            setGameTitle(matched.game_title || storedTitle || gSlug);
+            if (savedMap) {
+              setActiveMapSlug((prev) => (prev === "default" || !prev ? savedMap : prev));
+            }
+          } else {
+            const lastValid = localStorage.getItem("fitrepacks_last_valid_map_game");
+            const fallbackMatch = lastValid ? findMatchingMap(undefined, lastValid) : null;
+            const target = fallbackMatch || findMatchingMap(undefined, "witcher-3") || STATIC_POPULAR_MAPS[0];
+            if (target) {
+              const gSlug = target.game_slug || target.slug;
+              const savedMap = getLastOpenedMapSlug(gSlug);
+              setGameSlug(gSlug);
+              setActiveMapSlug(savedMap || target.map_slug || "default");
+              setGameTitle(target.game_title || target.title);
+            }
           }
         }
       } catch (_) {}
@@ -332,6 +374,7 @@ function MapOverlayContent() {
         try {
           localStorage.setItem("fitrepacks_active_game_slug", clean);
           localStorage.setItem("fitrepacks_active_game_title", newGameTitle);
+          localStorage.setItem("fitrepacks_last_valid_map_game", clean);
         } catch (_) {}
       }
 
@@ -368,6 +411,8 @@ function MapOverlayContent() {
     },
     [cleanGameSlug, gameTitle],
   );
+
+  const activeFetchIdRef = useRef(0);
 
   // Overlay Window State
   const [isPinned, setIsPinned] = useState(true);
@@ -703,7 +748,7 @@ function MapOverlayContent() {
       return;
     }
 
-    let isMounted = true;
+    const fetchId = ++activeFetchIdRef.current;
 
     async function fetchOnlineMapData() {
       const cleanGameSlug = resolveCanonicalMapGenieSlug(gameSlug, gameTitle);
@@ -711,6 +756,19 @@ function MapOverlayContent() {
       let hadOfflineData = false;
       let offlineCached: any = null;
       let discoveredItems: MapItem[] = [];
+
+      // If loadedMapData already has this exact game and map with locations, don't re-show loader
+      if (
+        loadedMapData &&
+        loadedMapData.game?.slug?.toLowerCase() === cleanGameSlug.toLowerCase() &&
+        (loadedMapData.map?.slug?.toLowerCase() === resolvedMapSlug.toLowerCase() ||
+          resolvedMapSlug === "default") &&
+        Array.isArray(loadedMapData.locations) &&
+        loadedMapData.locations.length > 0
+      ) {
+        setIsLoading(false);
+        return;
+      }
 
       try {
         offlineCached = await getOfflineMapData(cleanGameSlug, resolvedMapSlug);
@@ -720,7 +778,7 @@ function MapOverlayContent() {
             (await getOfflineMapData(cleanGameSlug, "world")) ||
             (await getOfflineMapData(cleanGameSlug, "empire-bay"));
         }
-        if (offlineCached && isMounted) {
+        if (offlineCached && fetchId === activeFetchIdRef.current) {
           const hasLocations =
             Array.isArray(offlineCached.locations) &&
             offlineCached.locations.length > 0;
@@ -728,19 +786,18 @@ function MapOverlayContent() {
           setLoadedMapData(offlineCached);
           if (hasLocations) {
             setIsLoading(false);
-          } else {
-            setIsLoading(true);
           }
         }
       } catch (_) {}
 
-      if (!hadOfflineData && isMounted) {
+      if (!hadOfflineData && fetchId === activeFetchIdRef.current) {
         setIsLoading(true);
       }
 
       try {
-        const allMaps = await loadMapsFromMapGenie();
-        const matched = allMaps.filter(
+        // 1. Instant check against static maps & memory cache (0ms, no network delay)
+        const staticOrCached = STATIC_POPULAR_MAPS || [];
+        let matched = staticOrCached.filter(
           (m) =>
             m.game_slug?.toLowerCase() === cleanGameSlug.toLowerCase() ||
             m.slug?.toLowerCase() === cleanGameSlug.toLowerCase() ||
@@ -749,9 +806,27 @@ function MapOverlayContent() {
               .startsWith(`${cleanGameSlug.toLowerCase()}--`),
         );
 
+        // If not in static maps, query MapGenie API
+        if (matched.length === 0) {
+          try {
+            const allMaps = await loadMapsFromMapGenie();
+            matched = allMaps.filter(
+              (m) =>
+                m.game_slug?.toLowerCase() === cleanGameSlug.toLowerCase() ||
+                m.slug?.toLowerCase() === cleanGameSlug.toLowerCase() ||
+                m.slug
+                  ?.toLowerCase()
+                  .startsWith(`${cleanGameSlug.toLowerCase()}--`),
+            );
+          } catch (_) {}
+        } else {
+          // If we already have static maps, refresh catalog in background without blocking
+          loadMapsFromMapGenie().catch(() => {});
+        }
+
         const gameData = getMapGenieGameBySlug(cleanGameSlug);
 
-        if (matched.length > 0 && isMounted) {
+        if (matched.length > 0 && fetchId === activeFetchIdRef.current) {
           const mapItemsMap = new Map<string, MapItem>();
           matched.forEach((item) => {
             const s =
@@ -814,6 +889,11 @@ function MapOverlayContent() {
         const targetMapSlug = resolvedMapSlug;
         if (cleanGameSlug && targetMapSlug && targetMapSlug !== "default") {
           saveLastOpenedMapSlug(cleanGameSlug, targetMapSlug);
+          if (typeof window !== "undefined") {
+            try {
+              localStorage.setItem("fitrepacks_last_valid_map_game", cleanGameSlug);
+            } catch (_) {}
+          }
         }
         const currentMapItem =
           matched.find(
@@ -840,11 +920,12 @@ function MapOverlayContent() {
         let rawData: any = null;
         let mapHtml = "";
         if (targetMapId) {
-          [rawData, mapHtml] = await Promise.all([
-            fetchRawMapGenieMapFull(targetMapId).catch(() => null),
-            fetchRawMapGenieHtml(cleanGameSlug, targetMapSlug).catch(() => ""),
-          ]);
+          const mapPromise = fetchRawMapGenieMapFull(targetMapId).catch(() => null);
+          const htmlPromise = fetchRawMapGenieHtml(cleanGameSlug, targetMapSlug).catch(() => "");
+          [rawData, mapHtml] = await Promise.all([mapPromise, htmlPromise]);
         }
+
+        if (fetchId !== activeFetchIdRef.current) return;
 
         let htmlMapData: any = null;
         if (mapHtml) {
@@ -871,7 +952,7 @@ function MapOverlayContent() {
           );
         }
 
-        if (!isMounted || !rawData) return;
+        if (fetchId !== activeFetchIdRef.current || !rawData) return;
 
         let extractedSpritePositions: Record<string, any> = {};
         let extractedMarkerUrl = "";
@@ -893,8 +974,8 @@ function MapOverlayContent() {
           }
 
           const urlMatch =
-            mapHtml.match(/const\s+MARKER_IMAGES_URL\s*=\s*['"]([^'"]+)['"]/) ||
-            mapHtml.match(/MARKER_IMAGES_URL\s*=\s*['"]([^'"]+)['"]/);
+            mapHtml.match(/const\\s+MARKER_IMAGES_URL\\s*=\\s*['"]([^'"]+)['"]/) ||
+            mapHtml.match(/MARKER_IMAGES_URL\\s*=\\s*['"]([^'"]+)['"]/);
           if (urlMatch) {
             extractedMarkerUrl = urlMatch[1];
           }
@@ -989,7 +1070,7 @@ function MapOverlayContent() {
           ? primaryTileSet.pattern.startsWith("http")
             ? primaryTileSet.pattern
             : `https://tiles.mapgenie.io/games/${primaryTileSet.pattern}`
-          : undefined;
+          : `https://tiles.mapgenie.io/games/${cleanGameSlug}/${targetMapSlug}/default-v1/{z}/{y}/{x}.jpg`;
 
         const resolvedGame =
           rawData.game || htmlMapData?.game || gameData || {};
@@ -1143,25 +1224,26 @@ function MapOverlayContent() {
           ).catch(() => {});
         }
 
-        if (isMounted) {
+        if (fetchId === activeFetchIdRef.current) {
           setLoadedMapData(finalMapData);
           setIsLoading(false);
+          setError(null);
         }
       } catch (err: any) {
-        if (isMounted) {
+        if (fetchId === activeFetchIdRef.current) {
           if (!hadOfflineData) {
             setError(err?.message || "Failed to load map data.");
           }
+          setIsLoading(false);
+        }
+      } finally {
+        if (fetchId === activeFetchIdRef.current) {
           setIsLoading(false);
         }
       }
     }
 
     fetchOnlineMapData();
-
-    return () => {
-      isMounted = false;
-    };
   }, [gameSlug, activeMapSlug, gameTitle]);
 
   const activeStorageKey = gameSlug

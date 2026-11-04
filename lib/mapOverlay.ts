@@ -150,19 +150,28 @@ export async function toggleMapOverlay(
           resolvedGameSlug = matched.game_slug || matched.slug;
           resolvedMapSlug = matched.map_slug || "default";
           resolvedGameTitle = matched.game_title || matched.title;
-        } else if (activeSlug) {
-          resolvedGameSlug = activeSlug;
-          resolvedMapSlug = "default";
-          resolvedGameTitle = activeTitle || activeSlug;
+        }
+      }
+
+      if (!resolvedGameSlug) {
+        const lastValid = localStorage.getItem("fitrepacks_last_valid_map_game");
+        if (lastValid) {
+          const { findMatchingMap } = await import("./gameMaps");
+          const matched = findMatchingMap(undefined, lastValid);
+          if (matched) {
+            resolvedGameSlug = matched.game_slug || matched.slug;
+            resolvedMapSlug = matched.map_slug || "default";
+            resolvedGameTitle = matched.game_title || matched.title;
+          }
         }
       }
     } catch (_) {}
   }
 
   if (!resolvedGameSlug) {
-    resolvedGameSlug = "mafia-2";
-    resolvedMapSlug = "empire-bay";
-    resolvedGameTitle = "Mafia II";
+    resolvedGameSlug = "witcher-3";
+    resolvedMapSlug = "velen-novigrad";
+    resolvedGameTitle = "The Witcher 3: Wild Hunt";
   }
 
   return await openMapOverlay({

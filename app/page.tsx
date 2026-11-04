@@ -800,6 +800,24 @@ export default function Home() {
 
     syncLibraryGamesWithLatestRepacks();
 
+    // Ensure Windows startup registry is verified and synchronized on app launch
+    if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+      import("../lib/db")
+        .then(({ getAppSetting, setAutostartStatus, getAutostartStatus }) => {
+          getAppSetting("autostart_enabled")
+            .then(async (setting) => {
+              if (setting === "true") {
+                const isCurrentlyEnabled = await getAutostartStatus().catch(() => false);
+                if (!isCurrentlyEnabled) {
+                  await setAutostartStatus(true).catch(() => {});
+                }
+              }
+            })
+            .catch(() => {});
+        })
+        .catch(() => {});
+    }
+
     return () => {
       if (cleanupFn) {
         cleanupFn();
@@ -941,6 +959,32 @@ export default function Home() {
       }
 
       setActiveGame(game);
+
+      // Update active map overlay target if game has an interactive map
+      try {
+        const { findMatchingMap, getLastOpenedMapSlug } = await import("../lib/gameMaps");
+        const matched = findMatchingMap(game.title, game.id);
+        if (matched) {
+          const gSlug = matched.game_slug || (matched.slug.includes("--") ? matched.slug.split("--")[0] : matched.slug);
+          const gTitle = matched.game_title || game.title;
+          const mLast = getLastOpenedMapSlug(gSlug) || matched.map_slug || "default";
+          if (typeof window !== "undefined") {
+            localStorage.setItem("fitrepacks_active_game_slug", gSlug);
+            localStorage.setItem("fitrepacks_active_game_title", gTitle);
+            localStorage.setItem("fitrepacks_last_valid_map_game", gSlug);
+          }
+          if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+            invoke("set_active_overlay_game", {
+              gameSlug: gSlug,
+              mapSlug: mLast,
+              gameTitle: gTitle,
+            }).catch(() => {});
+          }
+        } else if (typeof window !== "undefined") {
+          localStorage.removeItem("fitrepacks_active_game_slug");
+          localStorage.removeItem("fitrepacks_active_game_title");
+        }
+      } catch (_) {}
 
       // Update lastPlayed timestamp immediately on launch so it reflects in recent lists
       const now = new Date().toISOString();

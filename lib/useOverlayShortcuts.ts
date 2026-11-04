@@ -25,18 +25,29 @@ export function useOverlayShortcuts(options: UseOverlayShortcutsOptions = {}) {
   useEffect(() => {
     activeGameRef.current = activeGame;
     if (activeGame && typeof window !== "undefined") {
-      try {
-        localStorage.setItem("fitrepacks_active_game_slug", activeGame.id || activeGame.title);
-        localStorage.setItem("fitrepacks_active_game_title", activeGame.title);
-      } catch (_) {}
-      if (Boolean((window as any).__TAURI_INTERNALS__)) {
-        import("@tauri-apps/api/core").then(({ invoke }) => {
-          invoke("set_active_overlay_game", {
-            gameSlug: activeGame.id || activeGame.title,
-            mapSlug: "default",
-            gameTitle: activeGame.title,
-          }).catch(() => {});
-        });
+      const match = findMatchingMap(activeGame.title, activeGame.id);
+      if (match) {
+        const gSlug = match.game_slug || (match.slug.includes("--") ? match.slug.split("--")[0] : match.slug);
+        const gTitle = match.game_title || activeGame.title;
+        try {
+          localStorage.setItem("fitrepacks_active_game_slug", gSlug);
+          localStorage.setItem("fitrepacks_active_game_title", gTitle);
+          localStorage.setItem("fitrepacks_last_valid_map_game", gSlug);
+        } catch (_) {}
+        if (Boolean((window as any).__TAURI_INTERNALS__)) {
+          import("@tauri-apps/api/core").then(({ invoke }) => {
+            invoke("set_active_overlay_game", {
+              gameSlug: gSlug,
+              mapSlug: match.map_slug || "default",
+              gameTitle: gTitle,
+            }).catch(() => {});
+          });
+        }
+      } else {
+        try {
+          localStorage.removeItem("fitrepacks_active_game_slug");
+          localStorage.removeItem("fitrepacks_active_game_title");
+        } catch (_) {}
       }
     }
   }, [activeGame]);
@@ -102,10 +113,6 @@ export function useOverlayShortcuts(options: UseOverlayShortcutsOptions = {}) {
         targetGameSlug = match.game_slug || match.slug;
         targetMapSlug = match.map_slug || "default";
         targetGameTitle = match.game_title || match.title;
-      } else {
-        targetGameSlug = currentActive.id || currentActive.title;
-        targetMapSlug = "default";
-        targetGameTitle = currentActive.title;
       }
     }
 

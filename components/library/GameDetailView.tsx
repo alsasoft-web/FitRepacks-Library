@@ -181,11 +181,13 @@ interface GameDetailViewProps {
 /** Collapsible row for a single hoster in the direct downloads section */
 const DirectHosterAccordion: React.FC<{
   hoster: string;
-  links: { name: string; url: string; groupName: string }[];
+  links: { name: string; url: string; groupName: string; sourceUrl?: string }[];
   isUpdate?: boolean;
-}> = ({ hoster, links, isUpdate = false }) => {
+  sourcePageUrl?: string;
+}> = ({ hoster, links, isUpdate = false, sourcePageUrl }) => {
   const [open, setOpen] = useState(false);
   const [copiedLink, setCopiedLink] = useState<string | null>(null);
+  const isMegaDb = hoster.toUpperCase() === "MEGADB" || links.some((l) => l.url.includes("megadb.net"));
 
   const handleCopy = (url: string) => {
     navigator.clipboard.writeText(url);
@@ -224,14 +226,16 @@ const DirectHosterAccordion: React.FC<{
             <ThemeIcon
               size="sm"
               variant="light"
-              color={isUpdate ? "cyan" : "blue"}
+              color={isMegaDb ? "teal" : isUpdate ? "cyan" : "blue"}
             >
               {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
             </ThemeIcon>
             <Globe
               size={15}
               color={
-                isUpdate
+                isMegaDb
+                  ? "var(--mantine-color-teal-4)"
+                  : isUpdate
                   ? "var(--mantine-color-cyan-4)"
                   : "var(--mantine-color-blue-4)"
               }
@@ -239,6 +243,11 @@ const DirectHosterAccordion: React.FC<{
             <Text size="xs" fw={700} ff="monospace">
               {hoster.toUpperCase()}
             </Text>
+            {isMegaDb && (
+              <Badge size="xs" color="teal" variant="light">
+                ANTI-HOTLINK
+              </Badge>
+            )}
             {isUpdate && (
               <Badge
                 size="xs"
@@ -250,7 +259,7 @@ const DirectHosterAccordion: React.FC<{
               </Badge>
             )}
           </Group>
-          <Badge size="xs" variant="light" color={isUpdate ? "cyan" : "gray"}>
+          <Badge size="xs" variant="light" color={isMegaDb ? "teal" : isUpdate ? "cyan" : "gray"}>
             {links.length} {links.length === 1 ? "Link" : "Parts"}
           </Badge>
         </Group>
@@ -259,8 +268,29 @@ const DirectHosterAccordion: React.FC<{
       <Collapse expanded={open}>
         <Stack gap={6} p="sm" pt={0}>
           <Divider my={4} />
+          {isMegaDb && (
+            <Paper
+              p="xs"
+              radius="md"
+              bg="rgba(14, 165, 233, 0.08)"
+              style={{ border: "1px solid rgba(14, 165, 233, 0.2)" }}
+            >
+              <Group gap="xs" wrap="nowrap" align="flex-start">
+                <Info size={14} color="var(--mantine-color-blue-4)" style={{ flexShrink: 0, marginTop: 2 }} />
+                <Text size="xs" c="dimmed">
+                  MegaDB requires opening from the official SteamRIP post to prevent hotlinking errors (&ldquo;Referrer not allowed&rdquo;). The download button opens the game page directly.
+                </Text>
+              </Group>
+            </Paper>
+          )}
           <Stack gap="xs">
             {links.map((link, idx) => {
+              const isMegaDbLink = link.url.includes("megadb.net");
+              const targetUrl =
+                isMegaDbLink && (link.sourceUrl || sourcePageUrl)
+                  ? (link.sourceUrl || sourcePageUrl)
+                  : link.url;
+
               const displayName =
                 link.name &&
                 link.name.trim() &&
@@ -283,7 +313,9 @@ const DirectHosterAccordion: React.FC<{
                       <DownloadCloud
                         size={15}
                         color={
-                          isUpdate
+                          isMegaDbLink
+                            ? "var(--mantine-color-teal-4)"
+                            : isUpdate
                             ? "var(--mantine-color-cyan-4)"
                             : "var(--mantine-color-blue-4)"
                         }
@@ -297,16 +329,16 @@ const DirectHosterAccordion: React.FC<{
                       <Button
                         size="xs"
                         variant="light"
-                        color={isUpdate ? "cyan" : "blue"}
+                        color={isMegaDbLink ? "teal" : isUpdate ? "cyan" : "blue"}
                         rightSection={<ExternalLink size={12} />}
-                        onClick={() => openInBrowser(link.url)}
+                        onClick={() => openInBrowser(targetUrl)}
                         radius="md"
                       >
-                        Download
+                        {isMegaDbLink ? "Download (via SteamRIP)" : "Download"}
                       </Button>
                       <Tooltip
                         label={
-                          copiedLink === link.url ? "Copied!" : "Copy Link"
+                          copiedLink === link.url ? "Copied direct link!" : "Copy Link"
                         }
                         withArrow
                       >
@@ -315,6 +347,7 @@ const DirectHosterAccordion: React.FC<{
                           variant="subtle"
                           color={copiedLink === link.url ? "teal" : "gray"}
                           onClick={() => handleCopy(link.url)}
+                          aria-label="Copy link"
                         >
                           {copiedLink === link.url ? (
                             <Check size={14} />
@@ -323,6 +356,19 @@ const DirectHosterAccordion: React.FC<{
                           )}
                         </ActionIcon>
                       </Tooltip>
+                      {isMegaDbLink && (
+                        <Tooltip label="Open direct MegaDB link (Requires referer modifier extension in browser)" withArrow>
+                          <ActionIcon
+                            size="input-xs"
+                            variant="subtle"
+                            color="gray"
+                            onClick={() => openInBrowser(link.url)}
+                            aria-label="Open direct MegaDB link"
+                          >
+                            <ExternalLink size={14} />
+                          </ActionIcon>
+                        </Tooltip>
+                      )}
                     </Group>
                   </Group>
                 </Paper>
@@ -2392,6 +2438,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                                 hoster={hoster}
                                 links={links}
                                 isUpdate={hasSteamripUpdate}
+                                sourcePageUrl={currentGame.linkedSteamripUrl}
                               />
                             ))}
                           </Stack>

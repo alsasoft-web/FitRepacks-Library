@@ -370,11 +370,7 @@ fn launch_game_exe(
     runner_args: Option<Vec<String>>,
     env_vars: Option<std::collections::HashMap<String, String>>,
 ) -> Result<String, String> {
-    if let Some(ref gid) = game_id {
-        if let Ok(mut lock) = ACTIVE_GAME_OVERLAY_INFO.lock() {
-            *lock = Some((gid.clone(), "default".to_string(), String::new()));
-        }
-    }
+    // Note: Active overlay game is set selectively from frontend only when game actually has a map
 
     let mut cmd = if let Some(ref runner) = runner_command {
         if !runner.trim().is_empty() {
@@ -1795,7 +1791,15 @@ fn get_autostart_status() -> Result<bool, String> {
         use std::process::Command;
         use std::os::windows::process::CommandExt;
 
-        let ps_cmd = r#"$p = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'; (Get-ItemProperty -Path $p -Name 'FitRepacksLibrary' -ErrorAction SilentlyContinue) -ne $null"#;
+        let ps_cmd = r#"
+            $run = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run';
+            $approved = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run';
+            $item = Get-ItemProperty -Path $run -Name 'FitRepacksLibrary' -ErrorAction SilentlyContinue;
+            if ($null -eq $item) { Write-Output 'false'; exit; }
+            $appr = (Get-ItemProperty -Path $approved -Name 'FitRepacksLibrary' -ErrorAction SilentlyContinue).FitRepacksLibrary;
+            if ($null -ne $appr -and ($appr[0] -band 1) -eq 1) { Write-Output 'false'; exit; }
+            Write-Output 'true'
+        "#;
         let mut cmd = Command::new("powershell");
         cmd.args(["-NoProfile", "-Command", ps_cmd]);
         cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
@@ -1818,15 +1822,39 @@ fn set_autostart(enabled: bool) -> Result<bool, String> {
         use std::os::windows::process::CommandExt;
 
         let current_exe = std::env::current_exe().map_err(|e| format!("Failed to get current executable path: {}", e))?;
-        let exe_str = current_exe.to_string_lossy().replace("'", "''");
+        let exe_path = if current_exe.to_string_lossy().contains("target") {
+            if let Some(local_app_data) = dirs::data_local_dir() {
+                let installed = local_app_data.join("FitRepacks Library").join("app.exe");
+                if installed.exists() {
+                    installed
+                } else {
+                    current_exe
+                }
+            } else {
+                current_exe
+            }
+        } else {
+            current_exe
+        };
+        let exe_str = exe_path.to_string_lossy().replace("'", "''");
 
         let ps_cmd = if enabled {
             format!(
-                r#"$p = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'; Set-ItemProperty -Path $p -Name 'FitRepacksLibrary' -Value '"{}"'"#,
+                r#"
+                $rk = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Software\Microsoft\Windows\CurrentVersion\Run', $true);
+                if ($rk) {{ $rk.SetValue('FitRepacksLibrary', '"{}"'); $rk.Close(); }}
+                $ak = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run', $true);
+                if ($ak) {{ try {{ $ak.DeleteValue('FitRepacksLibrary', $false); }} catch {{}}; $ak.Close(); }}
+                "#,
                 exe_str
             )
         } else {
-            r#"$p = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'; Remove-ItemProperty -Path $p -Name 'FitRepacksLibrary' -ErrorAction SilentlyContinue"#.to_string()
+            r#"
+            $rk = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Software\Microsoft\Windows\CurrentVersion\Run', $true);
+            if ($rk) { try { $rk.DeleteValue('FitRepacksLibrary', $false); } catch {}; $rk.Close(); }
+            $ak = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run', $true);
+            if ($ak) { try { $ak.DeleteValue('FitRepacksLibrary', $false); } catch {}; $ak.Close(); }
+            "#.to_string()
         };
 
         let mut cmd = Command::new("powershell");
@@ -2406,7 +2434,7 @@ fn handle_tray_menu_event(app: &tauri::AppHandle, id_str: &str) {
 async fn fetch_mapgenie_games() -> Result<String, String> {
     tokio::task::spawn_blocking(|| {
         let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(35))
+            .timeout(std::time::Duration::from_secs(12))
             .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
             .gzip(true)
             .brotli(true)
@@ -2437,7 +2465,7 @@ async fn fetch_mapgenie_games() -> Result<String, String> {
 async fn fetch_mapgenie_map(map_id: u64) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
         let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(35))
+            .timeout(std::time::Duration::from_secs(12))
             .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
             .gzip(true)
             .brotli(true)
@@ -2480,7 +2508,7 @@ async fn fetch_mapgenie_map(map_id: u64) -> Result<String, String> {
 async fn fetch_mapgenie_page(game_slug: String, map_slug: String) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
         let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(35))
+            .timeout(std::time::Duration::from_secs(12))
             .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
             .gzip(true)
             .brotli(true)
@@ -2607,7 +2635,7 @@ async fn fetch_http_url(
         }
 
         let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(35))
+            .timeout(std::time::Duration::from_secs(12))
             .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
             .gzip(true)
             .brotli(true)

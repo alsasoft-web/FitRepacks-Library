@@ -1,3 +1,4 @@
+import { isMediaOrBadDownloadUrl } from "./urlFilters";
 import { RepackPost, RepackMirrorGroup } from "./repackTypes";
 import { saveSteamRipPosts, getSteamRipExistingIds } from "./db";
 
@@ -265,32 +266,36 @@ export function parseSteamRipGamePost(post: any): RepackPost | null {
     const companyParts = [developer, releasedBy].filter(Boolean).join(" / ");
     const companies = companyParts ? `Developer: ${companyParts}` : "SteamRIP";
 
-    const downloadLinks: Array<{ name: string; url: string }> = [];
+    const downloadLinks: Array<{ name: string; url: string; sourceUrl?: string }> = [];
     const aRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
     let match;
     while ((match = aRegex.exec(contentHtml)) !== null) {
       let href = match[1];
       if (href.startsWith("//")) href = `https:${href}`;
-      if (
-        !href.startsWith("http") ||
-        href.includes("steamrip.com") ||
-        href.includes("discord.gg") ||
-        href.includes("reddit.com") ||
-        href.includes("t.me") ||
-        href.includes("paypal") ||
-        href.includes("patreon")
-      ) {
+      if (!href.startsWith("http")) continue;
+
+      if (isMediaOrBadDownloadUrl(href)) {
+        if (
+          (/\.(jpe?g|png|webp)(\?.*)?$/i.test(href) || href.includes("steamstatic.com")) &&
+          href !== coverUrl &&
+          !href.includes("site-logo") &&
+          !href.includes("avatar") &&
+          !href.includes("tie-") &&
+          !screenshots.includes(href)
+        ) {
+          screenshots.push(href);
+        }
         continue;
       }
 
       let providerName = "Mirror";
       try {
         const parsedUrl = new URL(href);
-        const hostParts = parsedUrl.hostname.split(".");
+        const hostParts = parsedUrl.hostname.toLowerCase().split(".");
         const rawHost =
           hostParts.length > 1
             ? hostParts[hostParts.length - 2]
-            : parsedUrl.hostname;
+            : parsedUrl.hostname.toLowerCase();
         if (rawHost === "bzzhr" || rawHost === "buzzheavier")
           providerName = "BuzzHeavier";
         else if (rawHost === "gofile") providerName = "GoFile";
@@ -298,12 +303,25 @@ export function parseSteamRipGamePost(post: any): RepackPost | null {
           providerName = "MegaDB";
         else if (rawHost === "1fichier") providerName = "1Fichier";
         else if (rawHost === "qiwi") providerName = "Qiwi";
-        else if (rawHost === "fileditch") providerName = "FileDitch";
+        else if (parsedUrl.hostname.toLowerCase().includes("fileditch"))
+          providerName = "FileDitch";
+        else if (rawHost === "datanodes") providerName = "DataNodes";
+        else if (rawHost === "pixeldrain") providerName = "PixelDrain";
+        else if (rawHost === "vikingfile") providerName = "VikingFile";
+        else if (rawHost === "krakenfiles") providerName = "KrakenFiles";
+        else if (rawHost === "rapidgator") providerName = "Rapidgator";
+        else if (rawHost === "ddownload") providerName = "DDownload";
+        else if (rawHost === "mediafire") providerName = "MediaFire";
+        else if (rawHost === "filecrypt") providerName = "FileCrypt";
         else providerName = rawHost.charAt(0).toUpperCase() + rawHost.slice(1);
       } catch (_) {}
 
       if (!downloadLinks.some((l) => l.url === href)) {
-        downloadLinks.push({ name: providerName, url: href });
+        downloadLinks.push({
+          name: providerName,
+          url: href,
+          sourceUrl: normalizeUrl(gameUrl),
+        });
       }
     }
 

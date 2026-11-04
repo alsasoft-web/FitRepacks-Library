@@ -1,5 +1,5 @@
 "use client";
-
+import { isMediaOrBadDownloadUrl } from "../../lib/urlFilters";
 import React, { useState, useEffect, useMemo } from "react";
 import {
   Modal,
@@ -24,6 +24,7 @@ import {
 } from "@mantine/core";
 import {
   ExternalLink,
+  Info,
   Download,
   DownloadCloud,
   CheckCircle2,
@@ -72,6 +73,7 @@ import { ImageLightboxModal } from "../common/ImageLightboxModal";
 
 /** Extract a clean hoster display name from a URL or link name */
 function getHosterName(url: string, name?: string): string {
+  if (isMediaOrBadDownloadUrl(url)) return "";
   if (name && name.trim()) {
     const cleanName = name
       .replace(/\[\s*Use\s*(?:JDownloader2?|IDM)[^\]]*\]/gi, "")
@@ -84,6 +86,8 @@ function getHosterName(url: string, name?: string): string {
       !/^(download|link|mirror|click\s*here|here|part\s*\d+)$/i.test(cleanName) &&
       cleanName.length < 30
     ) {
+      if (cleanName.toLowerCase().includes("fileditch")) return "FileDitch";
+      if (cleanName.toLowerCase().includes("steamstatic")) return "";
       return cleanName;
     }
   }
@@ -93,6 +97,9 @@ function getHosterName(url: string, name?: string): string {
     if (host.includes("paste.fitgirl-repacks.site") || host.includes("pastefg.")) {
       return "FitGirl Pastebin";
     }
+    if (host.includes("megadb.net")) return "MegaDB";
+    if (host.includes("bzzhr.to") || host.includes("buzzheavier.")) return "BuzzHeavier";
+    if (host.includes("fileditch")) return "FileDitch";
     if (host.includes("datanodes.to")) return "DataNodes";
     if (host.includes("fuckingfast.co")) return "FuckingFast";
     if (host.includes("filekeeper.net")) return "Filekeeper";
@@ -137,11 +144,12 @@ interface RepackDetailModalProps {
 /** Collapsible accordion row for a single hoster inside a mirror group */
 interface HosterAccordionProps {
   hoster: string;
-  links: { name: string; url: string }[];
+  links: { name: string; url: string; sourceUrl?: string }[];
   onOpenTorrentDownload?: RepackDetailModalProps["onOpenTorrentDownload"];
   postTitle: string;
   postCoverUrl: string;
   postRepackSize?: string;
+  postUrl?: string;
 }
 
 const HosterAccordion: React.FC<HosterAccordionProps> = ({
@@ -151,9 +159,13 @@ const HosterAccordion: React.FC<HosterAccordionProps> = ({
   postTitle,
   postCoverUrl,
   postRepackSize,
+  postUrl,
 }) => {
   const [open, setOpen] = useState(false);
   const isMultiPart = links.length > 1;
+  const isMegaDb =
+    hoster.toUpperCase() === "MEGADB" ||
+    links.some((l) => l.url.includes("megadb.net"));
 
   return (
     <Box>
@@ -178,33 +190,94 @@ const HosterAccordion: React.FC<HosterAccordionProps> = ({
             <Text size="xs" fw={600}>
               {hoster}
             </Text>
+            {isMegaDb && (
+              <Badge size="xs" variant="light" color="teal">
+                Anti-Hotlink Protected
+              </Badge>
+            )}
           </Group>
-          <Badge size="xs" variant="dot" color="blue">
+          <Badge size="xs" variant="dot" color={isMegaDb ? "teal" : "blue"}>
             {links.length} {isMultiPart ? "parts" : "link"}
           </Badge>
         </Group>
       </UnstyledButton>
 
       <Collapse expanded={open}>
-        <Stack gap={4} pt={4} pl="xs">
-          {links.map((link, lIdx) => (
-            <Group key={lIdx} gap={4} wrap="nowrap">
-              <Button
-                onClick={() => openInBrowser(link.url)}
-                variant="light"
-                color="blue"
-                size="xs"
-                radius="md"
-                justify="space-between"
-                rightSection={<ExternalLink size={12} />}
-                style={{ flex: 1, cursor: "pointer", minWidth: 0 }}
-              >
-                <Text size="xs" truncate style={{ maxWidth: "100%" }}>
-                  {link.name}
+        <Stack gap={6} pt={4} pl="xs">
+          {isMegaDb && (
+            <Paper
+              p="xs"
+              radius="md"
+              bg="rgba(14, 165, 233, 0.08)"
+              style={{ border: "1px solid rgba(14, 165, 233, 0.2)" }}
+            >
+              <Group gap="xs" wrap="nowrap" align="flex-start">
+                <Info size={14} color="var(--mantine-color-blue-4)" style={{ flexShrink: 0, marginTop: 2 }} />
+                <Text size="xs" c="dimmed">
+                  MegaDB requires opening from the official SteamRIP post to prevent hotlinking errors (&ldquo;Referrer not allowed&rdquo;). The download button opens the game page directly.
                 </Text>
-              </Button>
-            </Group>
-          ))}
+              </Group>
+            </Paper>
+          )}
+
+          {links.map((link, lIdx) => {
+            const isMegaDbLink = link.url.includes("megadb.net");
+            const targetUrl =
+              isMegaDbLink && (link.sourceUrl || postUrl)
+                ? (link.sourceUrl || postUrl)
+                : link.url;
+
+            return (
+              <Group key={lIdx} gap={4} wrap="nowrap">
+                <Button
+                  onClick={() => openInBrowser(targetUrl)}
+                  variant="light"
+                  color={isMegaDbLink ? "teal" : "blue"}
+                  size="xs"
+                  radius="md"
+                  justify="space-between"
+                  rightSection={<ExternalLink size={12} />}
+                  style={{ flex: 1, cursor: "pointer", minWidth: 0 }}
+                >
+                  <Text size="xs" truncate style={{ maxWidth: "100%" }}>
+                    {isMegaDbLink ? `${link.name} (via SteamRIP)` : link.name}
+                  </Text>
+                </Button>
+
+                {isMegaDbLink && (
+                  <>
+                    <CopyButton value={link.url} timeout={2000}>
+                      {({ copied, copy }) => (
+                        <Tooltip label={copied ? "Copied direct link!" : "Copy direct MegaDB link"} withArrow>
+                          <ActionIcon
+                            size="input-xs"
+                            variant="subtle"
+                            color={copied ? "teal" : "gray"}
+                            onClick={copy}
+                            aria-label="Copy direct MegaDB link"
+                          >
+                            {copied ? <Check size={13} /> : <Copy size={13} />}
+                          </ActionIcon>
+                        </Tooltip>
+                      )}
+                    </CopyButton>
+
+                    <Tooltip label="Open direct MegaDB link (Requires referer modifier extension in browser)" withArrow>
+                      <ActionIcon
+                        size="input-xs"
+                        variant="subtle"
+                        color="gray"
+                        onClick={() => openInBrowser(link.url)}
+                        aria-label="Open direct MegaDB link"
+                      >
+                        <ExternalLink size={13} />
+                      </ActionIcon>
+                    </Tooltip>
+                  </>
+                )}
+              </Group>
+            );
+          })}
         </Stack>
       </Collapse>
     </Box>
@@ -937,7 +1010,9 @@ export const RepackDetailModal: React.FC<RepackDetailModalProps> = ({
 
                         // Non-magnet group — group links by hoster with collapsible sections
                         const linksByHoster = group.links.reduce<Record<string, typeof group.links>>((acc, link) => {
+                          if (isMediaOrBadDownloadUrl(link.url)) return acc;
                           const hoster = getHosterName(link.url, link.name);
+                          if (!hoster) return acc;
                           if (!acc[hoster]) acc[hoster] = [];
                           acc[hoster].push(link);
                           return acc;
@@ -974,6 +1049,7 @@ export const RepackDetailModal: React.FC<RepackDetailModalProps> = ({
                                   postTitle={post.title}
                                   postCoverUrl={post.coverUrl}
                                   postRepackSize={post.repackSize}
+                                  postUrl={post.url}
                                 />
                               ))}
                             </Stack>

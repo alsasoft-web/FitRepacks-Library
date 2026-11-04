@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
   workflow_dispatch:
 
 permissions:
@@ -17,10 +17,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: 'windows-latest'
-            args: ''
-          - platform: 'ubuntu-22.04'
-            args: '--bundles appimage,deb'
+          - platform: "windows-latest"
+            args: ""
+          - platform: "ubuntu-22.04"
+            args: "--bundles appimage,deb"
 
     runs-on: ${{ matrix.platform }}
     env:
@@ -28,7 +28,7 @@ jobs:
       NEXT_PUBLIC_IGDB_CLIENT_ID: ${{ secrets.NEXT_PUBLIC_IGDB_CLIENT_ID }}
       NEXT_PUBLIC_IGDB_CLIENT_SECRET: ${{ secrets.NEXT_PUBLIC_IGDB_CLIENT_SECRET }}
       NEXT_PUBLIC_STEAM_API_KEY: ${{ secrets.NEXT_PUBLIC_STEAM_API_KEY }}
-      NEXT_PUBLIC_POCKETBASE_URL: ${{ secrets.NEXT_PUBLIC_POCKETBASE_URL }}
+      NEXT_PUBLIC_ALSABASE_URL: ${{ secrets.NEXT_PUBLIC_ALSABASE_URL }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -37,7 +37,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
+          cache: "npm"
 
       - name: Install Linux system dependencies
         if: matrix.platform == 'ubuntu-22.04'
@@ -58,7 +58,7 @@ jobs:
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
-          work-dir: './src-tauri'
+          work-dir: "./src-tauri"
 
       - name: Install dependencies
         run: npm ci
@@ -71,8 +71,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: v__VERSION__
-          releaseName: 'FitRepacks Library v__VERSION__'
-          releaseBody: 'Automated release for FitRepacks Library v__VERSION__.'
+          releaseName: "FitRepacks Library v__VERSION__"
+          releaseBody: "Automated release for FitRepacks Library v__VERSION__."
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}

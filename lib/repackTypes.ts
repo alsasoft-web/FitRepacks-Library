@@ -1,6 +1,7 @@
-interface RepackMirror {
+export interface RepackMirror {
   name: string;
   url: string;
+  sourceUrl?: string;
 }
 
 export interface RepackMirrorGroup {

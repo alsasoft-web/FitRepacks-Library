@@ -916,6 +916,7 @@ export const RepacksPostsView: React.FC<RepacksPostsViewProps> = ({
   const [totalItems, setTotalItems] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
 
   const [globalStats, setGlobalStats] = useState<RepackDatasetStats>({
@@ -981,6 +982,7 @@ export const RepacksPostsView: React.FC<RepacksPostsViewProps> = ({
   // Load paginated repacks
   const fetchRepacks = useCallback(async () => {
     setIsLoading(true);
+    setLoadError(null);
     try {
       const res = await loadRepacksPaginated({
         page: currentPage,
@@ -992,11 +994,15 @@ export const RepacksPostsView: React.FC<RepacksPostsViewProps> = ({
         readFilter,
         dataSource,
       });
+      if (res.error && res.items.length === 0) {
+        setLoadError(res.error);
+      }
       setPosts(res.items);
       setTotalItems(res.totalItems);
       setTotalPages(res.totalPages);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error loading paginated repacks:", err);
+      setLoadError(err?.message || "Failed to load repacks from catalog server.");
     } finally {
       setIsLoading(false);
     }
@@ -1771,31 +1777,71 @@ export const RepacksPostsView: React.FC<RepacksPostsViewProps> = ({
         </Paper>
       ) : (
         <Paper p={60} radius="lg" className="repack-glass-card" style={{ textAlign: "center" }}>
-          <Box
-            w={64}
-            h={64}
-            bg="var(--mantine-color-default)"
-            style={{
-              borderRadius: "50%",
-              margin: "0 auto",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              border: "1px solid var(--mantine-color-default-border)",
-            }}
-          >
-            <DownloadCloud size={32} color="#a78bfa" />
-          </Box>
+          {loadError ? (
+            <Box style={{ maxWidth: 450, margin: "0 auto" }}>
+              <Box
+                w={64}
+                h={64}
+                style={{
+                  borderRadius: "50%",
+                  backgroundColor: "rgba(239, 68, 68, 0.12)",
+                  margin: "0 auto",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  border: "1px solid rgba(239, 68, 68, 0.3)",
+                }}
+              >
+                <AlertCircle size={32} color="#ef4444" />
+              </Box>
+              <Title order={3} mt="md" className="heading-font" c="red.4">
+                Connection Error
+              </Title>
+              <Text size="xs" c="dimmed" mt={6}>
+                Could not connect to the repack catalog server. Check your network connection or click below to retry.
+              </Text>
+              <Button
+                size="xs"
+                variant="light"
+                color="red"
+                mt="md"
+                radius="md"
+                leftSection={<RotateCcw size={14} />}
+                loading={isRefreshing || isLoading}
+                onClick={handleRefresh}
+              >
+                Retry Connection
+              </Button>
+            </Box>
+          ) : (
+            <>
+              <Box
+                w={64}
+                h={64}
+                bg="var(--mantine-color-default)"
+                style={{
+                  borderRadius: "50%",
+                  margin: "0 auto",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  border: "1px solid var(--mantine-color-default-border)",
+                }}
+              >
+                <DownloadCloud size={32} color="#a78bfa" />
+              </Box>
 
-          <Title order={3} mt="md" className="heading-font">
-            {posts.length === 0 ? "No Repack Posts Available" : "No Matching Repacks Found"}
-          </Title>
+              <Title order={3} mt="md" className="heading-font">
+                {posts.length === 0 ? "No Repack Posts Available" : "No Matching Repacks Found"}
+              </Title>
 
-          <Text size="xs" c="dimmed" mt={6} style={{ maxWidth: 450, margin: "6px auto 0" }}>
-            {posts.length === 0
-              ? 'Click "Refresh" to load the latest repack catalog.'
-              : "Try adjusting your search query, clearing category filter, or toggling read status."}
-          </Text>
+              <Text size="xs" c="dimmed" mt={6} style={{ maxWidth: 450, margin: "6px auto 0" }}>
+                {posts.length === 0
+                  ? 'Click "Refresh" to load the latest repack catalog.'
+                  : "Try adjusting your search query, clearing category filter, or toggling read status."}
+              </Text>
+            </>
+          )}
         </Paper>
       )}
 

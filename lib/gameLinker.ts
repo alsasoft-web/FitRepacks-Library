@@ -6,6 +6,7 @@ import {
   getStoredGames,
 } from "./db";
 import { RepackMirrorGroup, RepackPost } from "./repackTypes";
+import { isMediaOrBadDownloadUrl } from "./urlFilters";
 
 export { cleanGameTitle };
 
@@ -900,7 +901,7 @@ export async function linkGameToAllSources(
  */
 export function extractMagnetLinks(
   mirrorGroups?: RepackMirrorGroup[],
-): { name: string; url: string; groupName: string }[] {
+): { name: string; url: string; groupName: string; sourceUrl?: string }[] {
   if (!mirrorGroups || mirrorGroups.length === 0) return [];
   const magnets: { name: string; url: string; groupName: string }[] = [];
 
@@ -926,16 +927,17 @@ export function extractDirectDownloadLinks(
   mirrorGroups?: RepackMirrorGroup[],
 ): { name: string; url: string; groupName: string }[] {
   if (!mirrorGroups || mirrorGroups.length === 0) return [];
-  const directs: { name: string; url: string; groupName: string }[] = [];
+  const directs: { name: string; url: string; groupName: string; sourceUrl?: string }[] = [];
 
   for (const group of mirrorGroups) {
     if (!group.links) continue;
     for (const link of group.links) {
-      if (link.url && !link.url.startsWith("magnet:")) {
+      if (link.url && !link.url.startsWith("magnet:") && !isMediaOrBadDownloadUrl(link.url)) {
         directs.push({
           name: link.name || "Download Link",
           url: link.url,
           groupName: group.category || "Direct Mirrors",
+          sourceUrl: link.sourceUrl,
         });
       }
     }

@@ -1997,7 +1997,10 @@ export async function fetchRawMapGenieHtml(gameSlug: string, mapSlug: string): P
   return cached || "";
 }
 
-export async function loadMapsFromMapGenie(): Promise<GameMapInfo[]> {
+export async function loadMapsFromMapGenie(forceRefresh = false): Promise<GameMapInfo[]> {
+  if (!forceRefresh && mapsCache.length > 50 && gamesCache.length > 0) {
+    return mapsCache;
+  }
   if (inFlightMapsPromise) return inFlightMapsPromise;
 
   inFlightMapsPromise = (async () => {

@@ -1,3 +1,4 @@
+import { isMediaOrBadDownloadUrl } from "./urlFilters";
 import Database from "@tauri-apps/plugin-sql";
 import { Game, PlaySession } from "./types";
 import { RepackPost } from "./repackTypes";
@@ -2423,6 +2424,7 @@ export interface PaginatedRepacksResult {
   totalPages: number;
   page: number;
   perPage: number;
+  error?: string;
 }
 
 // In-memory TTL query cache for paginated results
@@ -2785,10 +2787,26 @@ async function loadSteamRipFromSQLite(
       typeof r.videos === "string"
         ? JSON.parse(r.videos || "[]")
         : r.videos || [],
-    mirrorGroups:
-      typeof r.mirror_groups === "string"
-        ? JSON.parse(r.mirror_groups || "[]")
-        : r.mirror_groups || [],
+    mirrorGroups: (() => {
+      const rawGroups =
+        typeof r.mirror_groups === "string"
+          ? JSON.parse(r.mirror_groups || "[]")
+          : r.mirror_groups || [];
+      return rawGroups
+        .map((g: any) => ({
+          ...g,
+          links: (g.links || [])
+            .filter((l: any) => !isMediaOrBadDownloadUrl(l.url))
+            .map((l: any) => ({
+              ...l,
+              name: l.name?.toLowerCase().includes("fileditch")
+                ? "FileDitch"
+                : l.name,
+              sourceUrl: l.sourceUrl || r.url,
+            })),
+        }))
+        .filter((g: any) => g.links.length > 0);
+    })(),
     gameUpdates:
       typeof r.game_updates === "string"
         ? JSON.parse(r.game_updates || "[]")
@@ -3232,8 +3250,16 @@ export async function loadRepacksPaginated(
 
       return finalResult;
     }
-  } catch (pbErr) {
+  } catch (pbErr: any) {
     console.warn("AlsaBase getList failed:", pbErr);
+    return {
+      items: [],
+      totalItems: 0,
+      totalPages: 1,
+      page,
+      perPage,
+      error: pbErr?.message || "Failed to load repacks from catalog server.",
+    };
   }
 
   return {

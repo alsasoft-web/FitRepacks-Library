@@ -6,6 +6,8 @@ import {
   updateGameInStorage,
   isIgnoredRepackTitle,
   normalizeGameTitle,
+  getAppSetting,
+  saveAppSetting,
 } from "./db";
 import {
   sendDesktopNotification,
@@ -565,6 +567,116 @@ async function handleRepackEvent(
   }, delay);
 }
 
+let pollingTimer: ReturnType<typeof setInterval> | null = null;
+let isCheckingNewReleases = false;
+
+/**
+ * Proactively check for new releases that arrived while app was closed or between realtime events
+ */
+export async function checkAndNotifyNewReleases(): Promise<void> {
+  if (typeof window === "undefined" || isCheckingNewReleases) return;
+  isCheckingNewReleases = true;
+
+  const notifSettings = getNotificationSettings();
+  if (!notifSettings.masterEnabled) {
+    isCheckingNewReleases = false;
+    return;
+  }
+
+  try {
+    // 1. FitGirl repacks check
+    if (notifSettings.fitgirlNotifications) {
+      const storedLastChecked =
+        (await getAppSetting("last_notified_repack_fitgirl")) ||
+        localStorage.getItem("fitrepacks_last_notified_fitgirl");
+
+      if (!storedLastChecked) {
+        // Anchor to latest repack date to prevent retroactive notification spam on first run
+        const latest = await ab.collection("repacks").getList(1, 1, {
+          sort: "-post_date",
+          requestKey: null,
+          autoCancel: false,
+        }).catch(() => null);
+        if (latest?.items && latest.items[0]?.post_date) {
+          const anchor = String(latest.items[0].post_date);
+          await saveAppSetting("last_notified_repack_fitgirl", anchor);
+          localStorage.setItem("fitrepacks_last_notified_fitgirl", anchor);
+        }
+      } else {
+        const markTime = new Date(storedLastChecked).getTime();
+        if (!isNaN(markTime)) {
+          const isoDate = new Date(markTime).toISOString().replace("T", " ").slice(0, 19);
+          const newer = await ab.collection("repacks").getList(1, 25, {
+            filter: `post_date > "${isoDate}"`,
+            sort: "+post_date",
+            requestKey: null,
+            autoCancel: false,
+          }).catch(() => null);
+
+          if (newer?.items && newer.items.length > 0) {
+            let maxDate = storedLastChecked;
+            for (const item of newer.items) {
+              await handleRepackEvent({ action: "create", record: item }, "fitgirl");
+              if (item.post_date && item.post_date > maxDate) {
+                maxDate = String(item.post_date);
+              }
+            }
+            await saveAppSetting("last_notified_repack_fitgirl", maxDate);
+            localStorage.setItem("fitrepacks_last_notified_fitgirl", maxDate);
+          }
+        }
+      }
+    }
+
+    // 2. SteamRIP repacks check
+    if (notifSettings.steamripNotifications) {
+      const storedLastChecked =
+        (await getAppSetting("last_notified_repack_steamrip")) ||
+        localStorage.getItem("fitrepacks_last_notified_steamrip");
+
+      if (!storedLastChecked) {
+        const latest = await ab.collection("steamrip").getList(1, 1, {
+          sort: "-post_date",
+          requestKey: null,
+          autoCancel: false,
+        }).catch(() => null);
+        if (latest?.items && latest.items[0]?.post_date) {
+          const anchor = String(latest.items[0].post_date);
+          await saveAppSetting("last_notified_repack_steamrip", anchor);
+          localStorage.setItem("fitrepacks_last_notified_steamrip", anchor);
+        }
+      } else {
+        const markTime = new Date(storedLastChecked).getTime();
+        if (!isNaN(markTime)) {
+          const isoDate = new Date(markTime).toISOString().replace("T", " ").slice(0, 19);
+          const newer = await ab.collection("steamrip").getList(1, 25, {
+            filter: `post_date > "${isoDate}"`,
+            sort: "+post_date",
+            requestKey: null,
+            autoCancel: false,
+          }).catch(() => null);
+
+          if (newer?.items && newer.items.length > 0) {
+            let maxDate = storedLastChecked;
+            for (const item of newer.items) {
+              await handleRepackEvent({ action: "create", record: item }, "steamrip");
+              if (item.post_date && item.post_date > maxDate) {
+                maxDate = String(item.post_date);
+              }
+            }
+            await saveAppSetting("last_notified_repack_steamrip", maxDate);
+            localStorage.setItem("fitrepacks_last_notified_steamrip", maxDate);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("[RepackSubscription] Error checking for new releases:", err);
+  } finally {
+    isCheckingNewReleases = false;
+  }
+}
+
 /**
  * Initialize AlsaBase realtime subscriptions for both 'repacks' and 'steamrip' collections
  */
@@ -576,28 +688,51 @@ export async function initRepackSubscription(): Promise<() => void> {
   subscribePromise = (async () => {
     try {
       // Clean up any existing listeners first
-      await ab
-        .collection("repacks")
-        .unsubscribe("*")
-        .catch(() => {});
-      await ab
-        .collection("steamrip")
-        .unsubscribe("*")
-        .catch(() => {});
+      await ab.collection("repacks").unsubscribe().catch(() => {});
+      await ab.collection("steamrip").unsubscribe().catch(() => {});
+      await ab.realtime.unsubscribe("repacks").catch(() => {});
+      await ab.realtime.unsubscribe("steamrip").catch(() => {});
 
       // Proactively request notification permission on startup if notifications are enabled
       if (getRepackNotificationsEnabled()) {
         requestNotificationPermission().catch(() => {});
       }
 
+      // In AlsaBase SDK, passing callback as first argument subscribes to collection topic directly ("repacks")
       await ab
         .collection("repacks")
-        .subscribe("*", (e) => handleRepackEvent(e, "fitgirl"))
+        .subscribe((e) => handleRepackEvent(e, "fitgirl"))
         .catch(() => {});
+
+      await ab
+        .collection("steamrip")
+        .subscribe((e) => handleRepackEvent(e, "steamrip"))
+        .catch(() => {});
+
+      // Also subscribe directly to realtime topics to ensure full coverage
+      await ab.realtime
+        .subscribe("repacks", (e) => handleRepackEvent(e, "fitgirl"))
+        .catch(() => {});
+      await ab.realtime
+        .subscribe("steamrip", (e) => handleRepackEvent(e, "steamrip"))
+        .catch(() => {});
+
       isSubscribed = true;
       console.log(
-        "[AlsaBase] Successfully subscribed to 'repacks' realtime events.",
+        "[AlsaBase] Successfully subscribed to 'repacks' and 'steamrip' realtime events.",
       );
+
+      // Trigger initial release check after a brief grace period (3s) to catch any releases while app was closed
+      setTimeout(() => {
+        checkAndNotifyNewReleases().catch(() => {});
+      }, 3000);
+
+      // Schedule periodic catch-up poll every 15 minutes while app is running / in tray
+      if (!pollingTimer) {
+        pollingTimer = setInterval(() => {
+          checkAndNotifyNewReleases().catch(() => {});
+        }, 15 * 60 * 1000);
+      }
     } catch (err) {
       console.error("[AlsaBase] Failed to subscribe to collections:", err);
     } finally {
@@ -622,14 +757,16 @@ export async function unsubscribeRepackSubscription(): Promise<void> {
       batchStartTime = null;
     }
 
-    await ab
-      .collection("repacks")
-      .unsubscribe("*")
-      .catch(() => {});
-    await ab
-      .collection("steamrip")
-      .unsubscribe("*")
-      .catch(() => {});
+    if (pollingTimer) {
+      clearInterval(pollingTimer);
+      pollingTimer = null;
+    }
+
+    await ab.collection("repacks").unsubscribe().catch(() => {});
+    await ab.collection("steamrip").unsubscribe().catch(() => {});
+    await ab.realtime.unsubscribe("repacks").catch(() => {});
+    await ab.realtime.unsubscribe("steamrip").catch(() => {});
+
     isSubscribed = false;
     subscribePromise = null;
     console.log(

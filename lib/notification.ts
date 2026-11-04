@@ -87,10 +87,16 @@ export async function sendDesktopNotification(
         console.warn("[sendDesktopNotification] Permission check:", pErr);
       }
 
+      // On desktop, only use icon if it is a local file path; web paths/svgs cause Windows Toast failures
+      const safeIcon =
+        icon && !icon.startsWith("/") && !icon.startsWith("http")
+          ? icon
+          : undefined;
+
       plugin.sendNotification({
         title,
         body,
-        icon: icon || undefined,
+        icon: safeIcon,
       });
       console.log("[sendDesktopNotification] Tauri sendNotification succeeded.");
       return true;
