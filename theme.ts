@@ -20,12 +20,12 @@ export const brandDark: MantineColorsTuple = [
   "#e5e7eb", // shade 1: secondary text
   "#9ca3af", // shade 2: dimmed text
   "#4b5058", // shade 3: subtle text / icons
-  "#373a40", // shade 4: subtle borders (never white)
-  "#2b2d34", // shade 5: container borders
-  "#24262c", // shade 6: elevated surfaces / popovers
-  "#1e2025", // shade 7: card containers
-  "#18191d", // shade 8: header / navbar
-  "#121316", // shade 9: main background (balanced dark, not pitch black)
+  "#33363f", // shade 4: subtle borders (never white)
+  "#23262d", // shade 5: container borders
+  "#1a1c22", // shade 6: elevated surfaces / popovers
+  "#14161b", // shade 7: card containers
+  "#0f1014", // shade 8: header / navbar
+  "#0b0c0f", // shade 9: main background (deep luxury gaming dark)
 ];
 
 export const theme = createTheme({
@@ -36,7 +36,7 @@ export const theme = createTheme({
     dark: brandDark,
     brandDark,
   },
-  black: "#121316",
+  black: "#0b0c0f",
   primaryColor: "brandCyan",
   primaryShade: { light: 6, dark: 8 },
 });

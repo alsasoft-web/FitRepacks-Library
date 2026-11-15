@@ -60,7 +60,7 @@ import {
   isFavoriteRepackInStorage,
   isInstalledRepackInStorage,
   toggleFavoriteRepack,
-  setRepackStatus,
+  setRepackStatus, promptForGameExePath,
 } from "../../lib/db";
 import {
   cleanGameTitle,
@@ -69,12 +69,13 @@ import {
   getRiotpixelsFullResUrl,
 } from "../../lib/gameLinker";
 import { openInBrowser } from "../../lib/openUrl";
+import { startDirectDownload, useDownloadQueueStore } from "../../lib/downloadQueueStore";
 import { ImageLightboxModal } from "../common/ImageLightboxModal";
 
 /** Extract a clean hoster display name from a URL or link name */
-function getHosterName(url: string, name?: string): string {
-  if (isMediaOrBadDownloadUrl(url)) return "";
-  if (name && name.trim()) {
+function getHosterName(url: string, name?: string, isRecomp = false): string {
+  if (!isRecomp && isMediaOrBadDownloadUrl(url)) return "";
+  if (!isRecomp && name && name.trim()) {
     const cleanName = name
       .replace(/\[\s*Use\s*(?:JDownloader2?|IDM)[^\]]*\]/gi, "")
       .replace(/\[\s*Direct\s*Link\s*\]/gi, "")
@@ -94,6 +95,10 @@ function getHosterName(url: string, name?: string): string {
   try {
     const parsed = new URL(url);
     const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+    if (host.includes("github.com")) return "GitHub";
+    if (host.includes("gitlab.com")) return "GitLab";
+    if (host.includes("sourceforge.net")) return "SourceForge";
+    if (host.includes("recomplauncher.com")) return "RecompLauncher";
     if (host.includes("paste.fitgirl-repacks.site") || host.includes("pastefg.")) {
       return "FitGirl Pastebin";
     }
@@ -149,7 +154,7 @@ interface HosterAccordionProps {
   postTitle: string;
   postCoverUrl: string;
   postRepackSize?: string;
-  postUrl?: string;
+  postUrl?: string; defaultOpen?: boolean; isRecomp?: boolean;
 }
 
 const HosterAccordion: React.FC<HosterAccordionProps> = ({
@@ -159,9 +164,33 @@ const HosterAccordion: React.FC<HosterAccordionProps> = ({
   postTitle,
   postCoverUrl,
   postRepackSize,
-  postUrl,
+  postUrl, defaultOpen = false, isRecomp = false,
 }) => {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
+  const magnetDownloads = useDownloadQueueStore((s) => s.magnetDownloads);
+
+  const isDirectDownloadUrl = (u: string): boolean => {
+    try {
+      const parsed = new URL(u);
+      const p = parsed.pathname.toLowerCase();
+      return p.includes("/releases/download/") || /\.(zip|7z|rar|tar\.gz|tar\.xz|exe|msi|appimage|dmg|deb|pkg|iso)$/i.test(p);
+    } catch {
+      return false;
+    }
+  };
+
+  const handleDirectDownload = (url: string) => {
+    if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
+      openInBrowser(url);
+      return;
+    }
+    void startDirectDownload({
+      title: postTitle,
+      url,
+      size: postRepackSize,
+      coverUrl: postCoverUrl,
+    });
+  };
   const isMultiPart = links.length > 1;
   const isMegaDb =
     hoster.toUpperCase() === "MEGADB" ||
@@ -227,20 +256,33 @@ const HosterAccordion: React.FC<HosterAccordionProps> = ({
                 ? (link.sourceUrl || postUrl)
                 : link.url;
 
+            const isDirectFile = isRecomp && !!targetUrl && isDirectDownloadUrl(targetUrl);
+            const queuedDirect = isDirectFile
+              ? magnetDownloads.find((d) => d.kind === "direct" && d.directUrl === targetUrl)
+              : undefined;
+            const isDownloading = queuedDirect?.status === "downloading";
+            const isCompleted = queuedDirect?.status === "completed";
+
             return (
               <Group key={lIdx} gap={4} wrap="nowrap">
                 <Button
-                  onClick={() => openInBrowser(targetUrl)}
+                  onClick={() => isDirectFile && targetUrl ? handleDirectDownload(targetUrl) : openInBrowser(targetUrl)}
                   variant="light"
-                  color={isMegaDbLink ? "teal" : "blue"}
+                  color={isCompleted ? "teal" : isDirectFile ? "violet" : isMegaDbLink ? "teal" : "blue"}
                   size="xs"
                   radius="md"
                   justify="space-between"
-                  rightSection={<ExternalLink size={12} />}
+                  rightSection={isDirectFile ? <Download size={12} /> : <ExternalLink size={12} />}
                   style={{ flex: 1, cursor: "pointer", minWidth: 0 }}
                 >
                   <Text size="xs" truncate style={{ maxWidth: "100%" }}>
-                    {isMegaDbLink ? `${link.name} (via SteamRIP)` : link.name}
+                    {isCompleted
+                      ? `Downloaded (in Downloads): ${link.name}`
+                      : isDownloading
+                        ? `Downloading in Downloads (${queuedDirect.progress.toFixed(0)}%): ${link.name}`
+                        : isMegaDbLink
+                          ? `${link.name} (via SteamRIP)`
+                          : link.name}
                   </Text>
                 </Button>
 
@@ -376,13 +418,19 @@ export const RepackDetailModal: React.FC<RepackDetailModalProps> = ({
     setIsFavorite(newState);
   };
 
-  const handleStatusChange = (status: "installed" | "wishlist" | "completed" | "none") => {
+  const handleStatusChange = async (status: "installed" | "wishlist" | "completed" | "none") => {
     let targetStatus = status;
     if (status === "installed" && isInstalled) targetStatus = "none";
     else if (status === "wishlist" && isWishlisted) targetStatus = "none";
     else if (status === "completed" && isCompleted) targetStatus = "none";
 
-    setRepackStatus(post.id, post, targetStatus);
+    let chosenExePath: string | undefined;
+    if (targetStatus === "installed") {
+      const picked = await promptForGameExePath(post.title);
+      if (picked) chosenExePath = picked;
+    }
+
+    setRepackStatus(post.id, post, targetStatus, chosenExePath);
   };
 
   const handleToggleWishlist = () => {
@@ -504,7 +552,7 @@ export const RepackDetailModal: React.FC<RepackDetailModalProps> = ({
                     <Badge
                       size="xs"
                       variant="filled"
-                      color="blue"
+                      color={post.source === "recomp" ? "violet" : post.source === "steamrip" ? "cyan" : "blue"}
                       style={{
                         position: "absolute",
                         top: -8,
@@ -523,7 +571,7 @@ export const RepackDetailModal: React.FC<RepackDetailModalProps> = ({
                   <Group gap="xs" wrap="wrap">
                     <Badge
                       variant="filled"
-                      color="blue"
+                      color={post.source === "recomp" ? "violet" : post.source === "steamrip" ? "cyan" : "blue"}
                       size="sm"
                       leftSection={<Zap size={11} />}
                       style={{
@@ -531,9 +579,9 @@ export const RepackDetailModal: React.FC<RepackDetailModalProps> = ({
                         letterSpacing: "0.5px",
                       }}
                     >
-                      {post.source && post.source == "steamrip"
-                        ? "SteamRip"
-                        : "FITGIRL REPACK"}
+                      {post.source === "recomp" ? "Recomp" : post.source === "steamrip" ? "SteamRip" : "FITGIRL REPACK"}
+
+
                     </Badge>
 
                     {post.date && (
@@ -949,7 +997,7 @@ export const RepackDetailModal: React.FC<RepackDetailModalProps> = ({
                                       <Button
                                         onClick={() => openInBrowser(link.url)}
                                         variant={isMagnet ? "filled" : "light"}
-                                        color="blue"
+                                        color={post.source === "recomp" ? "violet" : post.source === "steamrip" ? "cyan" : "blue"}
                                         size="xs"
                                         radius="md"
                                         justify="space-between"
@@ -965,7 +1013,7 @@ export const RepackDetailModal: React.FC<RepackDetailModalProps> = ({
                                         <>
                                           <Tooltip label="Download in-app (Torrent Manager)" withArrow position="top">
                                             <ActionIcon
-                                              color="blue"
+                                              color={post.source === "recomp" ? "violet" : post.source === "steamrip" ? "cyan" : "blue"}
                                               variant="light"
                                               size="md"
                                               onClick={() => {
@@ -1009,9 +1057,9 @@ export const RepackDetailModal: React.FC<RepackDetailModalProps> = ({
                         }
 
                         // Non-magnet group — group links by hoster with collapsible sections
-                        const linksByHoster = group.links.reduce<Record<string, typeof group.links>>((acc, link) => {
-                          if (isMediaOrBadDownloadUrl(link.url)) return acc;
-                          const hoster = getHosterName(link.url, link.name);
+                        const isRecomp = post.source === "recomp"; const linksByHoster = group.links.reduce<Record<string, typeof group.links>>((acc, link) => {
+                          if (!isRecomp && isMediaOrBadDownloadUrl(link.url)) return acc;
+                          const hoster = getHosterName(link.url, link.name, isRecomp);
                           if (!hoster) return acc;
                           if (!acc[hoster]) acc[hoster] = [];
                           acc[hoster].push(link);
@@ -1049,7 +1097,7 @@ export const RepackDetailModal: React.FC<RepackDetailModalProps> = ({
                                   postTitle={post.title}
                                   postCoverUrl={post.coverUrl}
                                   postRepackSize={post.repackSize}
-                                  postUrl={post.url}
+                                  postUrl={post.url} defaultOpen={isRecomp} isRecomp={isRecomp}
                                 />
                               ))}
                             </Stack>
@@ -1072,15 +1120,15 @@ export const RepackDetailModal: React.FC<RepackDetailModalProps> = ({
                         <Button
                           onClick={() => openInBrowser(post.url)}
                           variant="light"
-                          color="blue"
+                          color={post.source === "recomp" ? "violet" : post.source === "steamrip" ? "cyan" : "blue"}
                           size="xs"
                           radius="md"
                           rightSection={<ExternalLink size={13} />}
                           style={{ cursor: "pointer" }}
                         >
-                          {post.source && post.source == "steamrip"
-                            ? "View Mirrors on Official SteamRip Site"
-                            : "View Mirrors on Official FitGirl Site"}
+                          {post.source === "recomp" ? "View on Official Repository" : post.source === "steamrip" ? "View Mirrors on Official SteamRip Site" : "View Mirrors on Official FitGirl Site"}
+
+
                         </Button>
                       </Paper>
                     )}
@@ -1367,7 +1415,7 @@ export const RepackDetailModal: React.FC<RepackDetailModalProps> = ({
                                     ? "filled"
                                     : "outline"
                                 }
-                                color="blue"
+                                color={post.source === "recomp" ? "violet" : post.source === "steamrip" ? "cyan" : "blue"}
                                 leftSection={<Play size={12} />}
                                 onClick={() => setActiveVideoIndex(idx)}
                                 style={{ cursor: "pointer" }}
@@ -1454,7 +1502,7 @@ export const RepackDetailModal: React.FC<RepackDetailModalProps> = ({
                                   key={i}
                                   size="xs"
                                   variant="outline"
-                                  color="blue"
+                                  color={post.source === "recomp" ? "violet" : post.source === "steamrip" ? "cyan" : "blue"}
                                 >
                                   {g}
                                 </Badge>

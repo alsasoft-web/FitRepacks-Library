@@ -34,6 +34,9 @@ import {
   Progress,
   ThemeIcon,
   Modal,
+  TextInput,
+  ScrollArea,
+  Divider,
 } from "@mantine/core";
 import { useDebouncedValue, useHover, useNetwork } from "@mantine/hooks";
 import {
@@ -65,9 +68,12 @@ import {
   ChevronDown,
   Zap,
   Square,
+  Search,
+  X,
 } from "lucide-react";
 import { Carousel } from "@mantine/carousel";
 import { RepackPost } from "../../lib/repackTypes";
+import { getRecompCatalogPosts } from "../../lib/recompCatalog";
 import {
   startSteamRipScrape,
   stopSteamRipScrape,
@@ -88,6 +94,7 @@ import {
   isInstalledRepackInStorage,
   toggleFavoriteRepack,
   setRepackStatus,
+  promptForGameExePath,
   getCarouselVideoPosition,
   invalidateRepacksCache,
 } from "../../lib/db";
@@ -543,13 +550,19 @@ const RepackStatusActionGroup: React.FC<{
     return () => window.removeEventListener("fitrepacks-games-updated", syncState);
   }, [syncState]);
 
-  const handleStatusChange = (status: "installed" | "wishlist" | "completed" | "none") => {
+  const handleStatusChange = async (status: "installed" | "wishlist" | "completed" | "none") => {
     let targetStatus = status;
     if (status === "installed" && isInst) targetStatus = "none";
     else if (status === "wishlist" && isWish) targetStatus = "none";
     else if (status === "completed" && isComp) targetStatus = "none";
 
-    setRepackStatus(post.id, post, targetStatus);
+    let chosenExePath: string | undefined;
+    if (targetStatus === "installed") {
+      const picked = await promptForGameExePath(post.title);
+      if (picked) chosenExePath = picked;
+    }
+
+    setRepackStatus(post.id, post, targetStatus, chosenExePath);
     syncState();
   };
 
@@ -807,23 +820,31 @@ const RepackGridCard: React.FC<{
           </Stack>
 
           {/* Action Bar */}
-          <Group justify="space-between" align="center" pt={6} mt={4} style={{ borderTop: "1px solid var(--mantine-color-default-border)" }}>
-            <Tooltip label="Download Torrent Magnet (In-App)">
-              <Button
-                variant="filled"
-                color="blue"
-                size="xs"
-                leftSection={<Magnet size={13} />}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (onOpenTorrentDownload) {
-                    onOpenTorrentDownload(magnetUrl || post.url, post.title, post.coverUrl, post.repackSize);
-                  }
-                }}
-              >
-                Torrent Magnet
-              </Button>
-            </Tooltip>
+          <Group
+            justify={post.source !== "recomp" && post.source !== "steamrip" ? "space-between" : "flex-end"}
+            align="center"
+            pt={6}
+            mt={4}
+            style={{ borderTop: "1px solid var(--mantine-color-default-border)" }}
+          >
+            {post.source !== "recomp" && post.source !== "steamrip" && (
+              <Tooltip label="Download Torrent Magnet (In-App)">
+                <Button
+                  variant="filled"
+                  color="blue"
+                  size="xs"
+                  leftSection={<Magnet size={13} />}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (onOpenTorrentDownload) {
+                      onOpenTorrentDownload(magnetUrl || post.url, post.title, post.coverUrl, post.repackSize);
+                    }
+                  }}
+                >
+                  Torrent Magnet
+                </Button>
+              </Tooltip>
+            )}
 
             <Group gap="xs">
               <RepackStatusActionGroup post={post} size="sm" />
@@ -886,7 +907,8 @@ interface RepacksPostsViewProps {
   activeGameTitle?: string;
   externalSearchQuery?: string;
   onSearchChange?: (query: string) => void;
-  dataSource?: "fitgirl" | "steamrip";
+  dataSource?: "fitgirl" | "steamrip" | "recomp";
+  onDataSourceChange?: (source: "fitgirl" | "steamrip" | "recomp") => void;
   onOpenTorrentDownload?: (magnetUrl: string, title?: string, coverUrl?: string, repackSize?: string) => void;
 }
 
@@ -894,11 +916,27 @@ export const RepacksPostsView: React.FC<RepacksPostsViewProps> = ({
   activeGameTitle,
   externalSearchQuery,
   onSearchChange,
-  dataSource = "fitgirl",
+  dataSource: initialDataSource = "fitgirl",
+  onDataSourceChange,
   onOpenTorrentDownload,
 }) => {
+  const [internalDataSource, setInternalDataSource] = useState<"fitgirl" | "steamrip" | "recomp">(initialDataSource);
+  const dataSource = onDataSourceChange ? initialDataSource : internalDataSource;
   const [posts, setPosts] = useState<RepackPost[]>([]);
   const [popularFilter, setPopularFilter] = useState<"all" | "popular_month" | "popular_year">("all");
+  const handleDataSourceChange = useCallback(
+    (nextSource: "fitgirl" | "steamrip" | "recomp") => {
+      if (nextSource !== "fitgirl") {
+        setPopularFilter("all");
+      }
+      if (onDataSourceChange) {
+        onDataSourceChange(nextSource);
+      } else {
+        setInternalDataSource(nextSource);
+      }
+    },
+    [onDataSourceChange],
+  );
   const [internalSearchQuery, setInternalSearchQuery] = useState("");
   const searchQuery = externalSearchQuery !== undefined ? externalSearchQuery : internalSearchQuery;
   const setSearchQuery = onSearchChange || setInternalSearchQuery;
@@ -942,9 +980,13 @@ export const RepacksPostsView: React.FC<RepacksPostsViewProps> = ({
   const hasCheckedFirstTime = useRef(false);
 
   const topContainerRef = useRef<HTMLDivElement>(null);
+  const scrollViewportRef = useRef<HTMLDivElement>(null);
   const isInitialMount = useRef(true);
 
   const scrollToTop = useCallback(() => {
+    if (scrollViewportRef.current) {
+      scrollViewportRef.current.scrollTo({ top: 0, behavior: "smooth" });
+    }
     if (topContainerRef.current) {
       topContainerRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
     }
@@ -1023,6 +1065,8 @@ export const RepacksPostsView: React.FC<RepacksPostsViewProps> = ({
             body: `Discovered and added ${newCount} new game repack${newCount > 1 ? "s" : ""}!`,
           }).catch(() => {});
         }
+      } else if (dataSource === "recomp") {
+        await getRecompCatalogPosts(true);
       }
 
       await fetchRepacks();
@@ -1158,54 +1202,381 @@ export const RepacksPostsView: React.FC<RepacksPostsViewProps> = ({
 
   if (!isOnline) {
     return (
-      <Paper
-        p={60}
-        radius="lg"
-        bg="var(--mantine-color-default)"
-        style={{
-          textAlign: "center",
-          border: "1px solid var(--mantine-color-default-border)",
-          boxShadow: "0 10px 30px rgba(0, 0, 0, 0.2)",
-          marginTop: 10,
-        }}
-      >
-        <Box
-          w={72}
-          h={72}
-          bg="var(--mantine-color-red-9)"
+      <Box p="lg" style={{ width: "100%", overflowY: "auto" }}>
+        <Paper
+          p={60}
+          radius="lg"
+          className="daze-glass-panel"
           style={{
-            borderRadius: "50%",
-            margin: "0 auto",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            border: "1px solid var(--mantine-color-red-7)",
-            boxShadow: "0 0 24px rgba(239, 68, 68, 0.25)",
+            textAlign: "center",
+            border: "1px solid var(--mantine-color-default-border)",
+            boxShadow: "0 10px 30px rgba(0, 0, 0, 0.2)",
+            marginTop: 10,
           }}
         >
-          <WifiOff size={36} color="#ffffff" />
-        </Box>
+          <Box
+            w={72}
+            h={72}
+            bg="var(--mantine-color-red-9)"
+            style={{
+              borderRadius: "50%",
+              margin: "0 auto",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              border: "1px solid var(--mantine-color-red-7)",
+              boxShadow: "0 0 24px rgba(239, 68, 68, 0.25)",
+            }}
+          >
+            <WifiOff size={36} color="#ffffff" />
+          </Box>
 
-        <Title order={2} mt="lg" className="heading-font">
-          Offline Mode
-        </Title>
+          <Title order={2} mt="lg" className="heading-font">
+            Offline Mode
+          </Title>
 
-        <Text size="sm" c="dimmed" mt="xs" style={{ maxWidth: 460, margin: "8px auto 0" }}>
-          Connect to the internet to browse, search, and download releases from{" "}
-          {dataSource === "steamrip" ? "SteamRIP" : "FitGirl"}.
-        </Text>
+          <Text size="sm" c="dimmed" mt="xs" style={{ maxWidth: 460, margin: "8px auto 0" }}>
+            Connect to the internet to browse, search, and download releases from{" "}
+            {dataSource === "recomp" ? "Recomp" : dataSource === "steamrip" ? "SteamRIP" : "FitGirl"}.
+          </Text>
 
-        <Group justify="center" mt="xl" gap="md">
-          <Badge color="red" variant="filled" size="lg" radius="md" leftSection={<Lock size={14} />}>
-            Offline
-          </Badge>
-        </Group>
-      </Paper>
+          <Group justify="center" mt="xl" gap="md">
+            <Badge color="red" variant="filled" size="lg" radius="md" leftSection={<Lock size={14} />}>
+              Offline
+            </Badge>
+          </Group>
+        </Paper>
+      </Box>
     );
   }
 
   return (
-    <Stack gap="md" ref={topContainerRef}>
+    <Box
+      style={{
+        display: "flex",
+        width: "100%",
+        height: "100%",
+        overflow: "hidden",
+      }}
+    >
+      {/* Left Catalog Search & Filter Sidebar */}
+      <Box
+        w={{ base: 245, md: 275 }}
+        className="daze-glass-panel"
+        style={{
+          height: "100%",
+          flexShrink: 0,
+          borderRight: "1px solid rgba(255, 255, 255, 0.08)",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        {/* Sidebar Top: Search Field */}
+        <Box
+          p="sm"
+          style={{
+            borderBottom: "1px solid rgba(255, 255, 255, 0.06)",
+          }}
+        >
+          <TextInput
+            placeholder={
+              dataSource === "recomp"
+                ? "Search Recomp catalog..."
+                : dataSource === "steamrip"
+                  ? "Search SteamRIP games..."
+                  : "Search FitGirl repacks..."
+            }
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.currentTarget.value)}
+            leftSection={<Search size={14} color="#909296" />}
+            rightSection={
+              searchQuery ? (
+                <ActionIcon
+                  size="xs"
+                  variant="subtle"
+                  color="gray"
+                  onClick={() => setSearchQuery("")}
+                  aria-label="Clear search"
+                >
+                  <X size={12} />
+                </ActionIcon>
+              ) : null
+            }
+            radius="md"
+            size="xs"
+            styles={{
+              input: {
+                backgroundColor: "rgba(255, 255, 255, 0.05)",
+                borderColor: "rgba(255, 255, 255, 0.12)",
+              },
+            }}
+          />
+        </Box>
+
+        <ScrollArea style={{ flex: 1 }} p="sm" type="hover">
+          <Stack gap="sm">
+            {/* Source Switcher */}
+            <Box>
+              <Text size="10px" fw={700} c="dimmed" tt="uppercase" mb={6} style={{ letterSpacing: "0.5px" }}>
+                Source
+              </Text>
+              <SegmentedControl
+                fullWidth
+                value={dataSource}
+                onChange={(val) => handleDataSourceChange(val as "fitgirl" | "steamrip" | "recomp")}
+                size="xs"
+                radius="md"
+                color={dataSource === "recomp" ? "violet" : dataSource === "steamrip" ? "cyan" : "blue"}
+                bg="var(--mantine-color-body)"
+                data={[
+                  {
+                    value: "fitgirl",
+                    label: (
+                      <Group gap={5} wrap="nowrap" justify="center">
+                        <DownloadCloud size={13} />
+                        <span>FitGirl</span>
+                      </Group>
+                    ),
+                  },
+                  {
+                    value: "steamrip",
+                    label: (
+                      <Group gap={5} wrap="nowrap" justify="center">
+                        <Flame size={13} />
+                        <span>SteamRIP</span>
+                      </Group>
+                    ),
+                  },
+                  {
+                    value: "recomp",
+                    label: (
+                      <Group gap={5} wrap="nowrap" justify="center">
+                        <Sparkles size={13} />
+                        <span>Recomp</span>
+                      </Group>
+                    ),
+                  },
+                ]}
+              />
+            </Box>
+
+            {/* Popularity Filter (FitGirl only) */}
+            {dataSource === "fitgirl" && (
+              <Box>
+                <Text size="10px" fw={700} c="dimmed" tt="uppercase" mb={6} style={{ letterSpacing: "0.5px" }}>
+                  Popularity
+                </Text>
+                <SegmentedControl
+                  fullWidth
+                  value={popularFilter}
+                  onChange={(val) => setPopularFilter(val as "all" | "popular_month" | "popular_year")}
+                  size="xs"
+                  radius="md"
+                  bg="var(--mantine-color-body)"
+                  data={[
+                    { label: "All", value: "all" },
+                    { label: `Month (${globalStats.topMonthCount})`, value: "popular_month" },
+                    { label: `Year (${globalStats.topYearCount})`, value: "popular_year" },
+                  ]}
+                />
+              </Box>
+            )}
+
+            {/* Read Status */}
+            <Box>
+              <Text size="10px" fw={700} c="dimmed" tt="uppercase" mb={6} style={{ letterSpacing: "0.5px" }}>
+                Read Status
+              </Text>
+              <SegmentedControl
+                fullWidth
+                value={readFilter}
+                onChange={(val: any) => setReadFilter(val)}
+                color="brandCyan"
+                radius="md"
+                bg="var(--mantine-color-body)"
+                size="xs"
+                data={[
+                  {
+                    label: `All (${(
+                      debouncedSearchQuery ||
+                      popularFilter !== "all" ||
+                      (selectedCategories.length > 0 && !selectedCategories.includes("All"))
+                        ? (totalItems ?? 0)
+                        : (globalStats.totalCount ?? totalItems ?? 0)
+                    ).toLocaleString()})`,
+                    value: "all",
+                  },
+                  { label: `Unread (${(globalStats.unreadCount ?? 0).toLocaleString()})`, value: "unread" },
+                  { label: `Read (${(globalStats.readCount ?? 0).toLocaleString()})`, value: "read" },
+                ]}
+              />
+            </Box>
+
+            <Divider opacity={0.14} />
+
+            {/* Genres */}
+            <MultiSelect
+              label="Genres"
+              placeholder="Filter genres..."
+              data={CATALOG_GENRES}
+              value={selectedCategories.filter((c) => c !== "All")}
+              onChange={(selected) => setSelectedCategories(selected.length === 0 ? ["All"] : selected)}
+              searchable
+              clearable
+              leftSection={<Filter size={14} color="#00adb5" />}
+              radius="md"
+              size="xs"
+              maxDropdownHeight={240}
+            />
+
+            {/* Sort By */}
+            <Select
+              label="Sort By"
+              leftSection={<ArrowUpDown size={14} color="#00adb5" />}
+              value={sortBy}
+              onChange={(val: any) => setSortBy(val)}
+              data={[
+                { label: "Newest First", value: "newest" },
+                { label: "Oldest First", value: "oldest" },
+                { label: "Title (A-Z)", value: "title" },
+              ]}
+              radius="md"
+              size="xs"
+            />
+
+            {/* Layout Mode & Item Count */}
+            <Group justify="space-between" align="center" wrap="nowrap">
+              <SegmentedControl
+                value={viewMode}
+                onChange={(val: any) => setViewMode(val)}
+                data={[
+                  {
+                    label: (
+                      <Tooltip label="Grid View" withArrow position="top">
+                        <Center style={{ width: "100%", height: "100%" }}>
+                          <LayoutGrid size={15} />
+                        </Center>
+                      </Tooltip>
+                    ),
+                    value: "grid",
+                  },
+                  {
+                    label: (
+                      <Tooltip label="List View" withArrow position="top">
+                        <Center style={{ width: "100%", height: "100%" }}>
+                          <List size={15} />
+                        </Center>
+                      </Tooltip>
+                    ),
+                    value: "list",
+                  },
+                ]}
+                color="brandCyan"
+                radius="md"
+                bg="var(--mantine-color-body)"
+                size="xs"
+              />
+
+              {isLoading ? (
+                <Badge size="sm" color="brandCyan" variant="light" radius="md" leftSection={<Loader size={10} color="brandCyan" />}>
+                  Loading...
+                </Badge>
+              ) : (
+                <Badge size="sm" variant="subtle" color="gray" radius="md" style={{ textTransform: "none" }}>
+                  {(totalItems ?? 0).toLocaleString()} items
+                </Badge>
+              )}
+            </Group>
+
+            <Divider opacity={0.14} />
+
+            {/* Actions */}
+            <Stack gap="xs">
+              <Button
+                fullWidth
+                size="xs"
+                variant="light"
+                color="blue"
+                leftSection={<RefreshCw size={14} className={isRefreshing ? "animate-spin" : ""} />}
+                onClick={handleRefresh}
+                loading={isRefreshing || isLoading}
+                radius="md"
+              >
+                Refresh
+              </Button>
+
+              {dataSource === "steamrip" && (
+                scrapeProgress.isRunning ? (
+                  <Button
+                    fullWidth
+                    size="xs"
+                    variant="light"
+                    color="red"
+                    leftSection={<Square size={12} fill="currentColor" />}
+                    onClick={handleStopScraping}
+                    radius="md"
+                  >
+                    Stop Scraping
+                  </Button>
+                ) : (
+                  <Button
+                    fullWidth
+                    size="xs"
+                    variant="light"
+                    color="cyan"
+                    leftSection={<DownloadCloud size={14} />}
+                    onClick={handleStartScraping}
+                    radius="md"
+                  >
+                    {totalItems === 0 ? "Start Scraping" : "Scrape SteamRIP"}
+                  </Button>
+                )
+              )}
+
+              <Button
+                fullWidth
+                size="xs"
+                variant="light"
+                color="brandCyan"
+                leftSection={<CheckCheck size={14} />}
+                onClick={handleMarkAllRead}
+                loading={isMarkingAllRead}
+                disabled={isMarkingAllRead}
+                radius="md"
+              >
+                Mark All Read
+              </Button>
+
+              {(searchQuery ||
+                popularFilter !== "all" ||
+                readFilter !== "all" ||
+                (selectedCategories.length > 0 && (selectedCategories.length > 1 || selectedCategories[0] !== "All"))) && (
+                <Button
+                  fullWidth
+                  size="xs"
+                  variant="subtle"
+                  color="gray"
+                  leftSection={<RotateCcw size={13} />}
+                  onClick={() => {
+                    setSearchQuery("");
+                    setPopularFilter("all");
+                    setReadFilter("all");
+                    setSelectedCategories(["All"]);
+                  }}
+                  radius="md"
+                >
+                  Reset Filters
+                </Button>
+              )}
+            </Stack>
+          </Stack>
+        </ScrollArea>
+      </Box>
+
+      {/* Right Scrollable Repacks Area */}
+      <Box style={{ flex: 1, minWidth: 0, height: "100%" }}>
+        <ScrollArea h="100%" type="auto" viewportRef={scrollViewportRef}>
+          <Stack gap="md" p="lg" ref={topContainerRef}>
       {activeGameTitle && (
         <Alert icon={<AlertCircle size={16} />} color="orange" radius="md" p="xs">
           <Text size="xs" fw={700}>
@@ -1265,215 +1636,12 @@ export const RepacksPostsView: React.FC<RepacksPostsViewProps> = ({
         </Paper>
       )}
 
-      {/* Controls & Filter Toolbar */}
-      <Paper
-        p="sm"
-        radius="lg"
-        bg="var(--mantine-color-default)"
-        style={{
-          border: "1px solid var(--mantine-color-default-border)",
-          boxShadow: "0 2px 10px rgba(0, 0, 0, 0.08)",
-        }}
-      >
-        <Stack gap="sm">
-          {/* Row 1: Filters & View Modes */}
-          <Group justify="space-between" align="center" wrap="wrap" gap="sm">
-            <Group gap="sm" wrap="wrap" style={{ flex: 1, minWidth: 260 }}>
-              {dataSource === "fitgirl" && (
-                <SegmentedControl
-                  value={popularFilter}
-                  onChange={(val) => setPopularFilter(val as "all" | "popular_month" | "popular_year")}
-                  size="xs"
-                  radius="md"
-                  data={[
-                    { label: "All Repacks", value: "all" },
-                    { label: `Top Month (${globalStats.topMonthCount})`, value: "popular_month" },
-                    { label: `Top Year (${globalStats.topYearCount})`, value: "popular_year" },
-                  ]}
-                />
-              )}
-
-              <MultiSelect
-                placeholder="Filter genres..."
-                data={CATALOG_GENRES}
-                value={selectedCategories.filter((c) => c !== "All")}
-                onChange={(selected) => setSelectedCategories(selected.length === 0 ? ["All"] : selected)}
-                searchable
-                clearable
-                leftSection={<Filter size={14} color="#00adb5" />}
-                radius="md"
-                size="xs"
-                w={{ base: "100%", sm: 220 }}
-                maxDropdownHeight={240}
-              />
-            </Group>
-
-            <Group gap="xs" wrap="nowrap">
-              <Select
-                leftSection={<ArrowUpDown size={14} color="#00adb5" />}
-                value={sortBy}
-                onChange={(val: any) => setSortBy(val)}
-                data={[
-                  { label: "Newest First", value: "newest" },
-                  { label: "Oldest First", value: "oldest" },
-                  { label: "Title (A-Z)", value: "title" },
-                ]}
-                w={145}
-                radius="md"
-                size="xs"
-              />
-
-              <SegmentedControl
-                value={viewMode}
-                onChange={(val: any) => setViewMode(val)}
-                data={[
-                  {
-                    label: (
-                      <Tooltip label="Grid View" withArrow position="top">
-                        <Center style={{ width: "100%", height: "100%" }}>
-                          <LayoutGrid size={15} />
-                        </Center>
-                      </Tooltip>
-                    ),
-                    value: "grid",
-                  },
-                  {
-                    label: (
-                      <Tooltip label="List View" withArrow position="top">
-                        <Center style={{ width: "100%", height: "100%" }}>
-                          <List size={15} />
-                        </Center>
-                      </Tooltip>
-                    ),
-                    value: "list",
-                  },
-                ]}
-                color="brandCyan"
-                radius="md"
-                bg="var(--mantine-color-body)"
-                size="xs"
-              />
-
-              <Button
-                size="xs"
-                variant="light"
-                color="blue"
-                leftSection={<RefreshCw size={14} className={isRefreshing ? "animate-spin" : ""} />}
-                onClick={handleRefresh}
-                loading={isRefreshing || isLoading}
-                radius="md"
-              >
-                Refresh
-              </Button>
-
-              {dataSource === "steamrip" && (
-                scrapeProgress.isRunning ? (
-                  <Button
-                    size="xs"
-                    variant="light"
-                    color="red"
-                    leftSection={<Square size={12} fill="currentColor" />}
-                    onClick={handleStopScraping}
-                    radius="md"
-                  >
-                    Stop Scraping
-                  </Button>
-                ) : (
-                  <Button
-                    size="xs"
-                    variant="light"
-                    color="cyan"
-                    leftSection={<DownloadCloud size={14} />}
-                    onClick={handleStartScraping}
-                    radius="md"
-                  >
-                    {totalItems === 0 ? "Start Scraping" : "Scrape SteamRIP"}
-                  </Button>
-                )
-              )}
-
-              {isLoading ? (
-                <Badge size="sm" color="brandCyan" variant="light" radius="md" leftSection={<Loader size={10} color="brandCyan" />}>
-                  Loading...
-                </Badge>
-              ) : (
-                <Badge size="sm" variant="subtle" color="gray" radius="md" style={{ textTransform: "none" }}>
-                  {(totalItems ?? 0).toLocaleString()} items
-                </Badge>
-              )}
-            </Group>
-          </Group>
-
-          {/* Row 2: Read Status and Actions */}
-          <Group justify="space-between" align="center" wrap="wrap" gap="sm">
-            <Group gap="xs" wrap="wrap">
-              <SegmentedControl
-                value={readFilter}
-                onChange={(val: any) => setReadFilter(val)}
-                data={[
-                  {
-                    label: `All (${(
-                      debouncedSearchQuery ||
-                      popularFilter !== "all" ||
-                      (selectedCategories.length > 0 && !selectedCategories.includes("All"))
-                        ? (totalItems ?? 0)
-                        : (globalStats.totalCount ?? totalItems ?? 0)
-                    ).toLocaleString()})`,
-                    value: "all",
-                  },
-                  { label: `Unread (${(globalStats.unreadCount ?? 0).toLocaleString()})`, value: "unread" },
-                  { label: `Read (${(globalStats.readCount ?? 0).toLocaleString()})`, value: "read" },
-                ]}
-                color="brandCyan"
-                radius="md"
-                bg="var(--mantine-color-body)"
-                size="xs"
-              />
-
-              <Tooltip label="Mark all releases as read" withArrow>
-                <Button
-                  size="xs"
-                  variant="light"
-                  color="brandCyan"
-                  leftSection={<CheckCheck size={14} />}
-                  onClick={handleMarkAllRead}
-                  loading={isMarkingAllRead}
-                  disabled={isMarkingAllRead}
-                  radius="md"
-                >
-                  Mark All Read
-                </Button>
-              </Tooltip>
-            </Group>
-
-            {(popularFilter !== "all" ||
-              readFilter !== "all" ||
-              (selectedCategories.length > 0 && (selectedCategories.length > 1 || selectedCategories[0] !== "All"))) && (
-              <Button
-                size="xs"
-                variant="subtle"
-                color="gray"
-                leftSection={<RotateCcw size={13} />}
-                onClick={() => {
-                  setPopularFilter("all");
-                  setReadFilter("all");
-                  setSelectedCategories(["All"]);
-                }}
-                radius="md"
-              >
-                Reset Filters
-              </Button>
-            )}
-          </Group>
-        </Stack>
-      </Paper>
-
       {/* Main Repacks Listing */}
       {isLoading && posts.length === 0 ? (
         <Stack gap="md">
           <Center p="xs">
             <Badge size="md" color="blue" variant="light" leftSection={<Loader size={13} color="blue" />} radius="xl">
-              Loading {dataSource === "steamrip" ? "SteamRIP" : "FitGirl"} repacks...
+              Loading {dataSource === "recomp" ? "Recomp" : dataSource === "steamrip" ? "SteamRIP" : "FitGirl"} {dataSource === "recomp" ? "catalog" : "repacks"}...
             </Badge>
           </Center>
 
@@ -1625,22 +1793,24 @@ export const RepacksPostsView: React.FC<RepacksPostsViewProps> = ({
                       </Group>
 
                       <Group gap="xs" wrap="nowrap">
-                        <Tooltip label="Download Torrent">
-                          <ActionIcon
-                            variant="filled"
-                            color="blue"
-                            size="md"
-                            radius="md"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (onOpenTorrentDownload) {
-                                onOpenTorrentDownload(magnetUrl || post.url, post.title, post.coverUrl, post.repackSize);
-                              }
-                            }}
-                          >
-                            <Magnet size={15} />
-                          </ActionIcon>
-                        </Tooltip>
+                        {post.source !== "recomp" && post.source !== "steamrip" && (
+                          <Tooltip label="Download Torrent">
+                            <ActionIcon
+                              variant="filled"
+                              color="blue"
+                              size="md"
+                              radius="md"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (onOpenTorrentDownload) {
+                                  onOpenTorrentDownload(magnetUrl || post.url, post.title, post.coverUrl, post.repackSize);
+                                }
+                              }}
+                            >
+                              <Magnet size={15} />
+                            </ActionIcon>
+                          </Tooltip>
+                        )}
 
                         <RepackStatusActionGroup post={post} size="sm" />
 
@@ -1844,6 +2014,9 @@ export const RepacksPostsView: React.FC<RepacksPostsViewProps> = ({
           )}
         </Paper>
       )}
+          </Stack>
+        </ScrollArea>
+      </Box>
 
       {/* Detail Modal */}
       <RepackDetailModal
@@ -1889,6 +2062,6 @@ export const RepacksPostsView: React.FC<RepacksPostsViewProps> = ({
           </Group>
         </Stack>
       </Modal>
-    </Stack>
+    </Box>
   );
 };

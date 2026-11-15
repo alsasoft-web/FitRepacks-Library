@@ -52,6 +52,7 @@ import {
   QueuedGame,
   MagnetDownloadItem,
   isTorrentAlreadyInQueue,
+  startDirectDownload,
 } from "../lib/downloadQueueStore";
 import { HoldToConfirmButton } from "./HoldToConfirmButton";
 
@@ -246,6 +247,25 @@ export const DownloadsView: React.FC = () => {
     infoHash?: string,
     currentStatus?: string,
   ) => {
+    const dl = magnetDownloads.find((d) => d.id === id);
+    if (dl?.kind === "direct") {
+      if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+        if (currentStatus === "downloading") {
+          await invoke("cancel_direct_download", { downloadId: id }).catch(() => {});
+          toggleMagnetPause(id);
+        } else if (dl.directUrl) {
+          await startDirectDownload({
+            title: dl.title,
+            url: dl.directUrl,
+            size: dl.size,
+            coverUrl: dl.coverUrl,
+            downloadDir: dl.downloadDir,
+          });
+        }
+      }
+      return;
+    }
+
     toggleMagnetPause(id);
     if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
       try {
@@ -336,12 +356,18 @@ export const DownloadsView: React.FC = () => {
   };
 
   const handleRemoveMagnet = async (id: string, infoHash?: string) => {
+    const target = magnetDownloads.find((d) => d.id === id);
     removeMagnetDownload(id);
-    if (infoHash && typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
-      try {
-        await invoke("cancel_torrent_download", { infoHash });
-      } catch (err) {
-        console.error("Failed to cancel torrent:", err);
+    if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+      if (target?.kind === "direct" && target.status === "downloading") {
+        await invoke("cancel_direct_download", { downloadId: id }).catch(() => {});
+      }
+      if (infoHash) {
+        try {
+          await invoke("cancel_torrent_download", { infoHash });
+        } catch (err) {
+          console.error("Failed to cancel torrent:", err);
+        }
       }
     }
   };
@@ -634,7 +660,7 @@ export const DownloadsView: React.FC = () => {
                     </Group>
 
                     <Group gap="xs">
-                      {(item.status === "completed" || item.progress >= 100) && (
+                      {item.kind !== "direct" && (item.status === "completed" || item.progress >= 100) && (
                         <Tooltip label="Detect setup.exe, launch installer, and auto-add to Library via desktop shortcut watcher">
                           <Button
                             size="xs"

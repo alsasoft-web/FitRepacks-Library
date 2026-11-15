@@ -23,7 +23,6 @@ import {
   syncRecentGamesToTrayAndTaskbar,
 } from "../lib/db";
 import { toggleThemeWithRipple } from "../lib/themeRipple";
-import { Sidebar } from "../components/layout/Sidebar";
 import { GameCard } from "../components/library/GameCard";
 import { GameDetailModal } from "../components/GameDetailModal";
 import { GameDetailView } from "../components/library/GameDetailView";
@@ -81,10 +80,13 @@ import {
   Badge,
   Modal,
   Title,
+  Slider,
+  Checkbox,
+  Divider,
 } from "@mantine/core";
+import { useNetwork } from "@mantine/hooks";
 import {
   Search,
-  FolderSearch,
   Plus,
   Flame,
   SlidersHorizontal,
@@ -92,12 +94,13 @@ import {
   X,
   LayoutGrid,
   List,
+  LayoutTemplate,
   Sun,
   Moon,
   Minus,
   Square,
-  Database,
   DownloadCloud,
+  Download,
   Pause,
   Play,
   Sparkles,
@@ -105,11 +108,15 @@ import {
   CheckCircle2,
   Bookmark,
   Star,
-  Layers,
   Trash2,
-  Globe,
   Map as MapIcon,
   Zap,
+  Gamepad2,
+  BarChart3,
+  Settings,
+  Lock,
+  Filter,
+  Pin,
 } from "lucide-react";
 
 // Memoized Header Live Download Progress (prevents Home from re-rendering every 1s during downloads)
@@ -412,8 +419,8 @@ function useTaskbarProgressSync() {
 }
 
 export default function Home() {
-  const { colorScheme, setColorScheme, toggleColorScheme } =
-    useMantineColorScheme();
+  const { online: isOnline = true } = useNetwork();
+  const { setColorScheme } = useMantineColorScheme();
   const computedColorScheme = useComputedColorScheme("dark", {
     getInitialValueInEffect: true,
   });
@@ -428,6 +435,9 @@ export default function Home() {
   const [games, setGames] = useState<Game[]>([]);
   const [pinnedGameIds, setPinnedGameIds] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<ActiveTab>("library");
+  const [catalogSource, setCatalogSource] = useState<
+    "fitgirl" | "steamrip" | "recomp"
+  >("fitgirl");
   const [visitedTabs, setVisitedTabs] = useState<Set<ActiveTab>>(
     () => new Set(["library"]),
   );
@@ -437,6 +447,16 @@ export default function Home() {
   >("all");
   const [sortOption, setSortOption] = useState<SortOption>("playtime-desc");
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
+  const [splitGridCols, setSplitGridCols] = useState<number>(3);
+  const [fullGridZoom, setFullGridZoom] = useState<number>(155);
+  const [isFilterPanelOpen, setIsFilterPanelOpen] = useState<boolean>(false);
+  const [genreFilter, setGenreFilter] = useState<string | null>(null);
+  const [sourceFilter, setSourceFilter] = useState<
+    "all" | "fitgirl" | "steamrip" | "manual"
+  >("all");
+  const [yearFilter, setYearFilter] = useState<string | null>(null);
+  const [notInstalledOnly, setNotInstalledOnly] = useState<boolean>(false);
+  const [hoveredGameId, setHoveredGameId] = useState<string | null>(null);
   const [selectedListGameId, setSelectedListGameId] = useState<string | null>(
     null,
   );
@@ -455,8 +475,24 @@ export default function Home() {
     hasLoadedInitialSettings.current = true;
 
     const savedMode = localStorage.getItem("fitrepacks_view_mode");
-    if (savedMode === "grid" || savedMode === "list") {
+    if (
+      savedMode === "grid" ||
+      savedMode === "list" ||
+      savedMode === "full-grid"
+    ) {
       setViewMode(savedMode);
+    }
+
+    const savedSplitCols = localStorage.getItem("fitrepacks_split_grid_cols");
+    if (savedSplitCols) {
+      const parsed = parseInt(savedSplitCols, 10);
+      if (parsed >= 2 && parsed <= 4) setSplitGridCols(parsed);
+    }
+
+    const savedFullZoom = localStorage.getItem("fitrepacks_full_grid_zoom");
+    if (savedFullZoom) {
+      const parsed = parseInt(savedFullZoom, 10);
+      if (parsed >= 110 && parsed <= 240) setFullGridZoom(parsed);
     }
 
     const savedId = localStorage.getItem("fitrepacks_selected_list_game_id");
@@ -506,11 +542,17 @@ export default function Home() {
         "analytics",
       ].includes(savedTab)
     ) {
-      setActiveTab(savedTab as any);
+      const normalizedTab = (
+        savedTab === "steamrip" ? "repacks" : savedTab
+      ) as ActiveTab;
+      if (savedTab === "steamrip") {
+        setCatalogSource("steamrip");
+      }
+      setActiveTab(normalizedTab);
       setVisitedTabs((prev) => {
-        if (prev.has(savedTab as any)) return prev;
+        if (prev.has(normalizedTab)) return prev;
         const next = new Set(prev);
-        next.add(savedTab as any);
+        next.add(normalizedTab);
         return next;
       });
     }
@@ -526,6 +568,20 @@ export default function Home() {
     setViewMode(mode);
     if (typeof window !== "undefined") {
       localStorage.setItem("fitrepacks_view_mode", mode);
+    }
+  }, []);
+
+  const handleSplitGridColsChange = useCallback((cols: number) => {
+    setSplitGridCols(cols);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("fitrepacks_split_grid_cols", String(cols));
+    }
+  }, []);
+
+  const handleFullGridZoomChange = useCallback((zoom: number) => {
+    setFullGridZoom(zoom);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("fitrepacks_full_grid_zoom", String(zoom));
     }
   }, []);
 
@@ -545,8 +601,21 @@ export default function Home() {
       | "completed"
       | "wishlist";
     setCategoryFilter(filter);
+    setNotInstalledOnly(false);
     if (typeof window !== "undefined") {
       localStorage.setItem("fitrepacks_category_filter", filter);
+    }
+  }, []);
+
+  const clearAllFilters = useCallback(() => {
+    setCategoryFilter("all");
+    setGenreFilter(null);
+    setSourceFilter("all");
+    setYearFilter(null);
+    setNotInstalledOnly(false);
+    setSearchQuery("");
+    if (typeof window !== "undefined") {
+      localStorage.setItem("fitrepacks_category_filter", "all");
     }
   }, []);
 
@@ -561,6 +630,7 @@ export default function Home() {
 
   const handleTabChange = useCallback((tab: ActiveTab) => {
     setActiveTab(tab);
+    setSearchQuery("");
     setVisitedTabs((prev) => {
       if (prev.has(tab)) return prev;
       const next = new Set(prev);
@@ -769,6 +839,11 @@ export default function Home() {
         setPinnedGameIds(getPinnedGameIds());
       }
     };
+
+    window.addEventListener("fitrepacks-games-updated", handleGamesUpdated);
+    window.addEventListener("fitrepacks-pinned-updated", handlePinnedUpdated);
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("keydown", handleKeyDown);
 
     return () => {
       window.removeEventListener(
@@ -1248,6 +1323,39 @@ export default function Home() {
           const isWish = g.isWishlisted;
           if (!isWish) return false;
         }
+        if (notInstalledOnly && g.isInstalled) {
+          return false;
+        }
+        if (genreFilter) {
+          if (!g.genres || !g.genres.includes(genreFilter)) {
+            return false;
+          }
+        }
+        if (sourceFilter !== "all") {
+          if (sourceFilter === "fitgirl" && !g.linkedFitgirlUrl && g.source !== "fitgirl") {
+            return false;
+          }
+          if (sourceFilter === "steamrip" && !g.linkedSteamripUrl && g.source !== "steamrip") {
+            return false;
+          }
+          if (
+            sourceFilter === "manual" &&
+            (g.linkedFitgirlUrl ||
+              g.linkedSteamripUrl ||
+              g.source === "fitgirl" ||
+              g.source === "steamrip")
+          ) {
+            return false;
+          }
+        }
+        if (yearFilter) {
+          const gameYear = g.releaseYear
+            ? String(g.releaseYear)
+            : g.releaseDate
+              ? String(new Date(g.releaseDate).getFullYear())
+              : null;
+          if (gameYear !== yearFilter) return false;
+        }
 
         // Hide adult games unless explicitly searching or filtering for adult categories
         const isAdultSelectedInSearch =
@@ -1346,21 +1454,36 @@ export default function Home() {
         if (sortOption === "title-asc") {
           return a.title.localeCompare(b.title);
         }
+        if (sortOption === "title-desc") {
+          return b.title.localeCompare(a.title);
+        }
         if (sortOption === "rating-desc") {
           return (b.rating || 0) - (a.rating || 0);
         }
         return 0;
       });
-  }, [games, searchQuery, categoryFilter, sortOption, pinnedGameIds]);
+  }, [
+    games,
+    searchQuery,
+    categoryFilter,
+    notInstalledOnly,
+    genreFilter,
+    sourceFilter,
+    yearFilter,
+    sortOption,
+    pinnedGameIds,
+  ]);
 
   const categoryCounts = useMemo(() => {
     let installed = 0;
+    let notInstalled = 0;
     let completed = 0;
     let wishlist = 0;
     let favorites = 0;
     for (let i = 0; i < games.length; i++) {
       const g = games[i];
       if (g.isInstalled) installed++;
+      else notInstalled++;
       if (g.isCompleted) completed++;
       if (g.isWishlisted) wishlist++;
       if (g.isFavorite) favorites++;
@@ -1368,516 +1491,1013 @@ export default function Home() {
     return {
       all: games.length,
       installed,
+      notInstalled,
       completed,
       wishlist,
       favorites,
     };
   }, [games]);
 
-  const categoryControlData = useMemo(
+  const availableGenres = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const g of games) {
+      if (!g.genres) continue;
+      for (const genre of g.genres) {
+        counts.set(genre, (counts.get(genre) || 0) + 1);
+      }
+    }
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, count]) => ({ name, count }));
+  }, [games]);
+
+  const availableYears = useMemo(() => {
+    const years = new Set<string>();
+    for (const g of games) {
+      if (g.releaseYear) years.add(String(g.releaseYear));
+      else if (g.releaseDate) {
+        const y = new Date(g.releaseDate).getFullYear();
+        if (!isNaN(y)) years.add(String(y));
+      }
+    }
+    return Array.from(years).sort((a, b) => Number(b) - Number(a));
+  }, [games]);
+
+  const activeFilterCount =
+    (categoryFilter !== "all" ? 1 : 0) +
+    (notInstalledOnly ? 1 : 0) +
+    (genreFilter ? 1 : 0) +
+    (sourceFilter !== "all" ? 1 : 0) +
+    (yearFilter ? 1 : 0);
+
+  const navItems: {
+    id: ActiveTab;
+    label: string;
+    icon: React.ReactNode;
+    badge?: string;
+    isLocked?: boolean;
+  }[] = useMemo(
     () => [
       {
-        label: (
-          <Center style={{ gap: 6 }}>
-            <Box component="span" fw={600}>
-              All
-            </Box>
-            <Box
-              component="span"
-              style={{
-                fontSize: "11px",
-                fontWeight: 700,
-                opacity: 0.85,
-                backgroundColor: "rgba(0, 0, 0, 0.25)",
-                padding: "2px 6px",
-                borderRadius: "10px",
-                lineHeight: 1,
-              }}
-            >
-              {categoryCounts.all}
-            </Box>
-          </Center>
-        ),
-        value: "all",
+        id: "library",
+        label: "Library",
+        icon: <Gamepad2 size={15} />,
+        badge: `${games.length}`,
       },
       {
-        label: (
-          <Center style={{ gap: 6 }}>
-            <HardDrive size={13} color="#60a5fa" />
-            <Box component="span" fw={600}>
-              Installed
-            </Box>
-            <Box
-              component="span"
-              style={{
-                fontSize: "11px",
-                fontWeight: 700,
-                opacity: 0.85,
-                backgroundColor: "rgba(0, 0, 0, 0.25)",
-                padding: "2px 6px",
-                borderRadius: "10px",
-                lineHeight: 1,
-              }}
-            >
-              {categoryCounts.installed}
-            </Box>
-          </Center>
+        id: "repacks",
+        label: "Catalog",
+        icon: isOnline ? (
+          <DownloadCloud size={15} />
+        ) : (
+          <Lock size={14} color="#ff6b6b" />
         ),
-        value: "installed",
+        isLocked: !isOnline,
       },
       {
-        label: (
-          <Center style={{ gap: 6 }}>
-            <CheckCircle2 size={13} color="#34d399" />
-            <Box component="span" fw={600}>
-              Completed
-            </Box>
-            <Box
-              component="span"
-              style={{
-                fontSize: "11px",
-                fontWeight: 700,
-                opacity: 0.85,
-                backgroundColor: "rgba(0, 0, 0, 0.25)",
-                padding: "2px 6px",
-                borderRadius: "10px",
-                lineHeight: 1,
-              }}
-            >
-              {categoryCounts.completed}
-            </Box>
-          </Center>
-        ),
-        value: "completed",
+        id: "downloads",
+        label: "Downloads",
+        icon: <Download size={15} />,
       },
       {
-        label: (
-          <Center style={{ gap: 6 }}>
-            <Bookmark size={13} color="#fb923c" />
-            <Box component="span" fw={600}>
-              Wishlist
-            </Box>
-            <Box
-              component="span"
-              style={{
-                fontSize: "11px",
-                fontWeight: 700,
-                opacity: 0.85,
-                backgroundColor: "rgba(0, 0, 0, 0.25)",
-                padding: "2px 6px",
-                borderRadius: "10px",
-                lineHeight: 1,
-              }}
-            >
-              {categoryCounts.wishlist}
-            </Box>
-          </Center>
-        ),
-        value: "wishlist",
-      },
-      {
-        label: (
-          <Center style={{ gap: 6 }}>
-            <Star size={13} color="#facc15" />
-            <Box component="span" fw={600}>
-              Favorites
-            </Box>
-            <Box
-              component="span"
-              style={{
-                fontSize: "11px",
-                fontWeight: 700,
-                opacity: 0.85,
-                backgroundColor: "rgba(0, 0, 0, 0.25)",
-                padding: "2px 6px",
-                borderRadius: "10px",
-                lineHeight: 1,
-              }}
-            >
-              {categoryCounts.favorites}
-            </Box>
-          </Center>
-        ),
-        value: "favorites",
+        id: "analytics",
+        label: "Analytics",
+        icon: <BarChart3 size={15} />,
       },
     ],
-    [categoryCounts],
+    [games.length, isOnline],
   );
+
+  const activeListGame = useMemo(() => {
+    return (
+      filteredGames.find((g) => g.id === selectedListGameId) ||
+      filteredGames[0] ||
+      null
+    );
+  }, [filteredGames, selectedListGameId]);
+
+  const ambientGame = useMemo(() => {
+    if (viewMode === "full-grid" && hoveredGameId) {
+      return games.find((g) => g.id === hoveredGameId) || activeListGame;
+    }
+    return activeListGame;
+  }, [viewMode, hoveredGameId, games, activeListGame]);
+
+  const ambientArtworkUrl =
+    ambientGame?.bannerUrl ||
+    ambientGame?.screenshots?.[0] ||
+    ambientGame?.coverUrl ||
+    null;
 
   const searchPlaceholder =
     activeTab === "library"
-      ? "Search game library (title, genre...)"
+      ? "Search"
       : activeTab === "repacks"
-        ? "Search FitGirl repacks (title, genre, publisher...)"
-        : activeTab === "steamrip"
-          ? "Search SteamRIP pre-installed games (title, genre...)"
-          : activeTab === "analytics"
-            ? "Search playtime analytics (title, genre...)"
-            : "Search...";
+        ? catalogSource === "recomp"
+          ? "Search Recomp catalog..."
+          : catalogSource === "steamrip"
+            ? "Search SteamRIP games..."
+            : "Search FitGirl repacks..."
+        : activeTab === "analytics"
+          ? "Search analytics..."
+          : "Search...";
+
+  const glassSelectStyles = {
+    input: {
+      backgroundColor: "rgba(255, 255, 255, 0.05)",
+      borderColor: "rgba(255, 255, 255, 0.12)",
+      backdropFilter: "blur(12px)",
+    },
+    dropdown: {
+      backgroundColor: "rgba(14, 18, 26, 0.82)",
+      backdropFilter: "blur(24px)",
+      borderColor: "rgba(255, 255, 255, 0.12)",
+    },
+  };
 
   return (
-    <AppShell
-      header={{ height: 56 }}
-      navbar={{
-        width: viewMode === "list" ? 280 : 260,
-        breakpoint: 0,
-      }}
-      padding={0}
-      bg="var(--mantine-color-body)"
-    >
-      {/* Sticky Custom App Header spanning above sidebar with full-height window controls */}
-      <AppShell.Header
-        data-tauri-drag-region
-        bg="var(--mantine-color-default)"
+    <>
+      {/* Ambient Blurred Game Artwork Background */}
+      <Box
+        aria-hidden="true"
         style={{
-          borderBottom: "1px solid var(--mantine-color-default-border)",
-          zIndex: 100,
-          userSelect: "none",
-          height: 56,
+          position: "fixed",
+          inset: 0,
+          zIndex: 0,
+          overflow: "hidden",
+          pointerEvents: "none",
+          backgroundColor: isDark ? "#08090d" : "#f1f5f9",
         }}
       >
-        <Group
-          h="100%"
-          justify="space-between"
-          align="center"
-          gap={0}
+        {ambientArtworkUrl && (
+          <Box
+            style={{
+              position: "absolute",
+              inset: -40,
+              backgroundImage: `url(${ambientArtworkUrl})`,
+              backgroundSize: "cover",
+              backgroundPosition: "center",
+              filter: isDark
+                ? "blur(60px) brightness(0.44) saturate(1.55)"
+                : "blur(68px) brightness(0.92) saturate(1.1) opacity(0.35)",
+              transition: "background-image 350ms ease, filter 300ms ease",
+              transform: "scale(1.08)",
+            }}
+          />
+        )}
+        <Box
+          style={{
+            position: "absolute",
+            inset: 0,
+            background: isDark
+              ? "radial-gradient(circle at 50% 18%, rgba(14, 18, 28, 0.28) 0%, rgba(8, 9, 13, 0.74) 100%)"
+              : "linear-gradient(180deg, rgba(255,255,255,0.65) 0%, rgba(241,245,249,0.92) 100%)",
+          }}
+        />
+      </Box>
+
+      <AppShell
+        header={{ height: 52 }}
+        padding={0}
+        bg="transparent"
+        style={{ position: "relative", zIndex: 1 }}
+      >
+        {/* Glassmorphic Top Header (All Navigation, View Modes, Quick Filters & Settings) */}
+        <AppShell.Header
           data-tauri-drag-region
-          style={{ width: "100%", height: "100%" }}
+          className="daze-glass-header"
+          style={{
+            zIndex: 100,
+            userSelect: "none",
+            height: 52,
+          }}
         >
-          {/* Left section: App Brand + Search Input */}
-          <Group gap="lg" px="md" data-tauri-drag-region align="center">
+          <Group
+            h="100%"
+            justify="space-between"
+            align="center"
+            gap={0}
+            wrap="nowrap"
+            data-tauri-drag-region
+            style={{ width: "100%", height: "100%" }}
+          >
+            {/* Header Left: Brand + Search + Category Panel Toggle + Quick Filter Icons */}
             <Group
-              gap="sm"
+              gap="xs"
+              px="sm"
               data-tauri-drag-region
-              style={{ cursor: "default" }}
+              align="center"
+              wrap="nowrap"
+              style={{ minWidth: 0 }}
             >
-              <ThemeIcon size={32} radius="md" variant="transparent">
-                <Image src="/favicon.svg" alt="FitRepacks Logo" w={32} h={32} />
-              </ThemeIcon>
-              <Group gap={8} data-tauri-drag-region align="center">
-                <Text fw={800} size="sm" style={{ letterSpacing: -0.5 }}>
-                  FitRepacks
-                </Text>
-                <Badge size="xs" color="blue" variant="filled">
-                  Client
-                </Badge>
+              <Group
+                gap={8}
+                data-tauri-drag-region
+                align="center"
+                wrap="nowrap"
+                style={{ cursor: "default", flexShrink: 0 }}
+              >
+                <ThemeIcon size={26} radius="md" variant="transparent">
+                  <Image
+                    src="/favicon.svg"
+                    alt="FitRepacks Logo"
+                    w={26}
+                    h={26}
+                  />
+                </ThemeIcon>
                 {isDevMode && (
                   <Badge
-                    size="sm"
+                    size="xs"
                     color="yellow"
                     variant="filled"
                     style={{
                       color: "#1a1500",
                       backgroundColor: "#fab005",
                       fontWeight: 900,
-                      letterSpacing: 0.8,
-                      fontSize: 10.5,
-                      paddingInline: 8,
-                      boxShadow: "0 0 12px rgba(250, 176, 5, 0.5)",
+                      letterSpacing: 0.6,
+                      fontSize: 9.5,
                     }}
                   >
-                    DEV MODE
+                    DEV
                   </Badge>
                 )}
                 {updaterStatus === "available" && updateDetails && (
                   <Tooltip
-                    label={`Update v${updateDetails.version} is available! Click to view details & install.`}
+                    label={`Update v${updateDetails.version} available — click to install`}
                     withArrow
                   >
                     <Badge
-                      size="sm"
+                      size="xs"
                       color="teal"
                       variant="filled"
-                      leftSection={<Sparkles size={12} />}
+                      leftSection={<Sparkles size={10} />}
                       onClick={() => setIsSettingsOpen(true)}
-                      style={{
-                        cursor: "pointer",
-                        fontWeight: 700,
-                        letterSpacing: 0.3,
-                        boxShadow: "0 0 10px rgba(32, 201, 151, 0.4)",
-                        transition: "transform 0.15s ease",
-                      }}
+                      style={{ cursor: "pointer", fontWeight: 700 }}
                     >
-                      Update v{updateDetails.version}
+                      v{updateDetails.version}
                     </Badge>
                   </Tooltip>
                 )}
                 {updaterStatus === "downloading" && (
-                  <Tooltip
-                    label="Downloading update... Click to open settings."
-                    withArrow
-                  >
+                  <Tooltip label="Downloading update..." withArrow>
                     <Badge
-                      size="sm"
+                      size="xs"
                       color="blue"
                       variant="filled"
-                      leftSection={<DownloadCloud size={12} />}
+                      leftSection={<DownloadCloud size={10} />}
                       onClick={() => setIsSettingsOpen(true)}
-                      style={{
-                        cursor: "pointer",
-                        fontWeight: 700,
-                      }}
+                      style={{ cursor: "pointer" }}
                     >
-                      Downloading Update...
+                      Updating...
                     </Badge>
                   </Tooltip>
                 )}
                 {updaterStatus === "ready-to-restart" && (
-                  <Tooltip
-                    label="Update is ready to install! Click to restart."
-                    withArrow
-                  >
+                  <Tooltip label="Restart to apply update" withArrow>
                     <Badge
-                      size="sm"
+                      size="xs"
                       color="green"
                       variant="filled"
-                      leftSection={<CheckCircle2 size={12} />}
+                      leftSection={<CheckCircle2 size={10} />}
                       onClick={() => setIsSettingsOpen(true)}
-                      style={{
-                        cursor: "pointer",
-                        fontWeight: 700,
-                        boxShadow: "0 0 12px rgba(64, 192, 87, 0.6)",
-                      }}
+                      style={{ cursor: "pointer", fontWeight: 700 }}
                     >
-                      Restart to Update
+                      Restart
                     </Badge>
                   </Tooltip>
                 )}
               </Group>
+
+              {/* Rounded Glassmorphic Search (hidden on Catalog tab where search lives in the filter sidebar) */}
+              {activeTab !== "repacks" && (
+                <TextInput
+                  placeholder={searchPlaceholder}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  leftSection={<Search size={14} color="#909296" />}
+                  rightSection={
+                    searchQuery ? (
+                      <ActionIcon
+                        size="xs"
+                        variant="subtle"
+                        color="gray"
+                        onClick={() => setSearchQuery("")}
+                      >
+                        <X size={12} />
+                      </ActionIcon>
+                    ) : null
+                  }
+                  radius="xl"
+                  size="xs"
+                  w={{ base: 140, sm: 190, lg: 230 }}
+                  styles={{
+                    input: {
+                      backgroundColor: isDark
+                        ? "rgba(255, 255, 255, 0.08)"
+                        : "rgba(15, 23, 42, 0.06)",
+                      borderColor: isDark
+                        ? "rgba(255, 255, 255, 0.14)"
+                        : "rgba(15, 23, 42, 0.12)",
+                    },
+                  }}
+                />
+              )}
+
+              {/* Quick Filter Icon Buttons (Library tab) */}
+              {activeTab === "library" && (
+                <Group gap={4} wrap="nowrap" visibleFrom="md">
+
+                  {[
+                    {
+                      id: "all",
+                      label: `All (${categoryCounts.all})`,
+                      icon: <Gamepad2 size={13} />,
+                      color: "blue",
+                    },
+                    {
+                      id: "installed",
+                      label: `Installed (${categoryCounts.installed})`,
+                      icon: <HardDrive size={13} />,
+                      color: "blue",
+                    },
+                    {
+                      id: "favorites",
+                      label: `Favorites (${categoryCounts.favorites})`,
+                      icon: <Star size={13} />,
+                      color: "yellow",
+                    },
+                    {
+                      id: "completed",
+                      label: `Completed (${categoryCounts.completed})`,
+                      icon: <CheckCircle2 size={13} />,
+                      color: "teal",
+                    },
+                    {
+                      id: "wishlist",
+                      label: `Wishlist (${categoryCounts.wishlist})`,
+                      icon: <Bookmark size={13} />,
+                      color: "orange",
+                    },
+                  ].map((cat) => {
+                    const active = categoryFilter === cat.id && !notInstalledOnly;
+                    return (
+                      <Tooltip key={cat.id} label={cat.label} withArrow>
+                        <ActionIcon
+                          size="sm"
+                          radius="md"
+                          variant={active ? "filled" : "subtle"}
+                          color={active ? cat.color : "gray"}
+                          onClick={() => handleCategoryFilterChange(cat.id)}
+                        >
+                          {cat.icon}
+                        </ActionIcon>
+                      </Tooltip>
+                    );
+                  })}
+                </Group>
+              )}
             </Group>
 
-            <TextInput
-              placeholder={searchPlaceholder}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              leftSection={<Search size={16} color="#909296" />}
-              rightSection={
-                searchQuery ? (
-                  <ActionIcon
-                    size="xs"
-                    variant="subtle"
-                    color="gray"
-                    onClick={() => setSearchQuery("")}
-                  >
-                    <X size={14} />
-                  </ActionIcon>
-                ) : null
-              }
-              radius="md"
-              size="xs"
-              style={{ width: 320 }}
-            />
-          </Group>
-
-          {/* Right section: Download Indicator + Theme + Actions + Native Full-Height Window Controls */}
-          <Group
-            gap="xs"
-            h="100%"
-            align="center"
-            style={{ height: "100%" }}
-            data-tauri-drag-region
-          >
-            <HeaderDownloadProgress onOpenDownloads={() => handleTabChange("downloads")} />
-
-            <Tooltip
-              label={isDark ? "Switch to Light Mode" : "Switch to Dark Mode"}
-            >
-              <ActionIcon
-                suppressHydrationWarning
-                variant="outline"
-                color={isDark ? "yellow" : "blue"}
-                onClick={handleToggleTheme}
-                size="sm"
-                radius="md"
-              >
-                <span suppressHydrationWarning>
-                  {!mounted ? (
-                    <Moon size={16} />
-                  ) : isDark ? (
-                    <Sun size={16} />
-                  ) : (
-                    <Moon size={16} />
-                  )}
-                </span>
-              </ActionIcon>
-            </Tooltip>
-
-            <Tooltip label="Interactive Game Maps Browser">
-              <ActionIcon
-                variant="light"
-                color="teal"
-                onClick={() => setIsMapsBrowserOpen(true)}
-                size="sm"
-                radius="md"
-              >
-                <MapIcon size={16} />
-              </ActionIcon>
-            </Tooltip>
-
-            <Tooltip label="Game Booster & Resource Cleaner">
-              <ActionIcon
-                variant="light"
-                color="yellow"
-                onClick={() => setIsBoosterOpen(true)}
-                size="sm"
-                radius="md"
-              >
-                <Zap size={16} />
-              </ActionIcon>
-            </Tooltip>
-
-            {activeTab === "library" && (
-              <Group gap="xs">
-                <Button
-                  color="blue"
-                  variant="light"
-                  size="xs"
-                  leftSection={<Sparkles size={14} />}
-                  onClick={() => setIsIgdbSearchOpen(true)}
-                  radius="md"
+            {/* Header Center: View Modes (List / Split Grid / Full Grid) + Filter Drawer + Main Nav Pills */}
+            <Group gap="xs" align="center" wrap="nowrap" data-tauri-drag-region>
+              {activeTab === "library" && (
+                <Group
+                  gap={2}
+                  p={3}
+                  wrap="nowrap"
+                  className="daze-glass-pill"
+                  style={{ borderRadius: 10, flexShrink: 0 }}
                 >
-                  Find on IGDB
-                </Button>
-                <Button
-                  color="blue"
-                  size="xs"
-                  leftSection={<Plus size={14} />}
-                  onClick={() => setIsAddOrScanModalOpen(true)}
-                  radius="md"
-                >
-                  Add Game
-                </Button>
+                  <Tooltip label="List View (FusionX / Daze)" withArrow>
+                    <ActionIcon
+                      size="sm"
+                      radius="sm"
+                      variant={viewMode === "list" ? "white" : "subtle"}
+                      color={viewMode === "list" ? "dark" : "gray"}
+                      onClick={() => handleViewModeChange("list")}
+                    >
+                      <List size={14} />
+                    </ActionIcon>
+                  </Tooltip>
+                  <Tooltip label="Split Grid View (Posters + Details)" withArrow>
+                    <ActionIcon
+                      size="sm"
+                      radius="sm"
+                      variant={viewMode === "grid" ? "white" : "subtle"}
+                      color={viewMode === "grid" ? "dark" : "gray"}
+                      onClick={() => handleViewModeChange("grid")}
+                    >
+                      <LayoutTemplate size={14} />
+                    </ActionIcon>
+                  </Tooltip>
+                  <Tooltip label="Full Grid View (Daze Posters)" withArrow>
+                    <ActionIcon
+                      size="sm"
+                      radius="sm"
+                      variant={viewMode === "full-grid" ? "white" : "subtle"}
+                      color={viewMode === "full-grid" ? "dark" : "gray"}
+                      onClick={() => handleViewModeChange("full-grid")}
+                    >
+                      <LayoutGrid size={14} />
+                    </ActionIcon>
+                  </Tooltip>
+                  <Divider orientation="vertical" mx={2} opacity={0.2} />
+                  <Tooltip label="Toggle Filter & Sort Panel" withArrow>
+                    <ActionIcon
+                      size="sm"
+                      radius="sm"
+                      variant={
+                        isFilterPanelOpen || activeFilterCount > 0
+                          ? "light"
+                          : "subtle"
+                      }
+                      color={
+                        isFilterPanelOpen || activeFilterCount > 0
+                          ? "cyan"
+                          : "gray"
+                      }
+                      onClick={() => setIsFilterPanelOpen((v) => !v)}
+                    >
+                      <Filter size={13} />
+                    </ActionIcon>
+                  </Tooltip>
+                </Group>
+              )}
+
+              {/* Top Navigation Pills (Replacing Sidebar Menu) */}
+              <Group
+                gap={3}
+                p={3}
+                wrap="nowrap"
+                className="daze-glass-pill"
+                style={{ borderRadius: 10, flexShrink: 0 }}
+              >
+                {navItems.map((item) => {
+                  const isActive = activeTab === item.id;
+                  return (
+                    <Tooltip
+                      key={item.id}
+                      label={
+                        item.isLocked
+                          ? "Internet required for online catalog"
+                          : item.label
+                      }
+                      withArrow
+                    >
+                      <UnstyledButton
+                        onClick={() => {
+                          if (item.isLocked) return;
+                          handleTabChange(item.id);
+                        }}
+                        px={10}
+                        py={4}
+                        style={{
+                          borderRadius: 7,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 6,
+                          backgroundColor: isActive
+                            ? "rgba(255, 255, 255, 0.14)"
+                            : "transparent",
+                          color: item.isLocked
+                            ? "var(--mantine-color-dimmed)"
+                            : isActive
+                              ? "#ffffff"
+                              : "var(--mantine-color-dimmed)",
+                          opacity: item.isLocked ? 0.5 : 1,
+                          cursor: item.isLocked ? "not-allowed" : "pointer",
+                          transition: "all 140ms ease",
+                        }}
+                      >
+                        {item.icon}
+                        <Text size="xs" fw={isActive ? 700 : 500} visibleFrom="xl">
+                          {item.label}
+                        </Text>
+                        {item.badge && (
+                          <Badge
+                            size="10px"
+                            variant="filled"
+                            color={isActive ? "blue" : "dark.5"}
+                            px={5}
+                            visibleFrom="xl"
+                          >
+                            {item.badge}
+                          </Badge>
+                        )}
+                      </UnstyledButton>
+                    </Tooltip>
+                  );
+                })}
               </Group>
-            )}
+            </Group>
 
-            <UserMenu />
-
-            {/* Custom Desktop Window Controls Filling Full Header Height */}
+            {/* Header Right: Downloads + Actions + Theme + Settings + User + Window Controls */}
             <Group
-              gap={0}
+              gap={6}
               h="100%"
-              align="stretch"
-              style={{
-                height: "100%",
-                marginLeft: 8,
-                borderLeft: "1px solid var(--mantine-color-default-border)",
-              }}
+              align="center"
+              wrap="nowrap"
+              style={{ height: "100%", flexShrink: 0 }}
+              data-tauri-drag-region
             >
-              <Tooltip label="Minimize">
-                <UnstyledButton
-                  onClick={handleMinimizeWindow}
-                  className="window-control-btn"
-                  style={{
-                    width: 48,
-                    height: "100%",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    color: "var(--mantine-color-dimmed)",
-                  }}
+              <HeaderDownloadProgress
+                onOpenDownloads={() => handleTabChange("downloads")}
+              />
+
+              {activeTab === "library" && (
+                <Group gap={5} wrap="nowrap">
+                  <Tooltip label="Find Game on IGDB" withArrow>
+                    <ActionIcon
+                      color="blue"
+                      variant="light"
+                      size="sm"
+                      radius="md"
+                      onClick={() => setIsIgdbSearchOpen(true)}
+                    >
+                      <Sparkles size={14} />
+                    </ActionIcon>
+                  </Tooltip>
+                  <Tooltip label="Add or Scan Game" withArrow>
+                    <Button
+                      color="blue"
+                      size="compact-xs"
+                      leftSection={<Plus size={13} />}
+                      onClick={() => setIsAddOrScanModalOpen(true)}
+                      radius="md"
+                    >
+                      Add
+                    </Button>
+                  </Tooltip>
+                </Group>
+              )}
+
+              <Tooltip label="Interactive Game Maps" withArrow>
+                <ActionIcon
+                  variant="subtle"
+                  color="teal"
+                  onClick={() => setIsMapsBrowserOpen(true)}
+                  size="sm"
+                  radius="md"
                 >
-                  <Minus size={15} />
-                </UnstyledButton>
+                  <MapIcon size={15} />
+                </ActionIcon>
               </Tooltip>
-              <Tooltip label="Maximize / Restore">
-                <UnstyledButton
-                  onClick={handleToggleMaximizeWindow}
-                  className="window-control-btn"
-                  style={{
-                    width: 48,
-                    height: "100%",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    color: "var(--mantine-color-dimmed)",
-                  }}
+
+              <Tooltip label="Game Booster & Resource Cleaner" withArrow>
+                <ActionIcon
+                  variant="subtle"
+                  color="yellow"
+                  onClick={() => setIsBoosterOpen(true)}
+                  size="sm"
+                  radius="md"
                 >
-                  <Square size={12} />
-                </UnstyledButton>
+                  <Zap size={15} />
+                </ActionIcon>
               </Tooltip>
-              <Tooltip label="Close">
-                <UnstyledButton
-                  onClick={handleCloseAppWindow}
-                  className="window-control-close-btn"
-                  style={{
-                    width: 48,
-                    height: "100%",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    color: "var(--mantine-color-dimmed)",
-                  }}
+
+              <Tooltip
+                label={isDark ? "Switch to Light Mode" : "Switch to Dark Mode"}
+                withArrow
+              >
+                <ActionIcon
+                  suppressHydrationWarning
+                  variant="subtle"
+                  color={isDark ? "yellow" : "blue"}
+                  onClick={handleToggleTheme}
+                  size="sm"
+                  radius="md"
                 >
-                  <X size={16} />
-                </UnstyledButton>
+                  <span suppressHydrationWarning>
+                    {!mounted ? (
+                      <Moon size={15} />
+                    ) : isDark ? (
+                      <Sun size={15} />
+                    ) : (
+                      <Moon size={15} />
+                    )}
+                  </span>
+                </ActionIcon>
               </Tooltip>
+
+              <Tooltip label="Settings & Download Path" withArrow>
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  onClick={() => setIsSettingsOpen(true)}
+                  size="sm"
+                  radius="md"
+                  aria-label="Settings"
+                >
+                  <Settings size={15} />
+                </ActionIcon>
+              </Tooltip>
+
+              <UserMenu />
+
+              {/* Custom Desktop Window Controls Filling Full Header Height */}
+              <Group
+                gap={0}
+                h="100%"
+                align="stretch"
+                wrap="nowrap"
+                style={{
+                  height: "100%",
+                  marginLeft: 4,
+                  borderLeft: "1px solid rgba(255, 255, 255, 0.08)",
+                }}
+              >
+                <Tooltip label="Minimize">
+                  <UnstyledButton
+                    onClick={handleMinimizeWindow}
+                    className="window-control-btn"
+                    style={{
+                      width: 44,
+                      height: "100%",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: "var(--mantine-color-dimmed)",
+                    }}
+                  >
+                    <Minus size={14} />
+                  </UnstyledButton>
+                </Tooltip>
+                <Tooltip label="Maximize / Restore">
+                  <UnstyledButton
+                    onClick={handleToggleMaximizeWindow}
+                    className="window-control-btn"
+                    style={{
+                      width: 44,
+                      height: "100%",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: "var(--mantine-color-dimmed)",
+                    }}
+                  >
+                    <Square size={11} />
+                  </UnstyledButton>
+                </Tooltip>
+                <Tooltip label="Close">
+                  <UnstyledButton
+                    onClick={handleCloseAppWindow}
+                    className="window-control-close-btn"
+                    style={{
+                      width: 44,
+                      height: "100%",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: "var(--mantine-color-dimmed)",
+                    }}
+                  >
+                    <X size={15} />
+                  </UnstyledButton>
+                </Tooltip>
+              </Group>
             </Group>
           </Group>
-        </Group>
-      </AppShell.Header>
+        </AppShell.Header>
 
-      <AppShell.Navbar
-        p={0}
-        bg="var(--mantine-color-body)"
-        style={{ borderRight: "1px solid var(--mantine-color-default-border)" }}
-      >
-        <Sidebar
-          activeTab={activeTab}
-          setActiveTab={handleTabChange}
-          gameCount={games.length}
-          activeGameTitle={activeGame?.title}
-          activeGameMinutes={0}
-          viewMode={viewMode}
-          onViewModeChange={handleViewModeChange}
-          categoryFilter={categoryFilter}
-          onCategoryFilterChange={handleCategoryFilterChange}
-          sortOption={sortOption}
-          onSortOptionChange={handleSortOptionChange}
-          allGames={games}
-          games={filteredGames}
-          pinnedGameIds={pinnedGameIds}
-          selectedGameId={selectedListGameId || filteredGames[0]?.id || null}
-          onSelectGame={handleSelectGame}
-          onLaunchGame={handleLaunchGame}
-          activeGameId={activeGame?.id || null}
-          onOpenSettings={() => setIsSettingsOpen(true)}
-        />
-      </AppShell.Navbar>
-
-      <AppShell.Main
-        ref={mainScrollRef}
-        bg="var(--mantine-color-body)"
-        style={{
-          overflowY: "auto",
-          height: "calc(100vh - var(--app-shell-header-height, 56px))",
-        }}
-      >
-        {/* Active Session Alert Banner (isolated timer) */}
-        <ActiveSessionBanner
-          activeGame={activeGame}
-          onStop={stopActiveSession}
-        />
-
-        {/* Main Content Body with Zero-Delay Persistent Tabs */}
-        <Box
-          className="tab-content-fade"
-          key={`tab-library-${viewMode}`}
+        <AppShell.Main
+          ref={mainScrollRef}
+          bg="transparent"
           style={{
-            display: activeTab === "library" ? "block" : "none",
-            height: "100%",
+            paddingTop: 52,
+            height: "100vh",
+            overflowY: "hidden",
+            display: "flex",
+            flexDirection: "column",
           }}
         >
-          {viewMode === "list" ? (
-            (() => {
-              const activeListGame =
-                filteredGames.find((g) => g.id === selectedListGameId) ||
-                filteredGames[0];
+          {/* LIBRARY TAB: 3 FusionX / Daze View Modes + Optional Right Filter Panel */}
+          <Box
+            className="tab-content-fade"
+            key={`tab-library-${viewMode}`}
+            style={{
+              display: activeTab === "library" ? "flex" : "none",
+              flex: 1,
+              minHeight: 0,
+              height: "100%",
+              width: "100%",
+              overflow: "hidden",
+              position: "relative",
+            }}
+          >
 
-              return activeListGame ? (
-                <ScrollArea
-                  h="calc(100vh - var(--app-shell-header-height, 56px))"
-                  type="auto"
-                  style={{ width: "100%", height: "100%" }}
+            {/* COLUMN 2: Compact List Column OR Split Grid Poster Column */}
+            {viewMode !== "full-grid" && (
+              <Box
+                w={
+                  viewMode === "list"
+                    ? { base: 220, md: 255 }
+                    : { base: 280, md: 360, xl: 410 }
+                }
+                className="daze-glass-panel"
+                style={{
+                  height: "100%",
+                  flexShrink: 0,
+                  borderRight: "1px solid rgba(255, 255, 255, 0.06)",
+                  display: "flex",
+                  flexDirection: "column",
+                }}
+              >
+                <ScrollArea style={{ flex: 1 }} p="xs" type="hover">
+                  {filteredGames.length === 0 ? (
+                    <Center p="xl">
+                      <Text size="xs" c="dimmed" ta="center">
+                        No games match your filters.
+                      </Text>
+                    </Center>
+                  ) : viewMode === "list" ? (
+                    <Stack gap={2}>
+                      {filteredGames.map((g) => {
+                        const isSelected = activeListGame?.id === g.id;
+                        const isRunning = activeGame?.id === g.id;
+                        return (
+                          <Group
+                            key={g.id}
+                            px={8}
+                            py={6}
+                            gap="xs"
+                            wrap="nowrap"
+                            className={`fusionx-list-row ${isSelected ? "is-selected" : ""}`}
+                            onClick={() => handleSelectGame(g.id)}
+                            onDoubleClick={() => handleLaunchGame(g)}
+                            style={{
+                              contentVisibility: "auto" as any,
+                              containIntrinsicSize: "220px 32px",
+                            }}
+                          >
+                            <Image
+                              src={g.iconUrl || g.coverUrl}
+                              w={20}
+                              h={20}
+                              radius={4}
+                              fit="cover"
+                              fallbackSrc="https://placehold.co/24x24/141517/3b82f6?text=G"
+                              loading="lazy"
+                              decoding="async"
+                              style={{ flexShrink: 0 }}
+                            />
+                            <Text
+                              size="xs"
+                              fw={isSelected ? 700 : 500}
+                              c={
+                                isRunning
+                                  ? "teal.3"
+                                  : isSelected
+                                    ? "white"
+                                    : g.isInstalled
+                                      ? "gray.2"
+                                      : "dimmed"
+                              }
+                              truncate
+                              style={{ flex: 1, minWidth: 0 }}
+                            >
+                              {g.title}
+                            </Text>
+                            <Group gap={4} wrap="nowrap" style={{ flexShrink: 0 }}>
+                              {isRunning && (
+                                <Box
+                                  style={{
+                                    width: 7,
+                                    height: 7,
+                                    borderRadius: "50%",
+                                    backgroundColor: "#20c997",
+                                    boxShadow: "0 0 8px #20c997",
+                                  }}
+                                />
+                              )}
+                              {pinnedGameIds.includes(g.id) && (
+                                <Pin
+                                  size={10}
+                                  fill="#7950f2"
+                                  color="#7950f2"
+                                  style={{ transform: "rotate(45deg)" }}
+                                />
+                              )}
+                              {g.isFavorite && (
+                                <Star size={11} fill="#e5e7eb" color="#e5e7eb" />
+                              )}
+                            </Group>
+                          </Group>
+                        );
+                      })}
+                    </Stack>
+                  ) : (
+                    <SimpleGrid cols={splitGridCols} spacing={8}>
+                      {filteredGames.map((g) => {
+                        const isSelected = activeListGame?.id === g.id;
+                        const isRunning = activeGame?.id === g.id;
+                        return (
+                          <Box
+                            key={g.id}
+                            className={`fusionx-poster-item ${isSelected ? "is-selected" : ""}`}
+                            onClick={() => handleSelectGame(g.id)}
+                            onDoubleClick={() => handleLaunchGame(g)}
+                            style={{
+                              contentVisibility: "auto" as any,
+                              containIntrinsicSize: "110px 165px",
+                            }}
+                          >
+                            <Image
+                              src={g.coverUrl}
+                              alt={g.title}
+                              w="100%"
+                              h="100%"
+                              fit="cover"
+                              fallbackSrc={`https://placehold.co/300x450/0f172a/3b82f6?text=${encodeURIComponent(g.title)}`}
+                              loading="lazy"
+                              decoding="async"
+                              style={{
+                                opacity: g.isInstalled || isRunning ? 1 : 0.72,
+                              }}
+                            />
+                            {g.isFavorite && (
+                              <Box
+                                pos="absolute"
+                                top={6}
+                                right={6}
+                                style={{
+                                  filter:
+                                    "drop-shadow(0 2px 4px rgba(0,0,0,0.9))",
+                                }}
+                              >
+                                <Star size={12} fill="#fcc419" color="#fcc419" />
+                              </Box>
+                            )}
+                            {isRunning && (
+                              <Badge
+                                pos="absolute"
+                                bottom={6}
+                                left={6}
+                                right={6}
+                                size="xs"
+                                color="teal"
+                                variant="filled"
+                              >
+                                RUNNING
+                              </Badge>
+                            )}
+                          </Box>
+                        );
+                      })}
+                    </SimpleGrid>
+                  )}
+                </ScrollArea>
+
+                {/* Split Grid Bottom Zoom Slider */}
+                {viewMode === "grid" && (
+                  <Group
+                    px="md"
+                    py={8}
+                    gap="xs"
+                    wrap="nowrap"
+                    align="center"
+                    style={{
+                      background: "rgba(255, 255, 255, 0.04)",
+                      backdropFilter: "blur(16px)",
+                      WebkitBackdropFilter: "blur(16px)",
+                      borderTop: "1px solid rgba(255, 255, 255, 0.08)",
+                    }}
+                  >
+                    <Minus size={12} color="var(--mantine-color-dimmed)" />
+                    <Slider
+                      value={splitGridCols}
+                      onChange={handleSplitGridColsChange}
+                      min={2}
+                      max={4}
+                      step={1}
+                      size="xs"
+                      color="gray.3"
+                      label={(v) => `${v} columns`}
+                      style={{ flex: 1 }}
+                    />
+                    <Plus size={12} color="var(--mantine-color-dimmed)" />
+                  </Group>
+                )}
+              </Box>
+            )}
+
+            {/* COLUMN 3: Main Viewport (GameDetailView in List/Split-Grid OR Full Grid View) */}
+            <Box
+              style={{
+                flex: 1,
+                minWidth: 0,
+                height: "100%",
+                position: "relative",
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
+              {/* Active Session Alert Banner (shown in main viewport, not over sidebar) */}
+              <ActiveSessionBanner
+                activeGame={activeGame}
+                onStop={stopActiveSession}
+              />
+              <Box style={{ flex: 1, minHeight: 0, position: "relative" }}>
+              {viewMode === "full-grid" ? (
+                <>
+                  <ScrollArea h="100%" type="auto">
+                    <Box p={{ base: "md", lg: "xl" }} pb={88}>
+                      {filteredGames.length > 0 ? (
+                        <Box
+                          className="library-grid-container"
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: `repeat(auto-fill, minmax(${fullGridZoom}px, 1fr))`,
+                            gap: 14,
+                          }}
+                        >
+                          {filteredGames.map((game) => (
+                            <GameCard
+                              key={game.id}
+                              game={game}
+                              isPlaying={activeGame?.id === game.id}
+                              isAnyGameRunning={activeGame !== null}
+                              isPinned={pinnedGameIds.includes(game.id)}
+                              onTogglePin={handleTogglePin}
+                              onLaunch={handleLaunchGame}
+                              onOpenDetails={handleOpenDetails}
+                              onEdit={handleOpenEditModal}
+                              onToggleFavorite={handleToggleFavorite}
+                              onToggleCompleted={handleToggleCompleted}
+                              onStatusChange={handleStatusChange}
+                              onDelete={handleRemoveFromList}
+                              onHoverGame={(g) => setHoveredGameId(g?.id || null)}
+                            />
+                          ))}
+                        </Box>
+                      ) : (
+                        <Paper
+                          p={60}
+                          radius="lg"
+                          className="daze-glass-panel"
+                          style={{
+                            textAlign: "center",
+                            border: "1px solid rgba(255, 255, 255, 0.08)",
+                          }}
+                        >
+                          <Clock
+                            size={40}
+                            color="#5c5f66"
+                            style={{ margin: "0 auto" }}
+                          />
+                          <Text size="md" fw={700} c="white" mt="xs">
+                            No games found
+                          </Text>
+                          <Text size="xs" c="dimmed" mt={4}>
+                            {searchQuery
+                              ? `No games matched "${searchQuery}".`
+                              : 'Your library is empty. Click "+ Add" to start adding games.'}
+                          </Text>
+                        </Paper>
+                      )}
+                    </Box>
+                  </ScrollArea>
+
+                  {/* Floating Bottom-Center Zoom Slider (Daze Full Grid Style) */}
+                  <Paper
+                    px="md"
+                    py={6}
+                    radius="xl"
+                    className="daze-glass-pill"
+                    style={{
+                      position: "absolute",
+                      bottom: 16,
+                      left: "50%",
+                      transform: "translateX(-50%)",
+                      zIndex: 25,
+                      boxShadow: "0 8px 28px rgba(0, 0, 0, 0.55)",
+                    }}
+                  >
+                    <Group gap="sm" align="center" wrap="nowrap">
+                      <Text size="xs" fw={600} c="gray.3">
+                        Zoom
+                      </Text>
+                      <Slider
+                        value={fullGridZoom}
+                        onChange={handleFullGridZoomChange}
+                        min={110}
+                        max={240}
+                        step={5}
+                        w={130}
+                        size="xs"
+                        color="gray.2"
+                        label={(v) => `${v}px`}
+                      />
+                    </Group>
+                  </Paper>
+                </>
+              ) : activeListGame ? (
+                <Box
+                  h="100%"
+                  style={{
+                    width: "100%",
+                    position: "relative",
+                    overflow: "hidden",
+                  }}
                 >
                   <GameDetailView
                     game={activeListGame}
@@ -1888,183 +2508,216 @@ export default function Home() {
                     isPlaying={activeGame?.id === activeListGame.id}
                     isAnyGameRunning={activeGame !== null}
                     onOpenTorrentDownload={(data) => setTorrentModalData(data)}
-                    onGameUpdated={(updated) => {
+                    onGameUpdated={() => {
                       setGames(getStoredGames());
                     }}
                   />
-                </ScrollArea>
+                </Box>
               ) : (
-                <Paper
-                  p={60}
-                  style={{ textAlign: "center", margin: 40 }}
-                  radius="lg"
-                >
-                  <Text size="sm" c="dimmed">
-                    Select a game from the sidebar to view details.
-                  </Text>
-                </Paper>
-              );
-            })()
-          ) : (
-            <Box p="lg">
-              <Stack gap="lg">
-                <Paper
-                  p="xs"
-                  radius="lg"
-                  bg="var(--mantine-color-default)"
-                  style={{
-                    border: "1px solid var(--mantine-color-default-border)",
-                    boxShadow: "0 4px 16px rgba(0, 0, 0, 0.25)",
-                  }}
-                >
-                  <Group justify="space-between" wrap="wrap" gap="sm">
-                    <SegmentedControl
-                      value={categoryFilter}
-                      onChange={handleCategoryFilterChange}
-                      data={categoryControlData}
-                      radius="md"
-                      color="blue"
-                      size="sm"
-                      styles={{
-                        label: {
-                          padding: "6px 12px",
-                        },
-                      }}
-                    />
-
-                    <Group gap="sm">
-                      <Group gap={6} align="center">
-                        <SlidersHorizontal
-                          size={14}
-                          color="var(--mantine-color-dimmed)"
-                        />
-                        <Select
-                          value={sortOption}
-                          onChange={handleSortOptionChange}
-                          data={[
-                            { label: "Most Played", value: "playtime-desc" },
-                            { label: "Least Played", value: "playtime-asc" },
-                            { label: "Last Played", value: "recent" },
-                            {
-                              label: "Release (Newest)",
-                              value: "release-desc",
-                            },
-                            {
-                              label: "Release (Oldest)",
-                              value: "release-asc",
-                            },
-                            { label: "Recently Added", value: "added-desc" },
-                            { label: "First Added", value: "added-asc" },
-                            { label: "Size (Largest)", value: "size-desc" },
-                            { label: "Size (Smallest)", value: "size-asc" },
-                            { label: "Title (A-Z)", value: "title-asc" },
-                            { label: "Highest Rated", value: "rating-desc" },
-                          ]}
-                          radius="md"
-                          size="xs"
-                          w={170}
-                          comboboxProps={{
-                            shadow: "md",
-                            transitionProps: {
-                              transition: "pop",
-                              duration: 150,
-                            },
-                          }}
-                        />
-                      </Group>
-
-                      <SegmentedControl
-                        size="xs"
-                        value={viewMode}
-                        onChange={handleViewModeChange}
-                        data={[
-                          {
-                            label: (
-                              <Center style={{ gap: 5 }}>
-                                <LayoutGrid size={13} />
-                                <Box component="span">Grid</Box>
-                              </Center>
-                            ),
-                            value: "grid",
-                          },
-                          {
-                            label: (
-                              <Center style={{ gap: 5 }}>
-                                <List size={13} />
-                                <Box component="span">List</Box>
-                              </Center>
-                            ),
-                            value: "list",
-                          },
-                        ]}
-                        radius="md"
-                        color="blue"
-                      />
-                    </Group>
-                  </Group>
-                </Paper>
-
-                {/* Game Grid */}
-                {filteredGames.length > 0 ? (
-                  <SimpleGrid
-                    className="library-grid-container"
-                    cols={{ base: 2, sm: 3, md: 4, lg: 5, xl: 6 }}
-                    spacing="md"
-                  >
-                    {filteredGames.map((game) => (
-                      <GameCard
-                        key={game.id}
-                        game={game}
-                        isPlaying={activeGame?.id === game.id}
-                        isAnyGameRunning={activeGame !== null}
-                        isPinned={pinnedGameIds.includes(game.id)}
-                        onTogglePin={handleTogglePin}
-                        onLaunch={handleLaunchGame}
-                        onOpenDetails={handleOpenDetails}
-                        onEdit={handleOpenEditModal}
-                        onToggleFavorite={handleToggleFavorite}
-                        onToggleCompleted={handleToggleCompleted}
-                        onStatusChange={handleStatusChange}
-                        onDelete={handleRemoveFromList}
-                      />
-                    ))}
-                  </SimpleGrid>
-                ) : (
+                <Center h="100%" p="xl">
                   <Paper
-                    p={60}
+                    p={48}
                     radius="lg"
-                    bg="var(--mantine-color-default)"
+                    className="daze-glass-panel"
                     style={{
                       textAlign: "center",
-                      border: "1px solid var(--mantine-color-default-border)",
+                      border: "1px solid rgba(255, 255, 255, 0.08)",
                     }}
                   >
-                    <Clock
-                      size={40}
-                      color="#5c5f66"
-                      style={{ margin: "0 auto" }}
-                    />
-                    <Text size="md" fw={700} c="white" mt="xs">
-                      No games found
-                    </Text>
-                    <Text size="xs" c="dimmed" mt={4}>
-                      {searchQuery
-                        ? `No games matched "${searchQuery}".`
-                        : 'Your library is empty. Click "+ Add Game" to start adding games.'}
+                    <Text size="sm" c="dimmed">
+                      Select a game from the list or add one to get started.
                     </Text>
                   </Paper>
-                )}
-              </Stack>
+                </Center>
+              )}
+              </Box>
             </Box>
-          )}
-        </Box>
+
+            {/* COLUMN 4: Collapsible Right Filter & Sort Panel (FusionX Style) */}
+            {isFilterPanelOpen && (
+              <Box
+                w={260}
+                className="daze-glass-panel"
+                style={{
+                  height: "100%",
+                  flexShrink: 0,
+                  borderLeft: "1px solid rgba(255, 255, 255, 0.06)",
+                  display: "flex",
+                  flexDirection: "column",
+                }}
+              >
+                <Group
+                  justify="space-between"
+                  align="center"
+                  p="sm"
+                  style={{
+                    borderBottom: "1px solid rgba(255, 255, 255, 0.06)",
+                  }}
+                >
+                  <Button
+                    size="xs"
+                    radius="xl"
+                    variant="light"
+                    color="gray"
+                    className="daze-glass-pill"
+                    onClick={clearAllFilters}
+                    disabled={activeFilterCount === 0 && !searchQuery}
+                    style={{ flex: 1 }}
+                  >
+                    Clear Filters
+                  </Button>
+                  <ActionIcon
+                    size="sm"
+                    radius="xl"
+                    variant="subtle"
+                    color="gray"
+                    onClick={() => setIsFilterPanelOpen(false)}
+                  >
+                    <X size={14} />
+                  </ActionIcon>
+                </Group>
+
+                <ScrollArea style={{ flex: 1 }} p="sm" type="hover">
+                  <Stack gap="sm">
+                    <Stack gap={6}>
+                      <Checkbox
+                        size="xs"
+                        label={`Installed (${categoryCounts.installed})`}
+                        checked={categoryFilter === "installed"}
+                        onChange={(e) =>
+                          handleCategoryFilterChange(
+                            e.currentTarget.checked ? "installed" : "all",
+                          )
+                        }
+                      />
+                      <Checkbox
+                        size="xs"
+                        label={`Not installed (${categoryCounts.notInstalled})`}
+                        checked={notInstalledOnly}
+                        onChange={(e) => {
+                          const checked = e.currentTarget.checked;
+                          setNotInstalledOnly(checked);
+                          if (checked) setCategoryFilter("all");
+                        }}
+                      />
+                      <Checkbox
+                        size="xs"
+                        label={`Favorite (${categoryCounts.favorites})`}
+                        checked={categoryFilter === "favorites"}
+                        onChange={(e) =>
+                          handleCategoryFilterChange(
+                            e.currentTarget.checked ? "favorites" : "all",
+                          )
+                        }
+                      />
+                      <Checkbox
+                        size="xs"
+                        label={`Completed (${categoryCounts.completed})`}
+                        checked={categoryFilter === "completed"}
+                        onChange={(e) =>
+                          handleCategoryFilterChange(
+                            e.currentTarget.checked ? "completed" : "all",
+                          )
+                        }
+                      />
+                      <Checkbox
+                        size="xs"
+                        label={`Wishlist (${categoryCounts.wishlist})`}
+                        checked={categoryFilter === "wishlist"}
+                        onChange={(e) =>
+                          handleCategoryFilterChange(
+                            e.currentTarget.checked ? "wishlist" : "all",
+                          )
+                        }
+                      />
+                    </Stack>
+
+                    <Divider opacity={0.15} />
+
+                    <Select
+                      label="Sort By"
+                      size="xs"
+                      radius="md"
+                      styles={glassSelectStyles}
+                      value={sortOption}
+                      onChange={handleSortOptionChange}
+                      data={[
+                        { label: "Most Played", value: "playtime-desc" },
+                        { label: "Least Played", value: "playtime-asc" },
+                        { label: "Last Played", value: "recent" },
+                        { label: "Release (Newest)", value: "release-desc" },
+                        { label: "Release (Oldest)", value: "release-asc" },
+                        { label: "Recently Added", value: "added-desc" },
+                        { label: "First Added", value: "added-asc" },
+                        { label: "Size (Largest)", value: "size-desc" },
+                        { label: "Size (Smallest)", value: "size-asc" },
+                        { label: "Title (A-Z)", value: "title-asc" },
+                        { label: "Title (Z-A)", value: "title-desc" },
+                        { label: "Highest Rated", value: "rating-desc" },
+                      ]}
+                    />
+
+                    <Select
+                      label="Genre"
+                      size="xs"
+                      radius="md"
+                      styles={glassSelectStyles}
+                      placeholder="All genres"
+                      clearable
+                      searchable
+                      value={genreFilter}
+                      onChange={setGenreFilter}
+                      data={availableGenres.map((g) => ({
+                        label: `${g.name} (${g.count})`,
+                        value: g.name,
+                      }))}
+                    />
+
+                    <Select
+                      label="Source"
+                      size="xs"
+                      radius="md"
+                      styles={glassSelectStyles}
+                      value={sourceFilter}
+                      onChange={(val) =>
+                        setSourceFilter((val as any) || "all")
+                      }
+                      data={[
+                        { label: "All Sources", value: "all" },
+                        { label: "FitGirl Repacks", value: "fitgirl" },
+                        { label: "SteamRIP", value: "steamrip" },
+                        { label: "Manual / Other", value: "manual" },
+                      ]}
+                    />
+
+                    <Select
+                      label="Release Year"
+                      size="xs"
+                      radius="md"
+                      styles={glassSelectStyles}
+                      placeholder="Any year"
+                      clearable
+                      value={yearFilter}
+                      onChange={setYearFilter}
+                      data={availableYears}
+                    />
+                  </Stack>
+                </ScrollArea>
+              </Box>
+            )}
+          </Box>
 
         {visitedTabs.has("analytics") && (
           <Box
             className="tab-content-fade"
             key="tab-analytics"
             p="lg"
-            style={{ display: activeTab === "analytics" ? "block" : "none" }}
+            style={{
+              display: activeTab === "analytics" ? "block" : "none",
+              flex: 1,
+              minHeight: 0,
+              overflowY: "auto",
+            }}
           >
             <PlaytimeStats games={games} searchQuery={searchQuery} />
           </Box>
@@ -2074,14 +2727,21 @@ export default function Home() {
           <Box
             className="tab-content-fade"
             key="tab-repacks"
-            p="lg"
-            style={{ display: activeTab === "repacks" ? "block" : "none" }}
+            style={{
+              display: activeTab === "repacks" ? "flex" : "none",
+              flex: 1,
+              minHeight: 0,
+              height: "100%",
+              width: "100%",
+              overflow: "hidden",
+            }}
           >
             <RepacksPostsView
               activeGameTitle={activeGame?.title}
               externalSearchQuery={searchQuery}
               onSearchChange={setSearchQuery}
-              dataSource="fitgirl"
+              dataSource={catalogSource}
+              onDataSourceChange={setCatalogSource}
               onOpenTorrentDownload={(magnetUrl, title, coverUrl, repackSize) =>
                 setTorrentModalData({ magnetUrl, title, coverUrl, repackSize })
               }
@@ -2094,28 +2754,14 @@ export default function Home() {
             className="tab-content-fade"
             key="tab-downloads"
             p="lg"
-            style={{ display: activeTab === "downloads" ? "block" : "none" }}
+            style={{
+              display: activeTab === "downloads" ? "block" : "none",
+              flex: 1,
+              minHeight: 0,
+              overflowY: "auto",
+            }}
           >
             <DownloadsView />
-          </Box>
-        )}
-
-        {visitedTabs.has("steamrip") && (
-          <Box
-            className="tab-content-fade"
-            key="tab-steamrip"
-            p="lg"
-            style={{ display: activeTab === "steamrip" ? "block" : "none" }}
-          >
-            <RepacksPostsView
-              activeGameTitle={activeGame?.title}
-              externalSearchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
-              dataSource="steamrip"
-              onOpenTorrentDownload={(magnetUrl, title, coverUrl, repackSize) =>
-                setTorrentModalData({ magnetUrl, title, coverUrl, repackSize })
-              }
-            />
           </Box>
         )}
       </AppShell.Main>
@@ -2306,5 +2952,6 @@ export default function Home() {
         />
       )}
     </AppShell>
+    </>
   );
 }

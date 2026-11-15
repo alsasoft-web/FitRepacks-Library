@@ -2675,6 +2675,373 @@ async fn fetch_http_url(
     .map_err(|e| e.to_string())?
 }
 
+#[derive(Clone, serde::Serialize)]
+struct DirectDownloadProgress {
+    download_id: String,
+    file_name: String,
+    dest_path: String,
+    downloaded_bytes: u64,
+    total_bytes: Option<u64>,
+    progress: f64,
+    speed_bps: u64,
+    status: String,
+    error: Option<String>,
+}
+
+static DIRECT_DOWNLOAD_CANCELS: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<std::sync::atomic::AtomicBool>>>,
+> = std::sync::OnceLock::new();
+
+fn direct_download_cancels() -> &'static std::sync::Mutex<
+    std::collections::HashMap<String, std::sync::Arc<std::sync::atomic::AtomicBool>>,
+> {
+    DIRECT_DOWNLOAD_CANCELS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+fn sanitize_download_filename(name: &str) -> String {
+    let base = name
+        .split(['/', '\\'])
+        .last()
+        .unwrap_or("download.bin")
+        .split('?')
+        .next()
+        .unwrap_or("download.bin")
+        .trim();
+    let cleaned: String = base
+        .chars()
+        .map(|c| {
+            if matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') || c.is_control() {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let trimmed = cleaned.trim_matches(['.', ' ']);
+    if trimmed.is_empty() {
+        "download.bin".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+#[command]
+async fn cancel_direct_download(download_id: String) -> Result<bool, String> {
+    if let Ok(map) = direct_download_cancels().lock() {
+        if let Some(flag) = map.get(&download_id) {
+            flag.store(true, std::sync::atomic::Ordering::SeqCst);
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+#[command]
+async fn prepare_notification_image(
+    app: tauri::AppHandle,
+    image_url: Option<String>,
+) -> Result<String, String> {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let base_dir = app
+        .path()
+        .app_cache_dir()
+        .unwrap_or_else(|_| std::env::temp_dir().join("fitrepacks-library"))
+        .join("notif-images");
+    tokio::fs::create_dir_all(&base_dir)
+        .await
+        .map_err(|e| format!("Failed to create notif-images dir: {e}"))?;
+
+    let default_icon_path = base_dir.join("app-icon.png");
+    if !default_icon_path.exists() {
+        let icon_bytes: &[u8] = include_bytes!("../icons/128x128.png");
+        let _ = tokio::fs::write(&default_icon_path, icon_bytes).await;
+    }
+
+    let Some(raw) = image_url.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) else {
+        return Ok(default_icon_path.to_string_lossy().to_string());
+    };
+
+    if !raw.starts_with("http://") && !raw.starts_with("https://") {
+        let p = PathBuf::from(&raw);
+        if p.exists() {
+            return Ok(p.to_string_lossy().to_string());
+        }
+        return Ok(default_icon_path.to_string_lossy().to_string());
+    }
+
+    let mut hasher = DefaultHasher::new();
+    raw.hash(&mut hasher);
+    let hash = hasher.finish();
+    let lower = raw.to_lowercase();
+    let is_native_toast_fmt = lower.contains(".png") || lower.contains(".jpg") || lower.contains(".jpeg");
+    let ext = if lower.contains(".jpg") || lower.contains(".jpeg") {
+        "jpg"
+    } else {
+        "png"
+    };
+    let cached_path = base_dir.join(format!("{hash:x}.{ext}"));
+    if cached_path.exists() {
+        if let Ok(meta) = tokio::fs::metadata(&cached_path).await {
+            if meta.len() > 0 {
+                return Ok(cached_path.to_string_lossy().to_string());
+            }
+        }
+    }
+
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(6))
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return Ok(default_icon_path.to_string_lossy().to_string()),
+    };
+
+    if let Ok(resp) = client.get(&raw).send().await {
+        if resp.status().is_success() {
+            if let Ok(bytes) = resp.bytes().await {
+                if !bytes.is_empty() && bytes.len() <= 8 * 1024 * 1024 {
+                    if is_native_toast_fmt {
+                        if tokio::fs::write(&cached_path, &bytes).await.is_ok() {
+                            return Ok(cached_path.to_string_lossy().to_string());
+                        }
+                    } else if let Ok(img) = image::load_from_memory(&bytes) {
+                        let mut png_buf = Vec::new();
+                        if img
+                            .write_to(&mut std::io::Cursor::new(&mut png_buf), image::ImageFormat::Png)
+                            .is_ok()
+                        {
+                            if tokio::fs::write(&cached_path, &png_buf).await.is_ok() {
+                                return Ok(cached_path.to_string_lossy().to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(default_icon_path.to_string_lossy().to_string())
+}
+
+#[command]
+async fn send_rich_notification(
+    app: tauri::AppHandle,
+    title: String,
+    body: String,
+    image_url: Option<String>,
+) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::path::Path;
+        use tauri_winrt_notification::{Duration, IconCrop, Toast};
+
+        let app_icon_path = prepare_notification_image(app.clone(), None).await?;
+        let hero_path = match image_url.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            Some(url) => {
+                let resolved = prepare_notification_image(app.clone(), Some(url.to_string())).await?;
+                if resolved != app_icon_path {
+                    Some(resolved)
+                } else {
+                    None
+                }
+            }
+            None => None,
+        };
+
+        let app_id = if tauri::is_dev() {
+            Toast::POWERSHELL_APP_ID
+        } else {
+            app.config().identifier.as_str()
+        };
+
+        let mut toast = Toast::new(app_id)
+            .title(&title)
+            .text1(&body)
+            .icon(Path::new(&app_icon_path), IconCrop::Square, "FitRepacks Library")
+            .duration(Duration::Short);
+
+        if let Some(ref hero) = hero_path {
+            toast = toast.image(Path::new(hero), "Game Cover");
+        }
+
+        toast
+            .show()
+            .map_err(|e| format!("Failed to show Windows toast notification: {e:?}"))?;
+        return Ok(());
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (app, title, body, image_url);
+        Err("Rich native toast is only implemented for Windows".to_string())
+    }
+}
+
+#[command]
+async fn download_direct_file(
+    app: tauri::AppHandle,
+    download_id: String,
+    url: String,
+    download_dir: String,
+    file_name: Option<String>,
+) -> Result<String, String> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use tokio::io::AsyncWriteExt;
+
+    if !url.starts_with("https://") && !url.starts_with("http://") {
+        return Err("Only http/https URLs are supported".to_string());
+    }
+
+    let target_dir = if download_dir.trim().is_empty() {
+        dirs::download_dir().ok_or_else(|| "Could not determine Downloads directory".to_string())?
+    } else {
+        PathBuf::from(download_dir.trim())
+    };
+    tokio::fs::create_dir_all(&target_dir)
+        .await
+        .map_err(|e| format!("Failed to create download folder: {e}"))?;
+
+    let cancel_flag = Arc::new(AtomicBool::new(false));
+    if let Ok(mut map) = direct_download_cancels().lock() {
+        map.insert(download_id.clone(), cancel_flag.clone());
+    }
+
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let mut resp = match client.get(&url).send().await {
+        Ok(r) => r,
+        Err(e) => {
+            if let Ok(mut map) = direct_download_cancels().lock() {
+                map.remove(&download_id);
+            }
+            return Err(format!("Request failed: {e}"));
+        }
+    };
+
+    if !resp.status().is_success() {
+        let code = resp.status().as_u16();
+        if let Ok(mut map) = direct_download_cancels().lock() {
+            map.remove(&download_id);
+        }
+        return Err(format!("Download failed with HTTP {code}"));
+    }
+
+    let raw_name = file_name
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| url.split('/').last().unwrap_or("download.bin").to_string());
+    let safe_name = sanitize_download_filename(&raw_name);
+    let dest_path = target_dir.join(&safe_name);
+    let part_path = target_dir.join(format!("{safe_name}.part"));
+
+    let total_bytes = resp.content_length();
+    let mut file = tokio::fs::File::create(&part_path)
+        .await
+        .map_err(|e| format!("Failed to create file: {e}"))?;
+
+    let mut downloaded_bytes: u64 = 0;
+    let started_at = std::time::Instant::now();
+    let mut last_emit = std::time::Instant::now();
+
+    let emit_progress = |status: &str, downloaded: u64, err: Option<String>| {
+        let elapsed = started_at.elapsed().as_secs_f64().max(0.001);
+        let speed_bps = (downloaded as f64 / elapsed) as u64;
+        let progress = match total_bytes {
+            Some(total) if total > 0 => ((downloaded as f64 / total as f64) * 100.0).min(100.0),
+            _ => 0.0,
+        };
+        let _ = app.emit(
+            "direct-download-progress",
+            DirectDownloadProgress {
+                download_id: download_id.clone(),
+                file_name: safe_name.clone(),
+                dest_path: dest_path.to_string_lossy().to_string(),
+                downloaded_bytes: downloaded,
+                total_bytes,
+                progress,
+                speed_bps,
+                status: status.to_string(),
+                error: err,
+            },
+        );
+    };
+
+    emit_progress("downloading", 0, None);
+
+    loop {
+        if cancel_flag.load(Ordering::SeqCst) {
+            drop(file);
+            let _ = tokio::fs::remove_file(&part_path).await;
+            if let Ok(mut map) = direct_download_cancels().lock() {
+                map.remove(&download_id);
+            }
+            emit_progress("cancelled", downloaded_bytes, Some("Download cancelled".to_string()));
+            return Err("Download cancelled".to_string());
+        }
+
+        match resp.chunk().await {
+            Ok(Some(chunk)) => {
+                if let Err(e) = file.write_all(&chunk).await {
+                    drop(file);
+                    let _ = tokio::fs::remove_file(&part_path).await;
+                    if let Ok(mut map) = direct_download_cancels().lock() {
+                        map.remove(&download_id);
+                    }
+                    let msg = format!("Write error: {e}");
+                    emit_progress("error", downloaded_bytes, Some(msg.clone()));
+                    return Err(msg);
+                }
+                downloaded_bytes += chunk.len() as u64;
+                if last_emit.elapsed() >= std::time::Duration::from_millis(120) {
+                    emit_progress("downloading", downloaded_bytes, None);
+                    last_emit = std::time::Instant::now();
+                }
+            }
+            Ok(None) => break,
+            Err(e) => {
+                drop(file);
+                let _ = tokio::fs::remove_file(&part_path).await;
+                if let Ok(mut map) = direct_download_cancels().lock() {
+                    map.remove(&download_id);
+                }
+                let msg = format!("Stream error: {e}");
+                emit_progress("error", downloaded_bytes, Some(msg.clone()));
+                return Err(msg);
+            }
+        }
+    }
+
+    if let Err(e) = file.flush().await {
+        drop(file);
+        let _ = tokio::fs::remove_file(&part_path).await;
+        if let Ok(mut map) = direct_download_cancels().lock() {
+            map.remove(&download_id);
+        }
+        return Err(format!("Flush error: {e}"));
+    }
+    drop(file);
+
+    if let Err(e) = tokio::fs::rename(&part_path, &dest_path).await {
+        let _ = tokio::fs::remove_file(&part_path).await;
+        if let Ok(mut map) = direct_download_cancels().lock() {
+            map.remove(&download_id);
+        }
+        return Err(format!("Failed to finalize file: {e}"));
+    }
+
+    if let Ok(mut map) = direct_download_cancels().lock() {
+        map.remove(&download_id);
+    }
+    emit_progress("completed", downloaded_bytes, None);
+    Ok(dest_path.to_string_lossy().to_string())
+}
+
 fn get_maps_base_dir() -> PathBuf {
     if cfg!(debug_assertions) {
         if let Ok(curr) = std::env::current_dir() {
@@ -3807,7 +4174,11 @@ fn main() {
             get_map_absolute_path,
             delete_map_folder,
             list_downloaded_maps,
-            fetch_http_url
+            fetch_http_url,
+            download_direct_file,
+            cancel_direct_download,
+            prepare_notification_image,
+            send_rich_notification
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

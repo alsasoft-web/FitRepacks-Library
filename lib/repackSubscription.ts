@@ -169,6 +169,7 @@ interface PendingRepackNotification {
   source: string;
   repackSize?: string;
   originalSize?: string;
+  coverUrl?: string;
 }
 
 let pendingBatch: PendingRepackNotification[] = [];
@@ -198,6 +199,21 @@ function isDuplicate(key: string): boolean {
   return false;
 }
 
+function cleanNotificationTitle(raw: string): string {
+  let cleaned = (raw || "Unknown Game")
+    // Strip version / build / DLC suffixes commonly appended by FitGirl & SteamRIP
+    .replace(/\s*[–—-]\s*v\d[\s\S]*$/i, "")
+    .replace(/\s*\+\s*\d+\s*DLCs?[\s\S]*$/i, "")
+    .replace(/\s*\+\s*All\s+DLCs?[\s\S]*$/i, "")
+    .replace(/\s*[\[(](?:Build|v\d|Repack|Free Download)[^\])]*[\])]/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  if (cleaned.length > 52) {
+    cleaned = `${cleaned.slice(0, 49).trimEnd()}...`;
+  }
+  return cleaned || raw;
+}
+
 /**
  * Flush accumulated notifications. If 1 or 2, sends individually.
  * If more than 2, sends a single aggregated summary notification.
@@ -219,29 +235,22 @@ async function flushNotificationBatch(): Promise<void> {
       // 1 or 2 notifications: send individually
       for (const item of batch) {
         const isUpdate = item.action === "update";
-        const size = item.repackSize ? ` [${item.repackSize}]` : "";
-        const originalSize =
-          item.originalSize && item.originalSize !== "N/A"
-            ? ` (Original: ${item.originalSize})`
-            : "";
-        const sourceName =
-          item.source === "steamrip" ? "SteamRIP" : "FitGirl Repacks";
+        const shortTitle = cleanNotificationTitle(item.title);
+        const sourceLabel = item.source === "steamrip" ? "SteamRIP" : "FitGirl";
 
         const notificationTitle = isUpdate
-          ? item.source === "steamrip"
-            ? `SteamRIP Game Updated: ${item.title}`
-            : `FitGirl Repack Updated: ${item.title}`
-          : item.source === "steamrip"
-            ? `New SteamRIP Game: ${item.title}`
-            : `New FitGirl Repack: ${item.title}`;
+          ? `${sourceLabel} Update: ${shortTitle}`
+          : `New on ${sourceLabel}: ${shortTitle}`;
 
-        const bodyText = isUpdate
-          ? `${item.title}${size} has been updated on ${sourceName}!`
-          : `${item.title}${size}${originalSize} is now available on ${sourceName}!`;
+        const details: string[] = [];
+        if (item.repackSize) details.push(item.repackSize);
+        details.push(isUpdate ? "Update available" : "Ready to download");
+        const bodyText = details.join(" • ");
 
         await sendDesktopNotification({
           title: notificationTitle,
           body: bodyText,
+          image: item.coverUrl,
         });
       }
     } else {
@@ -254,15 +263,15 @@ async function flushNotificationBatch(): Promise<void> {
 
       let summaryBody = "";
       if (newCount > 0 && updateCount > 0) {
-        summaryBody = `${newCount} new game${newCount > 1 ? "s" : ""} added and ${updateCount} game${updateCount > 1 ? "s" : ""} updated.`;
+        summaryBody = `${newCount} new, ${updateCount} updated`;
       } else if (newCount > 0) {
-        summaryBody = `${newCount} new games are now available!`;
+        summaryBody = `${newCount} new games available`;
       } else {
-        summaryBody = `${updateCount} games have been updated!`;
+        summaryBody = `${updateCount} games updated`;
       }
 
       // Add preview of game titles
-      const sampleTitles = batch.slice(0, 3).map((item) => item.title);
+      const sampleTitles = batch.slice(0, 3).map((item) => cleanNotificationTitle(item.title));
       const remainingCount = batch.length - sampleTitles.length;
       const previewText =
         `\n• ${sampleTitles.join("\n• ")}` +
@@ -271,6 +280,7 @@ async function flushNotificationBatch(): Promise<void> {
       await sendDesktopNotification({
         title: "FitRepacks Library Updates",
         body: `${summaryBody}${previewText}`,
+        image: batch.find((item) => item.coverUrl)?.coverUrl,
       });
     }
   } catch (err) {
@@ -342,6 +352,7 @@ async function handleRepackEvent(
     await sendDesktopNotification({
       title: `[DEV TEST] ${sourceName} Test Insert`,
       body: `${title} (${record.repack_size || "N/A"}) was successfully inserted!`,
+      image: record.cover_url,
     });
     return;
   }
@@ -494,6 +505,7 @@ async function handleRepackEvent(
         await sendDesktopNotification({
           title: `Library Game Updated: ${matchedLibraryGame.title}`,
           body: `${matchedLibraryGame.title}${verStr} has a new update available on ${sourceName}!`,
+          image: matchedLibraryGame.coverUrl || record.cover_url,
         });
       }
     }
@@ -546,6 +558,7 @@ async function handleRepackEvent(
     source,
     repackSize: record.repack_size,
     originalSize: record.original_size,
+    coverUrl: record.cover_url,
   });
 
   const now = Date.now();

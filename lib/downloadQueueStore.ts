@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist, createJSONStorage, StateStorage } from "zustand/middleware";
 
-import { getAppSetting, saveAppSetting } from "./db";
+import { getAppSetting, saveAppSetting, getDefaultDownloadDir } from "./db";
 
 const pendingSaves = new Map<string, string>();
 let saveTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -100,6 +100,10 @@ export interface MagnetDownloadItem {
   addedAt: string;
   files?: QueuedFile[];
   peers?: number;
+  kind?: "torrent" | "direct";
+  directUrl?: string;
+  destPath?: string;
+  error?: string;
 }
 
 export function extractHashFromMagnet(url?: string): string {
@@ -833,4 +837,157 @@ export async function toggleAllDownloadsPause(): Promise<void> {
       state.toggleMagnetPause(dl.id);
     }
   }
+}
+
+function formatDirectBytes(bytes: number): string {
+  if (!bytes || bytes <= 0) return "0 MB";
+  const mb = bytes / (1024 * 1024);
+  return mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${mb.toFixed(1)} MB`;
+}
+
+let directListenerAttached = false;
+
+async function ensureDirectDownloadListener(): Promise<void> {
+  if (directListenerAttached) return;
+  if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) return;
+  directListenerAttached = true;
+  try {
+    const { listen } = await import("@tauri-apps/api/event");
+    await listen<{
+      download_id: string;
+      file_name: string;
+      dest_path: string;
+      downloaded_bytes: number;
+      total_bytes?: number | null;
+      progress: number;
+      speed_bps: number;
+      status: string;
+      error?: string | null;
+    }>("direct-download-progress", (ev) => {
+      const p = ev.payload;
+      useDownloadQueueStore.setState((prev) => ({
+        magnetDownloads: prev.magnetDownloads.map((item) => {
+          if (item.id !== p.download_id) return item;
+          const nextStatus: MagnetDownloadItem["status"] =
+            p.status === "completed"
+              ? "completed"
+              : p.status === "cancelled"
+                ? "paused"
+                : p.status === "error"
+                  ? "error"
+                  : "downloading";
+          const etaSecs =
+            p.total_bytes && p.speed_bps > 0 && p.total_bytes > p.downloaded_bytes
+              ? Math.ceil((p.total_bytes - p.downloaded_bytes) / p.speed_bps)
+              : 0;
+          const etaText =
+            nextStatus === "completed"
+              ? "Completed"
+              : nextStatus === "paused"
+                ? "Paused"
+                : nextStatus === "error"
+                  ? p.error || "Failed"
+                  : etaSecs > 60
+                    ? `${Math.floor(etaSecs / 60)}m ${etaSecs % 60}s`
+                    : etaSecs > 0
+                      ? `${etaSecs}s`
+                      : "Downloading...";
+          return {
+            ...item,
+            progress: nextStatus === "completed" ? 100 : p.progress,
+            downloaded: formatDirectBytes(p.downloaded_bytes),
+            size: p.total_bytes ? formatDirectBytes(p.total_bytes) : item.size,
+            speed: nextStatus === "downloading" ? `${formatDirectBytes(p.speed_bps)}/s` : "0 MB/s",
+            eta: etaText,
+            status: nextStatus,
+            destPath: p.dest_path || item.destPath,
+            error: p.error || undefined,
+          };
+        }),
+      }));
+    });
+  } catch (err) {
+    directListenerAttached = false;
+    console.warn("Failed to attach direct-download-progress listener:", err);
+  }
+}
+
+export async function startDirectDownload(opts: {
+  title: string;
+  url: string;
+  size?: string;
+  coverUrl?: string;
+  downloadDir?: string;
+}): Promise<string> {
+  const { title, url, size, coverUrl } = opts;
+  const state = useDownloadQueueStore.getState();
+  const existing = state.magnetDownloads.find(
+    (d) => d.kind === "direct" && d.directUrl === url,
+  );
+  if (existing && existing.status === "downloading") {
+    return existing.id;
+  }
+
+  let targetDir = opts.downloadDir;
+  if (!targetDir) {
+    const savedDir = await getAppSetting("default_download_dir").catch(() => null);
+    targetDir = savedDir || getDefaultDownloadDir() || "";
+  }
+
+  const downloadId =
+    existing?.id ||
+    `direct-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+  const newItem: MagnetDownloadItem = {
+    id: downloadId,
+    title,
+    progress: 0,
+    speed: "0 MB/s",
+    eta: "Starting...",
+    size: size || "Unknown",
+    downloaded: "0 MB",
+    status: "downloading",
+    downloadDir: targetDir,
+    coverUrl,
+    addedAt: existing?.addedAt || new Date().toISOString(),
+    kind: "direct",
+    directUrl: url,
+  };
+
+  useDownloadQueueStore.setState((prev) => ({
+    magnetDownloads: existing
+      ? prev.magnetDownloads.map((d) => (d.id === downloadId ? newItem : d))
+      : [newItem, ...prev.magnetDownloads],
+  }));
+
+  if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+    await ensureDirectDownloadListener();
+    const { invoke } = await import("@tauri-apps/api/core");
+    const fileName = decodeURIComponent(
+      url.split("/").pop()?.split("?")[0] || "recomp-download.zip",
+    );
+    invoke<string>("download_direct_file", {
+      downloadId,
+      url,
+      downloadDir: targetDir,
+      fileName,
+    }).catch((err) => {
+      const msg = typeof err === "string" ? err : err?.message || "Download failed";
+      useDownloadQueueStore.setState((prev) => ({
+        magnetDownloads: prev.magnetDownloads.map((d) =>
+          d.id === downloadId
+            ? {
+                ...d,
+                status: msg.toLowerCase().includes("cancel") ? "paused" : "error",
+                speed: "0 MB/s",
+                eta: msg,
+                error: msg,
+              }
+            : d,
+        ),
+      }));
+    });
+  }
+
+  return downloadId;
 }

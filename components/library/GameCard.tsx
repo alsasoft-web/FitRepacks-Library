@@ -10,7 +10,6 @@ import {
   unignoreGameUpdate,
 } from "../../lib/db";
 import { parseDateSafe } from "../../lib/versionDetector";
-import { openInBrowser } from "../../lib/openUrl";
 import { useGameMap } from "../../lib/gameMaps";
 import { MapViewerModal } from "../maps";
 import {
@@ -35,7 +34,6 @@ import {
   Bookmark,
   Sparkles,
   CheckCircle2,
-  Globe,
   Check,
   RotateCcw,
   ChevronDown,
@@ -46,7 +44,6 @@ import {
   MapPin,
 } from "lucide-react";
 import { setGameStatus } from "../../lib/db";
-import { useHover } from "@mantine/hooks";
 
 interface GameCardProps {
   game: Game;
@@ -62,6 +59,7 @@ interface GameCardProps {
   onTogglePin?: (id: string) => void;
   onDelete: (id: string) => void;
   onEdit?: (game: Game) => void;
+  onHoverGame?: (game: Game | null) => void;
   isPlaying?: boolean;
   isAnyGameRunning?: boolean;
 }
@@ -72,16 +70,15 @@ export const GameCard = React.memo<GameCardProps>(
     onLaunch,
     onOpenDetails,
     onToggleFavorite,
-    onToggleCompleted,
     onStatusChange,
     isPinned = false,
     onTogglePin,
     onDelete,
     onEdit,
+    onHoverGame,
     isPlaying = false,
     isAnyGameRunning = false,
   }) => {
-    const { ref: hoverRef, hovered } = useHover<HTMLDivElement>();
     const isOtherGameRunning = isAnyGameRunning && !isPlaying;
     const [isMapOpen, setIsMapOpen] = React.useState(false);
     const { map: gameMap } = useGameMap(game.title);
@@ -239,36 +236,37 @@ export const GameCard = React.memo<GameCardProps>(
       game.ignoredUpdateDate,
     ]);
 
+    const playtimeLabel = React.useMemo(() => {
+      if (!game.playtimeMinutes || game.playtimeMinutes <= 0) return null;
+      return game.playtimeMinutes >= 60
+        ? `${(game.playtimeMinutes / 60).toFixed(1)}h`
+        : `${Math.floor(game.playtimeMinutes)}m`;
+    }, [game.playtimeMinutes]);
+
     return (
       <Card
-        ref={hoverRef}
-        padding="sm"
-        radius="lg"
-        bg="var(--mantine-color-default)"
+        padding={0}
+        radius="md"
+        bg="dark.8"
+        className="daze-poster-card"
         style={{
           cursor: "pointer",
           position: "relative",
-          transition: "all 220ms cubic-bezier(0.16, 1, 0.3, 1)",
-          height: "100%",
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "space-between",
+          aspectRatio: "3 / 4",
+          overflow: "hidden",
           border: isPlaying
             ? "2px solid #20c997"
             : isPinned
-              ? "1px solid rgba(121, 80, 242, 0.45)"
-              : hovered
-                ? "1px solid rgba(59, 130, 246, 0.4)"
-                : "1px solid var(--mantine-color-default-border)",
+              ? "1px solid rgba(121, 80, 242, 0.7)"
+              : "1px solid rgba(255, 255, 255, 0.08)",
           boxShadow: isPlaying
-            ? "0 0 20px rgba(32, 201, 151, 0.45), 0 0 6px rgba(32, 201, 151, 0.8)"
-            : hovered
-              ? "0 10px 24px -6px rgba(0, 0, 0, 0.5), 0 0 12px rgba(59, 130, 246, 0.15)"
-              : "0 2px 8px rgba(0, 0, 0, 0.2)",
-          transform: hovered ? "translateY(-3px)" : "translateY(0)",
+            ? "0 0 22px rgba(32, 201, 151, 0.5), 0 8px 20px rgba(0, 0, 0, 0.6)"
+            : "0 8px 22px rgba(0, 0, 0, 0.45)",
           contentVisibility: "auto" as any,
-          containIntrinsicSize: "200px 340px",
+          containIntrinsicSize: "160px 214px",
         }}
+        onMouseEnter={() => onHoverGame?.(game)}
+        onMouseLeave={() => onHoverGame?.(null)}
         onClick={() => onOpenDetails(game)}
         onDoubleClick={(e) => {
           e.stopPropagation();
@@ -281,50 +279,111 @@ export const GameCard = React.memo<GameCardProps>(
           }
         }}
       >
-        <Card.Section
-          pos="relative"
-          bg="var(--mantine-color-body)"
-          style={{ overflow: "hidden", borderRadius: "10px 10px 0 0" }}
-        >
+        {/* Full-bleed 3:4 Cover Image */}
+        <Image
+          src={game.coverUrl}
+          alt={game.title}
+          fallbackSrc={`https://placehold.co/600x800/0f172a/3b82f6?text=${encodeURIComponent(game.title)}`}
+          fit="cover"
+          loading="lazy"
+          decoding="async"
+          className="daze-poster-img"
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            opacity: isGameInstalled || isPlaying ? 1 : 0.78,
+          }}
+        />
+
+        {/* Subtle Top-Right Star Indicator at Rest */}
+        {game.isFavorite && !isPlaying && (
           <Box
+            pos="absolute"
+            top={8}
+            right={8}
             style={{
-              transform: hovered ? "scale(1.03)" : "scale(1)",
-              transition: "transform 350ms cubic-bezier(0.16, 1, 0.3, 1)",
+              zIndex: 2,
+              pointerEvents: "none",
+              filter: "drop-shadow(0 2px 6px rgba(0,0,0,0.85))",
             }}
           >
-            <Image
-              src={game.coverUrl}
-              h={240}
-              alt={game.title}
-              fallbackSrc={`https://placehold.co/600x800/0f172a/3b82f6?text=${encodeURIComponent(game.title)}`}
-              fit="cover"
-              loading="lazy"
-              decoding="async"
-            />
+            <Star size={14} fill="#fcc419" color="#fcc419" />
           </Box>
+        )}
 
-          {/* Subtle Dark Bottom Vignette Overlay */}
-          <Box
-            style={{
-              position: "absolute",
-              inset: 0,
-              pointerEvents: "none",
-              background:
-                "linear-gradient(to top, rgba(15, 17, 23, 0.85) 0%, rgba(15, 17, 23, 0.2) 35%, transparent 60%)",
-            }}
-          />
-
-          {/* Top Badges */}
-          <Group
-            justify="space-between"
+        {/* Running Active Session Badge (Always visible) */}
+        {isPlaying && (
+          <Badge
+            color="teal"
+            variant="filled"
+            size="xs"
             pos="absolute"
             top={8}
             left={8}
-            right={8}
-            wrap="nowrap"
-            align="center"
-            style={{ zIndex: 2 }}
+            leftSection={
+              <Box
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: "50%",
+                  backgroundColor: "#fff",
+                  boxShadow: "0 0 6px #fff",
+                }}
+              />
+            }
+            style={{
+              zIndex: 6,
+              boxShadow: "0 0 14px rgba(32, 201, 151, 0.9)",
+              fontWeight: 800,
+              letterSpacing: "0.5px",
+              pointerEvents: "none",
+            }}
           >
+            RUNNING
+          </Badge>
+        )}
+
+        {/* Update Available Pill at Rest */}
+        {updateData && !isPlaying && (
+          <Badge
+            color="yellow"
+            variant="filled"
+            size="xs"
+            pos="absolute"
+            top={8}
+            left={8}
+            title={updateData.title}
+            leftSection={<Sparkles size={10} />}
+            style={{
+              zIndex: 3,
+              boxShadow: "0 2px 10px rgba(0, 0, 0, 0.65)",
+              fontWeight: 700,
+              pointerEvents: "none",
+            }}
+          >
+            UPDATE
+          </Badge>
+        )}
+
+        {/* Hover Reveal Overlay: Top Action Controls + Bottom Metadata & Quick Actions */}
+        <Box
+          className="daze-poster-overlay"
+          style={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 5,
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "space-between",
+            background:
+              "linear-gradient(to bottom, rgba(8, 9, 14, 0.55) 0%, transparent 35%, rgba(8, 9, 14, 0.35) 60%, rgba(8, 9, 14, 0.82) 100%)",
+            padding: 8,
+          }}
+        >
+          {/* Top Action Bar */}
+          <Group justify="space-between" wrap="nowrap" align="center">
             <Group gap={4} wrap="nowrap" align="center">
               <ActionIcon
                 variant="filled"
@@ -333,16 +392,12 @@ export const GameCard = React.memo<GameCardProps>(
                 style={{
                   backgroundColor: game.isFavorite
                     ? "#fcc419"
-                    : "rgba(15, 17, 23, 0.65)",
+                    : "rgba(15, 17, 23, 0.75)",
                   color: game.isFavorite ? "#000" : "#f1f3f5",
                   backdropFilter: "blur(8px)",
                   border: game.isFavorite
                     ? "none"
-                    : "1px solid rgba(255, 255, 255, 0.15)",
-                  boxShadow: game.isFavorite
-                    ? "0 0 10px rgba(252, 196, 25, 0.4)"
-                    : "0 2px 6px rgba(0, 0, 0, 0.35)",
-                  transition: "all 0.18s ease",
+                    : "1px solid rgba(255, 255, 255, 0.18)",
                 }}
                 title={
                   game.isFavorite ? "Remove from Favorites" : "Add to Favorites"
@@ -367,16 +422,12 @@ export const GameCard = React.memo<GameCardProps>(
                   style={{
                     backgroundColor: isPinned
                       ? "#7950f2"
-                      : "rgba(15, 17, 23, 0.65)",
-                    color: isPinned ? "#ffffff" : "#f1f3f5",
+                      : "rgba(15, 17, 23, 0.75)",
+                    color: "#ffffff",
                     backdropFilter: "blur(8px)",
                     border: isPinned
                       ? "none"
-                      : "1px solid rgba(255, 255, 255, 0.15)",
-                    boxShadow: isPinned
-                      ? "0 0 10px rgba(121, 80, 242, 0.45)"
-                      : "0 2px 6px rgba(0, 0, 0, 0.35)",
-                    transition: "all 0.18s ease",
+                      : "1px solid rgba(255, 255, 255, 0.18)",
                   }}
                   title={isPinned ? "Unpin from top" : "Pin to top"}
                   onClick={(e) => {
@@ -391,28 +442,36 @@ export const GameCard = React.memo<GameCardProps>(
                     strokeWidth={2.2}
                     style={{
                       transform: isPinned ? "rotate(45deg)" : "none",
-                      transition: "transform 0.15s ease",
                     }}
                   />
                 </ActionIcon>
               )}
+
+              {gameMap && (
+                <Tooltip label="Open Interactive Map" position="bottom" withArrow>
+                  <ActionIcon
+                    variant="filled"
+                    radius="xl"
+                    size="sm"
+                    style={{
+                      backgroundColor: "rgba(18, 184, 134, 0.92)",
+                      color: "#ffffff",
+                      backdropFilter: "blur(8px)",
+                      border: "1px solid rgba(255, 255, 255, 0.25)",
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsMapOpen(true);
+                    }}
+                  >
+                    <MapPin size={12} strokeWidth={2.2} />
+                  </ActionIcon>
+                </Tooltip>
+              )}
             </Group>
 
-            {isPlaying ? (
-              <Badge
-                color="teal"
-                variant="filled"
-                size="xs"
-                leftSection={<Flame size={11} />}
-                style={{
-                  boxShadow: "0 0 12px rgba(20, 184, 166, 0.5)",
-                  fontWeight: 700,
-                  letterSpacing: "0.4px",
-                }}
-              >
-                RUNNING
-              </Badge>
-            ) : (
+            {/* Status Menu */}
+            {!isPlaying && (
               <Menu
                 shadow="md"
                 width={175}
@@ -432,15 +491,8 @@ export const GameCard = React.memo<GameCardProps>(
                         variant="filled"
                         size="xs"
                         leftSection={<HardDrive size={10} />}
-                        rightSection={
-                          <ChevronDown size={9} style={{ opacity: 0.8 }} />
-                        }
-                        style={{
-                          boxShadow: "0 2px 8px rgba(0,0,0,0.4)",
-                          cursor: "pointer",
-                          fontWeight: 600,
-                          letterSpacing: "0.3px",
-                        }}
+                        rightSection={<ChevronDown size={9} />}
+                        style={{ cursor: "pointer", fontWeight: 600 }}
                         title="Change status"
                       >
                         INSTALLED
@@ -451,15 +503,8 @@ export const GameCard = React.memo<GameCardProps>(
                         variant="filled"
                         size="xs"
                         leftSection={<Bookmark size={10} fill="white" />}
-                        rightSection={
-                          <ChevronDown size={9} style={{ opacity: 0.8 }} />
-                        }
-                        style={{
-                          boxShadow: "0 2px 8px rgba(0,0,0,0.4)",
-                          cursor: "pointer",
-                          fontWeight: 600,
-                          letterSpacing: "0.3px",
-                        }}
+                        rightSection={<ChevronDown size={9} />}
+                        style={{ cursor: "pointer", fontWeight: 600 }}
                         title="Change status"
                       >
                         WISHLIST
@@ -469,44 +514,28 @@ export const GameCard = React.memo<GameCardProps>(
                         color="teal"
                         variant="filled"
                         size="xs"
-                        leftSection={<CheckCircle2 size={11} />}
-                        rightSection={
-                          <ChevronDown size={9} style={{ opacity: 0.8 }} />
-                        }
-                        style={{
-                          boxShadow: "0 2px 8px rgba(0,0,0,0.4)",
-                          cursor: "pointer",
-                          fontWeight: 600,
-                          letterSpacing: "0.3px",
-                        }}
+                        leftSection={<CheckCircle2 size={10} />}
+                        rightSection={<ChevronDown size={9} />}
+                        style={{ cursor: "pointer", fontWeight: 600 }}
                         title="Change status"
                       >
-                        COMPLETED
+                        DONE
                       </Badge>
                     ) : (
                       <Badge
                         variant="filled"
                         size="xs"
                         leftSection={<Clock size={10} />}
-                        rightSection={
-                          <ChevronDown size={9} style={{ opacity: 0.7 }} />
-                        }
+                        rightSection={<ChevronDown size={9} />}
                         style={{
-                          backgroundColor: "rgba(15, 17, 23, 0.7)",
-                          backdropFilter: "blur(8px)",
-                          border: "1px solid rgba(255, 255, 255, 0.12)",
+                          backgroundColor: "rgba(15, 17, 23, 0.8)",
+                          border: "1px solid rgba(255, 255, 255, 0.16)",
                           color: "#e5e7eb",
-                          boxShadow: "0 2px 8px rgba(0,0,0,0.35)",
                           cursor: "pointer",
-                          fontWeight: 500,
                         }}
                         title="Change status"
                       >
-                        {game.playtimeMinutes > 0
-                          ? game.playtimeMinutes >= 60
-                            ? `${(game.playtimeMinutes / 60).toFixed(1)}h`
-                            : `${Math.floor(game.playtimeMinutes)}m`
-                          : "STATUS"}
+                        {playtimeLabel || "STATUS"}
                       </Badge>
                     )}
                   </Box>
@@ -588,274 +617,144 @@ export const GameCard = React.memo<GameCardProps>(
             )}
           </Group>
 
-          {/* Running Active Session Badge */}
-          {isPlaying && (
-            <Badge
-              color="teal"
-              variant="filled"
-              size="xs"
-              pos="absolute"
-              top={8}
-              left={8}
-              leftSection={
-                <Box
-                  style={{
-                    width: 6,
-                    height: 6,
-                    borderRadius: "50%",
-                    backgroundColor: "#fff",
-                    boxShadow: "0 0 6px #fff",
-                  }}
-                />
-              }
-              style={{
-                zIndex: 10,
-                boxShadow: "0 0 14px rgba(32, 201, 151, 0.9)",
-                fontWeight: 800,
-                letterSpacing: "0.5px",
-                pointerEvents: "none",
-              }}
-            >
-              RUNNING
-            </Badge>
-          )}
-
-          {/* Update Available Badge - Only displayed when installed & update exists */}
-          {updateData && !isPlaying && (
-            <Group
-              gap={4}
-              wrap="nowrap"
-              pos="absolute"
-              bottom={8}
-              left={8}
-              style={{ zIndex: 3 }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <Badge
-                color="yellow"
-                variant="filled"
+          {/* Bottom Metadata + Quick Actions */}
+          <Stack
+            gap={6}
+            p={8}
+            className="daze-glass-card"
+            style={{
+              borderRadius: 10,
+              backdropFilter: "blur(16px) saturate(170%)",
+              WebkitBackdropFilter: "blur(16px) saturate(170%)",
+            }}
+          >
+            <Box>
+              <Text
+                fw={700}
                 size="xs"
-                title={updateData.title}
-                leftSection={<Sparkles size={10} />}
+                c="white"
+                lineClamp={2}
                 style={{
-                  boxShadow:
-                    "0 2px 10px rgba(250, 176, 5, 0.45), 0 2px 5px rgba(0, 0, 0, 0.5)",
-                  fontWeight: 700,
-                  letterSpacing: "0.4px",
+                  lineHeight: 1.25,
+                  textShadow: "0 1px 4px rgba(0, 0, 0, 0.9)",
                 }}
               >
-                UPDATE AVAILABLE
-              </Badge>
-              <Tooltip label="Ignore this update version" withArrow>
-                <ActionIcon
-                  size={20}
-                  variant="filled"
-                  color="dark.6"
-                  radius="xl"
-                  title="Ignore this update version"
-                  style={{
-                    boxShadow: "0 2px 6px rgba(0,0,0,0.4)",
-                    border: "1px solid rgba(255,255,255,0.2)",
-                  }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleIgnoreUpdate(updateData.postDate);
-                  }}
-                >
-                  <EyeOff size={11} color="#fcc419" />
-                </ActionIcon>
-              </Tooltip>
-            </Group>
-          )}
-
-          {/* Bottom-Right Interactive Map Button Overlay on Cover */}
-          {gameMap && (
-            <Box
-              pos="absolute"
-              bottom={8}
-              right={8}
-              style={{ zIndex: 3 }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <Tooltip label="Open Interactive Map" position="left" withArrow>
-                <ActionIcon
-                  variant="filled"
-                  radius="xl"
-                  size="sm"
-                  style={{
-                    backgroundColor: "rgba(18, 184, 134, 0.9)",
-                    color: "#ffffff",
-                    backdropFilter: "blur(8px)",
-                    border: "1px solid rgba(255, 255, 255, 0.25)",
-                    boxShadow:
-                      "0 2px 8px rgba(0, 0, 0, 0.45), 0 0 8px rgba(18, 184, 134, 0.5)",
-                    transition: "all 0.18s ease",
-                  }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setIsMapOpen(true);
-                  }}
-                >
-                  <MapPin size={12} strokeWidth={2.2} />
-                </ActionIcon>
-              </Tooltip>
-            </Box>
-          )}
-        </Card.Section>
-
-        <Stack gap="xs" mt="sm">
-          <Box>
-            <Text
-              fw={700}
-              size="sm"
-              lineClamp={1}
-              style={{
-                letterSpacing: "0.2px",
-                lineHeight: 1.3,
-              }}
-            >
-              {cleanGameTitle(game.title)}
-            </Text>
-            <Group justify="space-between" mt={4} wrap="nowrap" align="center" gap={6}>
-              <Text
-                size="xs"
-                c="dimmed"
-                truncate
-                style={{ flex: 1, minWidth: 0, fontSize: "11px" }}
-              >
-                {game.genres?.slice(0, 2).join(", ") || "Game"}
+                {cleanGameTitle(game.title)}
               </Text>
-              <Group gap={4} wrap="nowrap" style={{ flexShrink: 0 }}>
-                {(game.fitgirlSize || (game.source !== "steamrip" && game.repackSize)) && (
+              <Group gap={4} mt={4} wrap="wrap">
+                {game.releaseYear && (
                   <Badge
                     size="xs"
-                    variant="outline"
+                    variant="filled"
+                    color="dark.6"
+                    style={{ fontSize: "9.5px", height: 16, padding: "0 5px" }}
+                  >
+                    {game.releaseYear}
+                  </Badge>
+                )}
+                {(game.fitgirlSize ||
+                  (game.source !== "steamrip" && game.repackSize)) && (
+                  <Badge
+                    size="xs"
+                    variant="light"
                     color="grape"
-                    radius="xs"
-                    style={{
-                      fontSize: "10px",
-                      height: 18,
-                      padding: "0 5px",
-                      fontWeight: 600,
-                    }}
+                    style={{ fontSize: "9.5px", height: 16, padding: "0 5px" }}
                   >
                     {game.fitgirlSize || game.repackSize}
                   </Badge>
                 )}
-                {game.releaseYear ? (
+                {playtimeLabel && (
                   <Badge
                     size="xs"
                     variant="light"
-                    color="gray"
-                    radius="xs"
-                    style={{
-                      fontSize: "10px",
-                      height: 18,
-                      padding: "0 4px",
-                      fontWeight: 600,
-                    }}
+                    color="teal"
+                    style={{ fontSize: "9.5px", height: 16, padding: "0 5px" }}
                   >
-                    {game.releaseYear}
+                    {playtimeLabel}
                   </Badge>
-                ) : null}
+                )}
               </Group>
-            </Group>
-          </Box>
+            </Box>
 
-          <Group
-            justify="space-between"
-            pt="xs"
-            wrap="nowrap"
-            align="center"
-            style={{
-              borderTop: "1px solid var(--mantine-color-default-border)",
-            }}
-          >
-            <Text
-              size="xs"
-              c={isPlaying ? "teal.4" : "dimmed"}
-              fw={isPlaying ? 700 : 400}
-              truncate
-              style={{ maxWidth: "105px", fontSize: "11px" }}
+            <Group
+              justify="space-between"
+              align="center"
+              pt={5}
+              style={{ borderTop: "1px solid rgba(255, 255, 255, 0.12)" }}
             >
-              {isPlaying
-                ? "Running now"
-                : game.isInstalled
-                  ? game.lastPlayed
-                    ? `Last: ${new Date(game.lastPlayed).toLocaleDateString()}`
-                    : "Never played"
-                  : game.isWishlisted
-                    ? "Wishlist"
-                    : "Not Installed"}
-            </Text>
-            <Group gap={4} wrap="nowrap">
-              {game.isInstalled &&
-                game.exePath &&
-                game.exePath.trim() !== "" && (
+              <Group gap={4}>
+                {game.isInstalled &&
+                  game.exePath &&
+                  game.exePath.trim() !== "" && (
+                    <ActionIcon
+                      variant="filled"
+                      color={
+                        isPlaying
+                          ? "teal"
+                          : isOtherGameRunning
+                            ? "gray"
+                            : "white"
+                      }
+                      size="sm"
+                      radius="xl"
+                      disabled={isOtherGameRunning}
+                      title={
+                        isPlaying
+                          ? "Stop Game / Session"
+                          : isOtherGameRunning
+                            ? "Another game is currently running"
+                            : "Launch Game"
+                      }
+                      style={{
+                        color: isPlaying || isOtherGameRunning ? "#fff" : "#0b0c0f",
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onLaunch(game);
+                      }}
+                    >
+                      {isPlaying ? (
+                        <Square size={10} fill="white" />
+                      ) : (
+                        <Play size={11} fill="currentColor" />
+                      )}
+                    </ActionIcon>
+                  )}
+              </Group>
+
+              <Group gap={4}>
+                {onEdit && (
                   <ActionIcon
-                    variant="filled"
-                    color={
-                      isPlaying ? "teal" : isOtherGameRunning ? "gray" : "blue"
-                    }
+                    variant="subtle"
+                    color="gray.3"
                     size="xs"
                     radius="md"
-                    disabled={isOtherGameRunning}
-                    title={
-                      isPlaying
-                        ? "Stop Game / Session"
-                        : isOtherGameRunning
-                          ? "Another game is currently running"
-                          : "Launch Game"
-                    }
-                    style={{
-                      transition: "transform 0.15s ease, box-shadow 0.15s ease",
-                      boxShadow: isPlaying
-                        ? "0 0 10px rgba(32, 201, 151, 0.7)"
-                        : "0 2px 4px rgba(0, 0, 0, 0.2)",
-                    }}
+                    title="Edit Game"
                     onClick={(e) => {
                       e.stopPropagation();
-                      onLaunch(game);
+                      onEdit(game);
                     }}
                   >
-                    {isPlaying ? (
-                      <Square size={10} fill="white" />
-                    ) : (
-                      <Play size={11} fill="white" />
-                    )}
+                    <Edit3 size={12} />
                   </ActionIcon>
                 )}
-              {onEdit && (
                 <ActionIcon
                   variant="subtle"
-                  color="blue"
+                  color="red.4"
                   size="xs"
                   radius="md"
-                  title="Edit Game"
+                  title="Remove from Library"
                   onClick={(e) => {
                     e.stopPropagation();
-                    onEdit(game);
+                    onDelete(game.id);
                   }}
                 >
-                  <Edit3 size={12} />
+                  <Trash2 size={12} />
                 </ActionIcon>
-              )}
-              <ActionIcon
-                variant="subtle"
-                color="red"
-                size="xs"
-                radius="md"
-                title="Remove from Library"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDelete(game.id);
-                }}
-              >
-                <Trash2 size={12} />
-              </ActionIcon>
+              </Group>
             </Group>
-          </Group>
-        </Stack>
+          </Stack>
+        </Box>
 
         {/* Interactive Map Viewer Modal directly from Card */}
         {gameMap && isMapOpen && (

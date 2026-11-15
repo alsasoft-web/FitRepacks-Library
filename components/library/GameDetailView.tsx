@@ -4,6 +4,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { Game } from "../../lib/types";
 import {
   updateGameInStorage,
+  toggleFavoriteGame,
   toggleCompletedGame,
   toggleWishlistGame,
   detectInstalledGameVersion,
@@ -51,10 +52,13 @@ import {
   Divider,
   ThemeIcon,
   Menu,
+  Progress,
+  Center,
   Image as MantineImage,
 } from "@mantine/core";
 import {
   Play,
+  Square,
   Folder,
   Star,
   Tag,
@@ -198,7 +202,7 @@ const DirectHosterAccordion: React.FC<{
   return (
     <Paper
       radius="md"
-      bg="var(--mantine-color-default)"
+      className="daze-glass-panel"
       style={{
         border: isUpdate
           ? "1px solid var(--mantine-color-cyan-8)"
@@ -303,7 +307,7 @@ const DirectHosterAccordion: React.FC<{
                   key={idx}
                   p="xs"
                   radius="md"
-                  bg="var(--mantine-color-body)"
+                  className="daze-glass-card"
                   style={{
                     border: "1px solid var(--mantine-color-default-border)",
                   }}
@@ -744,6 +748,16 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
     if (onGameUpdated) onGameUpdated(updated);
   };
 
+  const handleToggleFavorite = () => {
+    toggleFavoriteGame(currentGame.id);
+    const updated: Game = {
+      ...currentGame,
+      isFavorite: !currentGame.isFavorite,
+    };
+    setCurrentGame(updated);
+    if (onGameUpdated) onGameUpdated(updated);
+  };
+
   const hasFitgirlUpdate = Boolean(
     currentGame.installedLastModified &&
     currentGame.fitgirlUploadDate &&
@@ -780,17 +794,50 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
   }, [installedVer]);
 
   const playtimeHours = ((currentGame.playtimeMinutes || 0) / 60).toFixed(1);
+  const starRatingCount = currentGame.rating
+    ? Math.max(1, Math.min(5, Math.round((currentGame.rating / 100) * 5)))
+    : 0;
+  const featuredMediaUrl = sortedScreenshots[0] || null;
+  const statusLabel = isPlaying
+    ? "Playing"
+    : currentGame.isCompleted
+      ? "Completed"
+      : currentGame.isInstalled
+        ? "Installed"
+        : currentGame.isWishlisted
+          ? "Wishlist"
+          : "Not Played";
 
   return (
     <Box
-      style={{ position: "relative", overflow: "hidden", minHeight: "100%" }}
+      style={{
+        position: "relative",
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+      }}
     >
-      {/* 1. CINEMATIC FULL-WIDTH HERO BANNER */}
+      <Box
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: "auto",
+          overflowX: "hidden",
+          paddingBottom: 72,
+        }}
+      >
+      {/* 1. CINEMATIC FULL-WIDTH HERO BANNER (FusionX Style) */}
       <Box
         pos="relative"
-        h={{ base: 320, sm: 380 }}
+        h={{ base: 310, sm: 360, lg: 390 }}
         style={{
           overflow: "hidden",
+          flexShrink: 0,
+          maskImage:
+            "linear-gradient(to bottom, black 0%, black 45%, rgba(0, 0, 0, 0.65) 75%, transparent 100%)",
+          WebkitMaskImage:
+            "linear-gradient(to bottom, black 0%, black 45%, rgba(0, 0, 0, 0.65) 75%, transparent 100%)",
         }}
       >
         <MantineImage
@@ -804,22 +851,18 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
           decoding="async"
           style={{
             transform: "scale(1.03)",
-            filter: "brightness(0.65) saturate(1.1)",
-            WebkitMaskImage:
-              "linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0.9) 40%, rgba(0,0,0,0.3) 80%, rgba(0,0,0,0) 100%)",
-            maskImage:
-              "linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0.9) 40%, rgba(0,0,0,0.3) 80%, rgba(0,0,0,0) 100%)",
-            transition: "all 300ms ease",
+            filter: "brightness(0.72) saturate(1.12)",
+            transition: "all 350ms ease",
           }}
         />
 
-        {/* Deep Vertical Fade into Background Darkness */}
+        {/* Deep Vertical Fade into Translucent Dark Background */}
         <Box
           pos="absolute"
           inset={0}
           style={{
             background:
-              "linear-gradient(180deg, rgba(0, 0, 0, 0.1) 0%, rgba(15, 17, 23, 0.4) 35%, rgba(15, 17, 23, 0.85) 75%, var(--mantine-color-body) 100%)",
+              "linear-gradient(180deg, rgba(10, 12, 16, 0.08) 0%, rgba(10, 12, 16, 0.32) 55%, rgba(10, 12, 16, 0.78) 100%)",
             pointerEvents: "none",
           }}
         />
@@ -830,206 +873,39 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
           inset={0}
           style={{
             background:
-              "linear-gradient(90deg, rgba(15, 17, 23, 0.7) 0%, transparent 18%, transparent 82%, rgba(15, 17, 23, 0.7) 100%)",
-            pointerEvents: "none",
-          }}
-        />
-
-        {/* Ambient Glow */}
-        <Box
-          pos="absolute"
-          inset={0}
-          style={{
-            background:
-              "radial-gradient(ellipse at 50% 0%, rgba(59, 130, 246, 0.08) 0%, transparent 70%)",
+              "linear-gradient(90deg, rgba(10, 12, 16, 0.52) 0%, transparent 20%, transparent 80%, rgba(10, 12, 16, 0.52) 100%)",
             pointerEvents: "none",
           }}
         />
       </Box>
 
-      {/* 2. HERO CONTENT & ACTION BAR */}
+      {/* 2. HERO CONTENT OVERLAY (Bottom-Left Title/Metadata + Bottom-Right Stat Boxes & Floating Poster) */}
       <Box
-        px="xl"
-        pb="xl"
-        style={{ marginTop: -180, position: "relative", zIndex: 10 }}
+        px={{ base: "md", sm: "xl" }}
+        pb={90}
+        style={{
+          marginTop: -165,
+          position: "relative",
+          zIndex: 10,
+          flex: 1,
+        }}
       >
-        {/* Profile Card Header */}
-        <Group align="flex-end" gap="xl" wrap="nowrap" mb="lg">
-          {/* Floating 3D Cover Poster */}
-          <Paper
-            radius="lg"
-            style={{
-              width: 170,
-              height: 235,
-              flexShrink: 0,
-              overflow: "hidden",
-              border: "2px solid rgba(255, 255, 255, 0.12)",
-              boxShadow: "0 16px 36px rgba(0, 0, 0, 0.7)",
-              position: "relative",
-              background: "var(--mantine-color-dark-8)",
-            }}
-          >
-            <MantineImage
-              src={currentGame.coverUrl}
-              h="100%"
-              w="100%"
-              fit="cover"
-              fallbackSrc="https://placehold.co/600x800/0f172a/3b82f6?text=No+Cover"
-              loading="lazy"
-              decoding="async"
-            />
-
-            {/* Poster Tag Overlay */}
-            {isPlaying ? (
-              <Badge
-                pos="absolute"
-                bottom={8}
-                left={8}
-                right={gameMap ? 38 : 8}
-                color="teal"
-                variant="filled"
-                size="xs"
-                style={{ backdropFilter: "blur(4px)" }}
-              >
-                ● RUNNING
-              </Badge>
-            ) : currentGame.isInstalled ? (
-              <Badge
-                pos="absolute"
-                bottom={8}
-                left={8}
-                right={gameMap ? 38 : 8}
-                color="blue"
-                variant="filled"
-                size="xs"
-                style={{ backdropFilter: "blur(4px)" }}
-              >
-                INSTALLED
-              </Badge>
-            ) : (
-              <Badge
-                pos="absolute"
-                bottom={8}
-                left={8}
-                right={gameMap ? 38 : 8}
-                color="dark"
-                variant="filled"
-                size="xs"
-                style={{ backdropFilter: "blur(4px)" }}
-              >
-                WISHLIST
-              </Badge>
-            )}
-
-            {/* Interactive Map Button Overlay on Hero Poster */}
-            {gameMap && (
-              <Box
-                pos="absolute"
-                bottom={8}
-                right={8}
-                style={{ zIndex: 4 }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <Tooltip label="Open Interactive Map" position="top" withArrow>
-                  <ActionIcon
-                    variant="filled"
-                    radius="xl"
-                    size="sm"
-                    style={{
-                      backgroundColor: "rgba(18, 184, 134, 0.95)",
-                      color: "#ffffff",
-                      backdropFilter: "blur(8px)",
-                      border: "1px solid rgba(255, 255, 255, 0.25)",
-                      boxShadow:
-                        "0 4px 12px rgba(0, 0, 0, 0.5), 0 0 10px rgba(18, 184, 134, 0.5)",
-                      transition: "all 0.18s ease",
-                    }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setIsMapModalOpen(true);
-                    }}
-                  >
-                    <MapPin size={13} />
-                  </ActionIcon>
-                </Tooltip>
-              </Box>
-            )}
-          </Paper>
-
-          {/* Title & Metadata Hub */}
-          <Stack gap={8} style={{ flex: 1, minWidth: 0, paddingBottom: 6 }}>
-            {/* Top Stat Pills Row */}
+        <Group
+          justify="space-between"
+          align="flex-end"
+          gap="xl"
+          wrap="wrap"
+          mb="lg"
+        >
+          {/* Left: Game Icon + Title + Star Rating + Year + Genre Pills */}
+          <Stack gap={10} style={{ flex: 1, minWidth: 280 }}>
             <Group gap="xs" wrap="wrap">
-              {(currentGame.releaseDate || currentGame.releaseYear) && (
-                <Badge
-                  color="blue"
-                  variant="light"
-                  size="sm"
-                  leftSection={<Calendar size={12} />}
-                >
-                  {currentGame.releaseDate
-                    ? new Date(currentGame.releaseDate).toLocaleDateString(
-                        "en-US",
-                        {
-                          year: "numeric",
-                          month: "short",
-                          day: "numeric",
-                        },
-                      )
-                    : currentGame.releaseYear}
-                </Badge>
-              )}
-
-              {currentGame.rating && (
-                <Badge
-                  color="yellow"
-                  variant="light"
-                  size="sm"
-                  leftSection={<Star size={12} fill="#fcc419" />}
-                >
-                  {currentGame.rating} / 100
-                </Badge>
-              )}
-
-              {currentGame.fitgirlSize && (
-                <Badge
-                  color="grape"
-                  variant="light"
-                  size="sm"
-                  leftSection={<HardDrive size={12} />}
-                >
-                  FitGirl: {currentGame.fitgirlSize}
-                </Badge>
-              )}
-
-              {currentGame.steamripSize && (
-                <Badge
-                  color="cyan"
-                  variant="light"
-                  size="sm"
-                  leftSection={<HardDrive size={12} />}
-                >
-                  SteamRIP: {currentGame.steamripSize}
-                </Badge>
-              )}
-
-              {!currentGame.fitgirlSize && !currentGame.steamripSize && currentGame.repackSize && (
-                <Badge
-                  color="grape"
-                  variant="light"
-                  size="sm"
-                  leftSection={<HardDrive size={12} />}
-                >
-                  {currentGame.repackSize}
-                </Badge>
-              )}
-
               {currentGame.isCompleted && (
                 <Badge
                   color="teal"
                   variant="filled"
-                  size="sm"
-                  leftSection={<Trophy size={12} />}
+                  size="xs"
+                  leftSection={<Trophy size={11} />}
                 >
                   COMPLETED
                 </Badge>
@@ -1040,8 +916,10 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                   <Badge
                     color="yellow"
                     variant="filled"
-                    size="sm"
+                    size="xs"
                     leftSection={<Sparkles size={11} />}
+                    style={{ cursor: "pointer" }}
+                    onClick={() => setActiveTab("downloads")}
                   >
                     Update in FitGirl (
                     {currentGame.fitgirlUploadDate || "Available"})
@@ -1066,8 +944,10 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                   <Badge
                     color="yellow"
                     variant="filled"
-                    size="sm"
+                    size="xs"
                     leftSection={<Sparkles size={11} />}
+                    style={{ cursor: "pointer" }}
+                    onClick={() => setActiveTab("downloads")}
                   >
                     Update in SteamRIP (
                     {currentGame.steamripUploadDate || "Available"})
@@ -1094,7 +974,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                     <Badge
                       color="gray"
                       variant="light"
-                      size="sm"
+                      size="xs"
                       leftSection={<RotateCcw size={11} />}
                       style={{ cursor: "pointer" }}
                       onClick={handleUnignoreUpdate}
@@ -1105,406 +985,277 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                 )}
             </Group>
 
-            {/* Game Title */}
-            <Title
-              order={1}
-              style={{
-                fontSize: "2rem",
-                fontWeight: 900,
-                letterSpacing: "-0.5px",
-                lineHeight: 1.15,
-                wordBreak: "break-word",
-                textShadow: "0 2px 10px rgba(0,0,0,0.5)",
-              }}
-            >
-              {cleanGameTitle(currentGame.title)}
-            </Title>
+            {/* Title with inline square cover icon */}
+            <Group gap="sm" align="center" wrap="nowrap">
+              <MantineImage
+                src={currentGame.iconUrl || currentGame.coverUrl}
+                w={32}
+                h={32}
+                radius="sm"
+                fit="cover"
+                fallbackSrc="https://placehold.co/32x32/141517/3b82f6?text=G"
+                style={{
+                  border: "1px solid rgba(255,255,255,0.18)",
+                  flexShrink: 0,
+                }}
+              />
+              <Title
+                order={1}
+                style={{
+                  fontSize: "clamp(1.55rem, 2.5vw, 2.25rem)",
+                  fontWeight: 900,
+                  letterSpacing: "-0.4px",
+                  lineHeight: 1.1,
+                  textTransform: "uppercase",
+                  textShadow: "0 4px 16px rgba(0, 0, 0, 0.75)",
+                }}
+              >
+                {cleanGameTitle(currentGame.title)}
+              </Title>
+            </Group>
 
-            {/* Sub-Header Developer & Version Info */}
-            <Group gap="md" wrap="wrap">
-              {currentGame.developer && (
-                <Group gap={6}>
-                  <Building2 size={14} color="var(--mantine-color-dimmed)" />
-                  <Text size="xs" c="dimmed">
-                    {currentGame.developer}
+            {/* Star Rating + Release Year + Platform + Outlined Genre Pills */}
+            <Group gap="xs" wrap="wrap" align="center">
+              {currentGame.rating !== undefined && (
+                <Group gap={3} align="center" mr={4}>
+                  {Array.from({ length: 5 }).map((_, idx) => (
+                    <Star
+                      key={idx}
+                      size={13}
+                      fill={idx < starRatingCount ? "#f8fafc" : "none"}
+                      color={
+                        idx < starRatingCount
+                          ? "#f8fafc"
+                          : "rgba(255,255,255,0.28)"
+                      }
+                    />
+                  ))}
+                  <Text size="xs" fw={700} c="gray.2" ml={3}>
+                    {Math.round(currentGame.rating)}
                   </Text>
                 </Group>
               )}
 
-              {displayInstalledVer && (
-                <Group gap={6}>
-                  <Badge size="xs" color="teal" variant="dot">
-                    {displayInstalledVer}
-                  </Badge>
-                </Group>
+              {(currentGame.releaseYear || currentGame.releaseDate) && (
+                <Text size="xs" fw={600} c="gray.3">
+                  •{" "}
+                  {currentGame.releaseYear ||
+                    new Date(currentGame.releaseDate!).getFullYear()}{" "}
+                  • PC (WINDOWS)
+                </Text>
               )}
-            </Group>
 
-            {/* Source Connection Badges */}
-            <Group gap={6} wrap="wrap" mt={2}>
-              {isLinkedIgdb && (
-                <Badge size="xs" color="violet" variant="light">
-                  IGDB Linked
-                </Badge>
-              )}
-              {isLinkedFitgirl && (
-                <Badge
-                  size="xs"
-                  color="pink"
-                  variant={
-                    releaseComparison.fitgirlIsNewest ? "filled" : "light"
-                  }
-                  style={{
-                    cursor: "pointer",
-                    border: releaseComparison.fitgirlIsNewest
-                      ? "1.5px solid #40c057"
-                      : undefined,
-                    boxShadow: releaseComparison.fitgirlIsNewest
-                      ? "0 0 8px rgba(64, 192, 87, 0.35)"
-                      : undefined,
-                  }}
-                  leftSection={
-                    releaseComparison.fitgirlIsNewest ? (
-                      <Sparkles size={10} />
-                    ) : undefined
-                  }
-                  onClick={() =>
-                    currentGame.linkedFitgirlUrl &&
-                    openInBrowser(currentGame.linkedFitgirlUrl)
-                  }
-                >
-                  FitGirl: {fitgirlVer || "Linked"}
-                  {releaseComparison.fitgirlIsNewest && isLinkedSteamrip
-                    ? " (LATEST)"
-                    : ""}{" "}
-                  ↗
-                </Badge>
-              )}
-              {isLinkedSteamrip && (
-                <Badge
-                  size="xs"
-                  color="cyan"
-                  variant={
-                    releaseComparison.steamripIsNewest ? "filled" : "light"
-                  }
-                  style={{
-                    cursor: "pointer",
-                    border: releaseComparison.steamripIsNewest
-                      ? "1.5px solid #40c057"
-                      : undefined,
-                    boxShadow: releaseComparison.steamripIsNewest
-                      ? "0 0 8px rgba(64, 192, 87, 0.35)"
-                      : undefined,
-                  }}
-                  leftSection={
-                    releaseComparison.steamripIsNewest ? (
-                      <Sparkles size={10} />
-                    ) : undefined
-                  }
-                  onClick={() =>
-                    currentGame.linkedSteamripUrl &&
-                    openInBrowser(currentGame.linkedSteamripUrl)
-                  }
-                >
-                  SteamRIP: {steamripVer || "Linked"}
-                  {releaseComparison.steamripIsNewest && isLinkedFitgirl
-                    ? " (LATEST)"
-                    : ""}{" "}
-                  ↗
-                </Badge>
-              )}
-              {gameMap && (
-                <Badge
-                  size="xs"
-                  color="teal"
-                  variant="light"
-                  style={{
-                    cursor: "pointer",
-                    boxShadow: "0 0 8px rgba(32, 201, 151, 0.25)",
-                  }}
-                  leftSection={<MapPin size={10} />}
-                  onClick={() => setIsMapModalOpen(true)}
-                >
-                  Interactive Map ↗
-                </Badge>
-              )}
+              {currentGame.genres &&
+                currentGame.genres.slice(0, 4).map((genre) => (
+                  <Badge
+                    key={genre}
+                    size="xs"
+                    variant="outline"
+                    color="gray.3"
+                    radius="xs"
+                    className="daze-glass-pill"
+                    style={{
+                      borderColor: "rgba(255, 255, 255, 0.24)",
+                      color: "#e2e8f0",
+                      fontWeight: 600,
+                      letterSpacing: "0.4px",
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    {genre}
+                  </Badge>
+                ))}
             </Group>
           </Stack>
-        </Group>
 
-        {/* 3. STEAM-STYLE ACTION COMMAND BAR */}
-        <Paper
-          p="md"
-          radius="lg"
-          bg="var(--mantine-color-default)"
-          style={{
-            border: "1px solid var(--mantine-color-default-border)",
-            boxShadow: "0 8px 24px rgba(0, 0, 0, 0.25)",
-            backdropFilter: "blur(12px)",
-          }}
-          mb="lg"
-        >
-          <Group justify="space-between" align="center" wrap="wrap" gap="md">
-            {/* Primary Action Button (Big & Glowing) */}
-            <Group gap="md">
-              {currentGame.exePath && currentGame.exePath.trim() !== "" ? (
-                <>
-                  <Button
-                    size="md"
-                    color={
-                      isPlaying ? "red" : isAnyGameRunning ? "dark" : "blue"
-                    }
-                    disabled={isAnyGameRunning && !isPlaying}
+          {/* Right: Stat Boxes + Floating 3:4 Cover Poster */}
+          <Group gap="md" align="flex-end" wrap="nowrap">
+            <Group gap={8} wrap="nowrap" visibleFrom="sm">
+              <Paper
+                px="sm"
+                py={8}
+                radius="md"
+                className="daze-glass-panel"
+                style={{
+                  border: "1px solid rgba(255, 255, 255, 0.1)",
+                  textAlign: "center",
+                  minWidth: 74,
+                }}
+              >
+                <Text size="sm" fw={800} c="white" ff="monospace">
+                  {playtimeHours}h
+                </Text>
+                <Text
+                  size="9px"
+                  fw={700}
+                  c="dimmed"
+                  tt="uppercase"
+                  style={{ letterSpacing: "0.5px" }}
+                >
+                  IN-GAME
+                </Text>
+              </Paper>
+
+              <Paper
+                px="sm"
+                py={8}
+                radius="md"
+                className="daze-glass-panel"
+                style={{
+                  border: "1px solid rgba(255, 255, 255, 0.1)",
+                  textAlign: "center",
+                  minWidth: 82,
+                }}
+              >
+                <Text size="xs" fw={800} c="white" truncate maw={95}>
+                  {currentGame.fitgirlSize ||
+                    currentGame.steamripSize ||
+                    currentGame.repackSize ||
+                    (currentGame.isInstalled ? "Installed" : "PC")}
+                </Text>
+                <Text
+                  size="9px"
+                  fw={700}
+                  c="dimmed"
+                  tt="uppercase"
+                  style={{ letterSpacing: "0.5px" }}
+                >
+                  {currentGame.repackSize || currentGame.fitgirlSize
+                    ? "SIZE"
+                    : "STATUS"}
+                </Text>
+              </Paper>
+
+              {gameMap && (
+                <Tooltip label="Open Interactive Map" withArrow>
+                  <Paper
+                    px="sm"
+                    py={8}
                     radius="md"
-                    px="xl"
-                    leftSection={
-                      <Play
-                        size={20}
-                        fill={isPlaying ? "none" : "currentColor"}
-                      />
-                    }
+                    className="daze-glass-panel"
+                    onClick={() => setIsMapModalOpen(true)}
                     style={{
-                      boxShadow: isPlaying
-                        ? "0 0 20px rgba(239, 68, 68, 0.4)"
-                        : "0 0 20px rgba(34, 139, 230, 0.35)",
-                      transition: "all 150ms ease",
-                    }}
-                    onClick={() => {
-                      onLaunch(currentGame);
-                      if (onCloseModal) onCloseModal();
+                      border: "1px solid rgba(32, 201, 151, 0.35)",
+                      textAlign: "center",
+                      cursor: "pointer",
+                      minWidth: 68,
                     }}
                   >
-                    <Stack gap={0} align="flex-start">
-                      <Text
-                        size="sm"
-                        fw={800}
-                        style={{ letterSpacing: "0.5px" }}
-                      >
-                        {isPlaying
-                          ? "STOP RUNNING GAME"
-                          : isAnyGameRunning
-                            ? "GAME IN PROGRESS"
-                            : "PLAY NOW"}
-                      </Text>
-                      <Text size="10px" opacity={0.8} ff="monospace">
-                        {playtimeHours}h logged
-                      </Text>
-                    </Stack>
-                  </Button>
-
-                  {(hasFitgirlUpdate || hasSteamripUpdate) && (
-                    <Group gap="xs" wrap="nowrap">
-                      <Button
-                        size="md"
-                        color="yellow"
-                        variant="light"
-                        radius="md"
-                        leftSection={<Sparkles size={18} />}
-                        onClick={() => setActiveTab("downloads")}
-                      >
-                        <Stack gap={0} align="flex-start">
-                          <Text size="xs" fw={800}>
-                            UPDATE AVAILABLE
-                          </Text>
-                          <Text size="10px" opacity={0.8}>
-                            {hasFitgirlUpdate
-                              ? `FitGirl: ${currentGame.fitgirlUploadDate || "Available"}`
-                              : `SteamRIP: ${currentGame.steamripUploadDate || "Available"}`}
-                          </Text>
-                        </Stack>
-                      </Button>
-                      <Tooltip label="Ignore this update">
-                        <Button
-                          size="md"
-                          color="gray"
-                          variant="subtle"
-                          radius="md"
-                          leftSection={<EyeOff size={16} />}
-                          onClick={() =>
-                            handleIgnoreUpdate(
-                              hasFitgirlUpdate
-                                ? currentGame.fitgirlUploadDate
-                                : currentGame.steamripUploadDate,
-                            )
-                          }
-                        >
-                          Ignore
-                        </Button>
-                      </Tooltip>
-                    </Group>
-                  )}
-                </>
-              ) : !currentGame.isInstalled && primaryMagnet ? (
-                <Button
-                  size="md"
-                  color="grape"
-                  radius="md"
-                  px="xl"
-                  leftSection={<DownloadCloud size={20} />}
-                  style={{
-                    boxShadow: "0 0 20px rgba(174, 62, 201, 0.35)",
-                  }}
-                  onClick={() => handleStartMagnetDownload(primaryMagnet)}
-                >
-                  <Stack gap={0} align="flex-start">
-                    <Text size="sm" fw={800} style={{ letterSpacing: "0.5px" }}>
-                      DOWNLOAD REPACK
+                    <Center mb={2}>
+                      <MapPin size={15} color="#20c997" />
+                    </Center>
+                    <Text
+                      size="9px"
+                      fw={700}
+                      c="teal.3"
+                      tt="uppercase"
+                      style={{ letterSpacing: "0.5px" }}
+                    >
+                      MAP
                     </Text>
-                    <Text size="10px" opacity={0.8}>
-                      {currentGame.repackSize || "Instant Torrent Setup"}
-                    </Text>
-                  </Stack>
-                </Button>
-              ) : currentGame.isInstalled ? null : (
-                <Button
-                  size="md"
-                  color="indigo"
-                  variant="light"
-                  radius="md"
-                  leftSection={<Link2 size={18} />}
-                  onClick={() => setIsSourceLinkerOpen(true)}
-                >
-                  LINK SOURCES TO DOWNLOAD
-                </Button>
-              )}
-
-              {/* Open Folder Quick Shortcut (if installed) */}
-              {currentGame.exePath && (
-                <Tooltip label="Open Game Install Folder in Explorer" withArrow>
-                  <ActionIcon
-                    size="42px"
-                    radius="md"
-                    variant="light"
-                    color="blue"
-                    onClick={() => handleOpenFolder()}
-                  >
-                    <FolderOpen size={18} />
-                  </ActionIcon>
+                  </Paper>
                 </Tooltip>
               )}
             </Group>
 
-            {/* Secondary Controls Group */}
-            <Group gap="xs" wrap="wrap">
-              {/* Combined Status Dropdown Menu */}
-              <Menu shadow="md" width={180} position="bottom-start" radius="md">
-                <Menu.Target>
-                  <Button
-                    size="sm"
-                    radius="md"
-                    variant="filled"
-                    color={
-                      currentGame.isInstalled
-                        ? "blue"
-                        : currentGame.isWishlisted
-                          ? "orange"
-                          : currentGame.isCompleted
-                            ? "teal"
-                            : "gray"
-                    }
-                    leftSection={
-                      currentGame.isInstalled ? (
-                        <HardDrive size={15} />
-                      ) : currentGame.isWishlisted ? (
-                        <Bookmark size={15} fill="white" />
-                      ) : currentGame.isCompleted ? (
-                        <CheckCircle2 size={15} />
-                      ) : (
-                        <Clock size={15} />
-                      )
-                    }
-                    rightSection={<ChevronDown size={14} />}
-                  >
-                    {currentGame.isInstalled
-                      ? "INSTALLED"
-                      : currentGame.isWishlisted
-                        ? "WISHLIST"
-                        : currentGame.isCompleted
-                          ? "COMPLETED"
-                          : "SET STATUS"}
-                  </Button>
-                </Menu.Target>
-                <Menu.Dropdown>
-                  <Menu.Label>Change Status</Menu.Label>
-                  <Menu.Item
-                    leftSection={<HardDrive size={14} color="#3b82f6" />}
-                    rightSection={
-                      currentGame.isInstalled ? (
-                        <Check size={13} color="#3b82f6" />
-                      ) : undefined
-                    }
-                    onClick={() => handleStatusChange("installed")}
-                  >
-                    Installed
-                  </Menu.Item>
-                  <Menu.Item
-                    leftSection={
-                      <Bookmark
-                        size={14}
-                        color="#f97316"
-                        fill={currentGame.isWishlisted ? "#f97316" : "none"}
-                      />
-                    }
-                    rightSection={
-                      currentGame.isWishlisted ? (
-                        <Check size={13} color="#f97316" />
-                      ) : undefined
-                    }
-                    onClick={() => handleStatusChange("wishlist")}
-                  >
-                    Wishlist
-                  </Menu.Item>
-                  <Menu.Item
-                    leftSection={<CheckCircle2 size={14} color="#10b981" />}
-                    rightSection={
-                      currentGame.isCompleted ? (
-                        <Check size={13} color="#10b981" />
-                      ) : undefined
-                    }
-                    onClick={() => handleStatusChange("completed")}
-                  >
-                    Completed
-                  </Menu.Item>
-                  <Menu.Divider />
-                  <Menu.Item
-                    leftSection={<RotateCcw size={14} />}
-                    color="dimmed"
-                    onClick={() => handleStatusChange("none")}
-                  >
-                    Clear Status
-                  </Menu.Item>
-                  {(hasFitgirlUpdate || hasSteamripUpdate || currentGame.hasUpdate) && (
-                    <>
-                      <Menu.Divider />
-                      <Menu.Item
-                        leftSection={<EyeOff size={14} color="#eab308" />}
-                        onClick={() => handleIgnoreUpdate()}
-                      >
-                        Ignore New Version
-                      </Menu.Item>
-                    </>
-                  )}
-                  {Boolean(currentGame.ignoredUpdateDate) && (
-                    <>
-                      <Menu.Divider />
-                      <Menu.Item
-                        leftSection={<RotateCcw size={14} />}
-                        onClick={() => handleUnignoreUpdate()}
-                      >
-                        Restore Update Checking
-                      </Menu.Item>
-                    </>
-                  )}
-                </Menu.Dropdown>
-              </Menu>
+            {/* Floating 3:4 Cover Poster */}
+            <Paper
+              radius="lg"
+              visibleFrom="xs"
+              style={{
+                width: 148,
+                height: 205,
+                flexShrink: 0,
+                overflow: "hidden",
+                border: "1.5px solid rgba(255, 255, 255, 0.16)",
+                boxShadow: "0 18px 40px rgba(0, 0, 0, 0.78)",
+                position: "relative",
+                background: "var(--mantine-color-dark-8)",
+              }}
+            >
+              <MantineImage
+                src={currentGame.coverUrl}
+                h="100%"
+                w="100%"
+                fit="cover"
+                fallbackSrc="https://placehold.co/600x800/0f172a/3b82f6?text=No+Cover"
+                loading="lazy"
+                decoding="async"
+              />
+              {isPlaying && (
+                <Badge
+                  pos="absolute"
+                  bottom={8}
+                  left={8}
+                  right={8}
+                  color="teal"
+                  variant="filled"
+                  size="xs"
+                >
+                  ● RUNNING
+                </Badge>
+              )}
+            </Paper>
+          </Group>
+        </Group>
+
+        {/* 3. HORIZONTAL QUICK-LINKS STRIP (FusionX Style) */}
+        <Paper
+          px="md"
+          py={8}
+          radius="md"
+          className="daze-glass-panel"
+          mb="lg"
+          style={{
+            border: "1px solid rgba(255, 255, 255, 0.08)",
+          }}
+        >
+          <Group gap="xs" wrap="wrap" justify="space-between">
+            <Group gap={6} wrap="wrap">
+              {isLinkedFitgirl && currentGame.linkedFitgirlUrl && (
+                <Button
+                  size="compact-xs"
+                  variant="subtle"
+                  color={releaseComparison.fitgirlIsNewest ? "pink" : "gray.3"}
+                  leftSection={<Globe size={13} />}
+                  rightSection={<ExternalLink size={11} />}
+                  onClick={() => openInBrowser(currentGame.linkedFitgirlUrl!)}
+                >
+                  FitGirl {fitgirlVer ? `(${fitgirlVer})` : "Page"}
+                </Button>
+              )}
+
+              {isLinkedSteamrip && currentGame.linkedSteamripUrl && (
+                <Button
+                  size="compact-xs"
+                  variant="subtle"
+                  color={releaseComparison.steamripIsNewest ? "cyan" : "gray.3"}
+                  leftSection={<Flame size={13} />}
+                  rightSection={<ExternalLink size={11} />}
+                  onClick={() => openInBrowser(currentGame.linkedSteamripUrl!)}
+                >
+                  SteamRIP {steamripVer ? `(${steamripVer})` : "Page"}
+                </Button>
+              )}
+
+              {currentGame.exePath && (
+                <Button
+                  size="compact-xs"
+                  variant="subtle"
+                  color="gray.3"
+                  leftSection={<FolderOpen size={13} />}
+                  onClick={() => handleOpenFolder()}
+                >
+                  Install Folder
+                </Button>
+              )}
 
               {gameMap && (
                 <Button
-                  size="sm"
-                  variant="light"
+                  size="compact-xs"
+                  variant="subtle"
                   color="teal"
-                  radius="md"
-                  leftSection={<MapPin size={15} />}
+                  leftSection={<MapPin size={13} />}
                   onClick={() => setIsMapModalOpen(true)}
                 >
                   Interactive Map
@@ -1512,11 +1263,10 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
               )}
 
               <Button
-                size="sm"
-                variant="light"
-                color="indigo"
-                radius="md"
-                leftSection={<Link2 size={15} />}
+                size="compact-xs"
+                variant="subtle"
+                color="indigo.3"
+                leftSection={<Link2 size={13} />}
                 onClick={() => setIsSourceLinkerOpen(true)}
               >
                 {isLinkedFitgirl || isLinkedSteamrip || isLinkedIgdb
@@ -1524,58 +1274,30 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                   : "Link Sources"}
               </Button>
 
-              {onEdit && (
-                <Button
-                  size="sm"
-                  variant="default"
-                  radius="md"
-                  leftSection={<Edit3 size={15} color="#4dabf7" />}
-                  onClick={() => {
-                    if (onCloseModal) onCloseModal();
-                    onEdit(currentGame);
-                  }}
-                >
-                  Edit Info
-                </Button>
-              )}
+              <Button
+                size="compact-xs"
+                variant="subtle"
+                color="gray.3"
+                leftSection={<FileCode size={13} />}
+                onClick={() => {
+                  setActiveTab("overview");
+                  setIsEditingExePath(true);
+                }}
+              >
+                Executable Path
+              </Button>
+            </Group>
 
-              {(hasFitgirlUpdate || hasSteamripUpdate || currentGame.hasUpdate) && (
-                <Button
-                  size="sm"
-                  variant="subtle"
-                  color="yellow"
-                  radius="md"
-                  leftSection={<EyeOff size={15} color="#eab308" />}
-                  onClick={() => handleIgnoreUpdate()}
-                >
-                  Ignore Version
-                </Button>
+            <Group gap={6}>
+              {isLinkedIgdb && (
+                <Badge size="xs" color="violet" variant="light">
+                  IGDB Linked
+                </Badge>
               )}
-              {Boolean(currentGame.ignoredUpdateDate) &&
-                !hasFitgirlUpdate &&
-                !hasSteamripUpdate &&
-                !currentGame.hasUpdate && (
-                  <Button
-                    size="sm"
-                    variant="subtle"
-                    color="gray"
-                    radius="md"
-                    leftSection={<RotateCcw size={14} />}
-                    onClick={() => handleUnignoreUpdate()}
-                  >
-                    Restore Update Check
-                  </Button>
-                )}
-
-              {currentGame.exePath && onUninstall && (
-                <HoldToConfirmButton
-                  label="HOLD TO UNINSTALL"
-                  holdDurationMs={2000}
-                  onConfirmed={() => {
-                    onUninstall(currentGame.id);
-                    if (onCloseModal) onCloseModal();
-                  }}
-                />
+              {displayInstalledVer && (
+                <Badge size="xs" color="teal" variant="dot">
+                  {displayInstalledVer}
+                </Badge>
               )}
             </Group>
           </Group>
@@ -1589,7 +1311,12 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
           color="blue"
           variant="pills"
         >
-          <Tabs.List mb="md">
+          <Tabs.List
+            mb="md"
+            p={4}
+            className="daze-glass-pill"
+            style={{ borderRadius: 12, width: "fit-content" }}
+          >
             <Tabs.Tab value="overview" leftSection={<Info size={15} />}>
               Overview
             </Tabs.Tab>
@@ -1614,15 +1341,60 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
           {/* TAB 1: OVERVIEW */}
           <Tabs.Panel value="overview">
             <SimpleGrid cols={{ base: 1, md: 3 }} spacing="lg">
-              {/* Left Column: About & Storyline (Spans 2 cols) */}
+              {/* Left Column: Media Preview, About & Storyline, Updates, Exe (Spans 2 cols) */}
               <Stack gap="md" style={{ gridColumn: "span 2" }}>
+                {/* Featured 16:9 Media Showcase Frame (FusionX Style) */}
+                {featuredMediaUrl && (
+                  <Paper
+                    radius="lg"
+                    style={{
+                      overflow: "hidden",
+                      position: "relative",
+                      aspectRatio: "16 / 9",
+                      maxHeight: 330,
+                      border: "1px solid rgba(255, 255, 255, 0.1)",
+                      cursor: "pointer",
+                      background: "var(--mantine-color-dark-8)",
+                    }}
+                    onClick={() => {
+                      setSelectedScreenshotIndex(0);
+                      setIsLightboxOpen(true);
+                    }}
+                  >
+                    <MantineImage
+                      src={featuredMediaUrl}
+                      h="100%"
+                      w="100%"
+                      fit="cover"
+                      loading="lazy"
+                      decoding="async"
+                    />
+                    <Badge
+                      pos="absolute"
+                      bottom={10}
+                      right={10}
+                      size="xs"
+                      variant="filled"
+                      color="dark.7"
+                      leftSection={<ImageIcon size={11} />}
+                      style={{
+                        backgroundColor: "rgba(10, 12, 16, 0.78)",
+                        backdropFilter: "blur(8px)",
+                        border: "1px solid rgba(255, 255, 255, 0.16)",
+                      }}
+                    >
+                      1 / {sortedScreenshots.length} Screenshots
+                    </Badge>
+                  </Paper>
+                )}
+
                 {/* About Game Card */}
                 <Paper
                   p="lg"
                   radius="md"
-                  bg="var(--mantine-color-default)"
+                  className="daze-glass-panel"
                   style={{
-                    border: "1px solid var(--mantine-color-default-border)",
+                    border: "1px solid rgba(255, 255, 255, 0.08)",
                   }}
                 >
                   <Stack gap="xs">
@@ -1691,7 +1463,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                                     key={i}
                                     p="xs"
                                     radius="md"
-                                    bg="var(--mantine-color-body)"
+                                    className="daze-glass-card"
                                     style={{
                                       border:
                                         "1px solid var(--mantine-color-default-border)",
@@ -1783,7 +1555,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                 <Paper
                   p="lg"
                   radius="md"
-                  bg="var(--mantine-color-default)"
+                  className="daze-glass-panel"
                   style={{
                     border: "1px solid var(--mantine-color-default-border)",
                   }}
@@ -1886,7 +1658,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                   <Paper
                     p="lg"
                     radius="md"
-                    bg="var(--mantine-color-default)"
+                    className="daze-glass-panel"
                     style={{
                       border: "1px solid var(--mantine-color-default-border)",
                     }}
@@ -1912,59 +1684,156 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                 )}
               </Stack>
 
-              {/* Right Column: Launch Statistics & Quick Info */}
+              {/* Right Column: Playtime Breakdown & Structured Details Table (FusionX / Daze Style) */}
               <Stack gap="md">
-                {/* Play Stats Card */}
+                {/* Playtime & Completion Breakdown Card */}
                 <Paper
                   p="lg"
                   radius="md"
-                  bg="var(--mantine-color-default)"
+                  className="daze-glass-panel"
                   style={{
-                    border: "1px solid var(--mantine-color-default-border)",
+                    border: "1px solid rgba(255, 255, 255, 0.08)",
                   }}
                 >
                   <Stack gap="sm">
                     <Text size="xs" fw={700} c="dimmed" tt="uppercase">
-                      Session & Play Statistics
+                      Playtime & Progress
                     </Text>
 
-                    <Group justify="space-between" align="center">
-                      <Text size="xs" c="dimmed">
-                        Logged Playtime
-                      </Text>
-                      <Text size="sm" fw={700} ff="monospace">
-                        {playtimeHours} Hours
-                      </Text>
-                    </Group>
+                    <Progress.Root size={10} radius="xl">
+                      <Progress.Section
+                        value={Math.min(
+                          100,
+                          Math.max(
+                            8,
+                            ((currentGame.playtimeMinutes || 0) / 3000) * 100,
+                          ),
+                        )}
+                        color="cyan"
+                      />
+                      {currentGame.isCompleted && (
+                        <Progress.Section value={100} color="teal" />
+                      )}
+                    </Progress.Root>
 
-                    <Divider my={2} />
+                    <SimpleGrid cols={3} spacing="xs" mt={4}>
+                      <Paper
+                        p="xs"
+                        radius="sm"
+                        className="daze-glass-card"
+                        style={{ textAlign: "center" }}
+                      >
+                        <Text size="9px" c="dimmed" fw={600}>
+                          Logged
+                        </Text>
+                        <Text size="sm" fw={800} ff="monospace">
+                          {playtimeHours}h
+                        </Text>
+                      </Paper>
+                      <Paper
+                        p="xs"
+                        radius="sm"
+                        className="daze-glass-card"
+                        style={{ textAlign: "center" }}
+                      >
+                        <Text size="9px" c="dimmed" fw={600}>
+                          Sessions
+                        </Text>
+                        <Text size="sm" fw={800} ff="monospace">
+                          {currentGame.playSessions?.length || 0}
+                        </Text>
+                      </Paper>
+                      <Paper
+                        p="xs"
+                        radius="sm"
+                        className="daze-glass-card"
+                        style={{ textAlign: "center" }}
+                      >
+                        <Text size="9px" c="dimmed" fw={600}>
+                          Status
+                        </Text>
+                        <Text size="xs" fw={700} c="teal.3" truncate>
+                          {statusLabel}
+                        </Text>
+                      </Paper>
+                    </SimpleGrid>
+                  </Stack>
+                </Paper>
 
-                    <Group justify="space-between" align="center">
-                      <Text size="xs" c="dimmed">
-                        Last Played
-                      </Text>
-                      <Text size="xs" fw={600}>
-                        {currentGame.lastPlayed
-                          ? new Date(currentGame.lastPlayed).toLocaleDateString(
-                              undefined,
-                              {
-                                year: "numeric",
-                                month: "short",
-                                day: "numeric",
-                              },
-                            )
-                          : "Never"}
-                      </Text>
-                    </Group>
+                {/* Structured Details Table Card */}
+                <Paper
+                  p="lg"
+                  radius="md"
+                  className="daze-glass-panel"
+                  style={{
+                    border: "1px solid rgba(255, 255, 255, 0.08)",
+                  }}
+                >
+                  <Stack gap="xs">
+                    <Text size="xs" fw={700} c="dimmed" tt="uppercase" mb={2}>
+                      Details
+                    </Text>
 
-                    <Divider my={2} />
-
-                    <Group justify="space-between" align="center">
-                      <Text size="xs" c="dimmed">
-                        Date Added
-                      </Text>
-                      <Text size="xs" fw={600}>
-                        {currentGame.dateAdded
+                    {[
+                      {
+                        label: "Developer",
+                        value: currentGame.developer || "Unknown",
+                      },
+                      {
+                        label: "Publisher",
+                        value: currentGame.publisher || "—",
+                      },
+                      {
+                        label: "Release Date",
+                        value: currentGame.releaseDate
+                          ? new Date(
+                              currentGame.releaseDate,
+                            ).toLocaleDateString(undefined, {
+                              year: "numeric",
+                              month: "short",
+                              day: "numeric",
+                            })
+                          : currentGame.releaseYear
+                            ? String(currentGame.releaseYear)
+                            : "Unknown",
+                      },
+                      {
+                        label: "Installed Build",
+                        value: displayInstalledVer || "Not detected",
+                      },
+                      {
+                        label: "Repack Size",
+                        value:
+                          currentGame.fitgirlSize ||
+                          currentGame.steamripSize ||
+                          currentGame.repackSize ||
+                          "—",
+                      },
+                      {
+                        label: "Source",
+                        value: isLinkedFitgirl && isLinkedSteamrip
+                          ? "FitGirl & SteamRIP"
+                          : isLinkedFitgirl
+                            ? "FitGirl Repacks"
+                            : isLinkedSteamrip
+                              ? "SteamRIP"
+                              : currentGame.source || "Manual",
+                      },
+                      {
+                        label: "Last Played",
+                        value: currentGame.lastPlayed
+                          ? new Date(
+                              currentGame.lastPlayed,
+                            ).toLocaleDateString(undefined, {
+                              year: "numeric",
+                              month: "short",
+                              day: "numeric",
+                            })
+                          : "Never",
+                      },
+                      {
+                        label: "Date Added",
+                        value: currentGame.dateAdded
                           ? new Date(currentGame.dateAdded).toLocaleDateString(
                               undefined,
                               {
@@ -1973,61 +1842,92 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                                 day: "numeric",
                               },
                             )
-                          : "Unknown"}
-                      </Text>
-                    </Group>
+                          : "Unknown",
+                      },
+                    ].map((row) => (
+                      <Group
+                        key={row.label}
+                        justify="space-between"
+                        align="flex-start"
+                        wrap="nowrap"
+                        gap="sm"
+                        py={4}
+                        style={{
+                          borderBottom: "1px solid rgba(255, 255, 255, 0.05)",
+                        }}
+                      >
+                        <Text
+                          size="xs"
+                          c="dimmed"
+                          style={{ flexShrink: 0, minWidth: 94 }}
+                        >
+                          {row.label}
+                        </Text>
+                        <Text
+                          size="xs"
+                          fw={600}
+                          style={{ textAlign: "right", wordBreak: "break-word" }}
+                        >
+                          {row.value}
+                        </Text>
+                      </Group>
+                    ))}
 
-                    {currentGame.rating !== undefined && (
-                      <>
-                        <Divider my={2} />
-                        <Group justify="space-between" align="center">
-                          <Text size="xs" c="dimmed">
-                            IGDB User Rating
-                          </Text>
-                          <Badge
-                            size="sm"
-                            color="yellow"
-                            variant="light"
-                            leftSection={<Star size={10} />}
-                          >
-                            {Math.round(currentGame.rating)}%
-                          </Badge>
+                    {currentGame.genres && currentGame.genres.length > 0 && (
+                      <Box pt={6}>
+                        <Text size="xs" c="dimmed" mb={6}>
+                          Genres
+                        </Text>
+                        <Group gap={5} wrap="wrap">
+                          {currentGame.genres.map((genre) => (
+                            <Badge
+                              key={genre}
+                              variant="light"
+                              color="blue"
+                              size="xs"
+                              leftSection={<Tag size={10} />}
+                            >
+                              {genre}
+                            </Badge>
+                          ))}
                         </Group>
-                      </>
+                      </Box>
+                    )}
+
+                    {(hasFitgirlUpdate ||
+                      hasSteamripUpdate ||
+                      currentGame.hasUpdate ||
+                      currentGame.ignoredUpdateDate) && (
+                      <Box pt={8}>
+                        {hasFitgirlUpdate ||
+                        hasSteamripUpdate ||
+                        currentGame.hasUpdate ? (
+                          <Button
+                            fullWidth
+                            size="xs"
+                            variant="light"
+                            color="yellow"
+                            leftSection={<EyeOff size={13} />}
+                            onClick={() => handleIgnoreUpdate()}
+                          >
+                            Ignore New Version
+                          </Button>
+                        ) : (
+                          <Button
+                            fullWidth
+                            size="xs"
+                            variant="subtle"
+                            color="gray"
+                            leftSection={<RotateCcw size={13} />}
+                            onClick={() => handleUnignoreUpdate()}
+                          >
+                            Restore Update Checking
+                          </Button>
+                        )}
+                      </Box>
                     )}
                   </Stack>
                 </Paper>
-
-                {/* Genres & Categorization */}
-                {currentGame.genres && currentGame.genres.length > 0 && (
-                  <Paper
-                    p="lg"
-                    radius="md"
-                    bg="var(--mantine-color-default)"
-                    style={{
-                      border: "1px solid var(--mantine-color-default-border)",
-                    }}
-                  >
-                    <Stack gap="xs">
-                      <Text size="xs" fw={700} c="dimmed" tt="uppercase">
-                        Genres & Tags
-                      </Text>
-                      <Group gap={6} wrap="wrap">
-                        {currentGame.genres.map((genre) => (
-                          <Badge
-                            key={genre}
-                            variant="light"
-                            color="blue"
-                            size="sm"
-                            leftSection={<Tag size={10} />}
-                          >
-                            {genre}
-                          </Badge>
-                        ))}
-                      </Group>
-                    </Stack>
-                  </Paper>
-                )}
               </Stack>
             </SimpleGrid>
           </Tabs.Panel>
@@ -2053,7 +1953,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                     <Paper
                       p="md"
                       radius="md"
-                      bg="var(--mantine-color-default)"
+                      className="daze-glass-panel"
                       style={{
                         border: hasFitgirlUpdate
                           ? "1.5px solid var(--mantine-color-pink-6)"
@@ -2116,7 +2016,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                               key={idx}
                               p="sm"
                               radius="md"
-                              bg="var(--mantine-color-body)"
+                              className="daze-glass-card"
                               style={{
                                 border:
                                   "1px solid var(--mantine-color-default-border)",
@@ -2329,7 +2229,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                             key={idx}
                             p="md"
                             radius="md"
-                            bg="var(--mantine-color-default)"
+                            className="daze-glass-panel"
                             style={{
                               border:
                                 "1px solid var(--mantine-color-default-border)",
@@ -2450,7 +2350,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                 <Paper
                   p="xl"
                   radius="md"
-                  bg="var(--mantine-color-default)"
+                  className="daze-glass-panel"
                   style={{
                     textAlign: "center",
                     border: "1px solid var(--mantine-color-default-border)",
@@ -2520,6 +2420,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                             <Paper
                               key={i}
                               radius="md"
+                              className="daze-glass-card"
                               style={{
                                 position: "relative",
                                 overflow: "hidden",
@@ -2531,7 +2432,6 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                                 transition:
                                   "transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease",
                               }}
-                              bg="var(--mantine-color-body)"
                               onClick={() => {
                                 setSelectedScreenshotIndex(i);
                                 setIsLightboxOpen(true);
@@ -2577,7 +2477,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                 <Paper
                   p="xl"
                   radius="md"
-                  bg="var(--mantine-color-default)"
+                  className="daze-glass-panel"
                   style={{ textAlign: "center" }}
                 >
                   <Text size="xs" c="dimmed">
@@ -2596,13 +2496,13 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                     </Text>
                   </Group>
                   <Box
+                    className="daze-glass-panel"
                     style={{
                       overflow: "hidden",
                       borderRadius: 12,
                       height: 320,
                       border: "1px solid var(--mantine-color-default-border)",
                     }}
-                    bg="var(--mantine-color-body)"
                   >
                     <iframe
                       title={`${currentGame.title} Trailer`}
@@ -2622,6 +2522,272 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
           </Tabs.Panel>
         </Tabs>
       </Box>
+      </Box>
+
+      <Paper
+        px={{ base: "md", sm: "xl" }}
+        py="sm"
+        radius={0}
+        className="daze-glass-footer"
+        style={{
+          position: "absolute",
+          bottom: 0,
+          left: 0,
+          right: 0,
+          zIndex: 30,
+          borderBottom: "none",
+        }}
+      >
+        <Group justify="space-between" align="center" wrap="wrap" gap="md">
+          {/* Left Metrics */}
+          <Group gap="xl" wrap="wrap">
+            <Group gap={8} align="center">
+              <Calendar size={15} color="var(--mantine-color-dimmed)" />
+              <Stack gap={0}>
+                <Text size="10px" c="dimmed" fw={600}>
+                  Last Played
+                </Text>
+                <Text size="xs" fw={700}>
+                  {currentGame.lastPlayed
+                    ? new Date(currentGame.lastPlayed).toLocaleDateString()
+                    : "Never"}
+                </Text>
+              </Stack>
+            </Group>
+
+            <Group gap={8} align="center">
+              <Clock size={15} color="var(--mantine-color-dimmed)" />
+              <Stack gap={0}>
+                <Text size="10px" c="dimmed" fw={600}>
+                  Time Played
+                </Text>
+                <Text size="xs" fw={700} ff="monospace">
+                  {playtimeHours}h
+                </Text>
+              </Stack>
+            </Group>
+
+            <Menu shadow="md" width={180} position="top-start" radius="md">
+              <Menu.Target>
+                <UnstyledButton style={{ cursor: "pointer" }}>
+                  <Group gap={8} align="center">
+                    <Trophy
+                      size={15}
+                      color={
+                        currentGame.isCompleted
+                          ? "#20c997"
+                          : "var(--mantine-color-dimmed)"
+                      }
+                    />
+                    <Stack gap={0}>
+                      <Text size="10px" c="dimmed" fw={600}>
+                      </Text>
+                      <Group gap={4} align="center">
+                        <Text size="xs" fw={700}>
+                          {statusLabel}
+                        </Text>
+                        <ChevronDown size={11} />
+                      </Group>
+                    </Stack>
+                  </Group>
+                </UnstyledButton>
+              </Menu.Target>
+              <Menu.Dropdown>
+                <Menu.Label>Change Status</Menu.Label>
+                <Menu.Item
+                  leftSection={<HardDrive size={14} color="#3b82f6" />}
+                  rightSection={
+                    currentGame.isInstalled ? (
+                      <Check size={13} color="#3b82f6" />
+                    ) : undefined
+                  }
+                  onClick={() => handleStatusChange("installed")}
+                >
+                  Installed
+                </Menu.Item>
+                <Menu.Item
+                  leftSection={
+                    <Bookmark
+                      size={14}
+                      color="#f97316"
+                      fill={currentGame.isWishlisted ? "#f97316" : "none"}
+                    />
+                  }
+                  rightSection={
+                    currentGame.isWishlisted ? (
+                      <Check size={13} color="#f97316" />
+                    ) : undefined
+                  }
+                  onClick={() => handleStatusChange("wishlist")}
+                >
+                  Wishlist
+                </Menu.Item>
+                <Menu.Item
+                  leftSection={<CheckCircle2 size={14} color="#10b981" />}
+                  rightSection={
+                    currentGame.isCompleted ? (
+                      <Check size={13} color="#10b981" />
+                    ) : undefined
+                  }
+                  onClick={() => handleStatusChange("completed")}
+                >
+                  Completed
+                </Menu.Item>
+                <Menu.Divider />
+                <Menu.Item
+                  leftSection={<RotateCcw size={14} />}
+                  color="dimmed"
+                  onClick={() => handleStatusChange("none")}
+                >
+                  Clear Status
+                </Menu.Item>
+              </Menu.Dropdown>
+            </Menu>
+          </Group>
+
+          {/* Right Action Controls + Signature Pill Play Button */}
+          <Group gap="xs" wrap="nowrap">
+            <Tooltip
+              label={
+                currentGame.isFavorite
+                  ? "Remove from Favorites"
+                  : "Add to Favorites"
+              }
+              withArrow
+            >
+              <ActionIcon
+                size="lg"
+                radius="xl"
+                variant="default"
+                className="daze-glass-pill"
+                onClick={handleToggleFavorite}
+              >
+                <Star
+                  size={15}
+                  fill={currentGame.isFavorite ? "#fcc419" : "none"}
+                  color={currentGame.isFavorite ? "#fcc419" : "currentColor"}
+                />
+              </ActionIcon>
+            </Tooltip>
+
+            {currentGame.exePath && (
+              <Tooltip label="Open Install Folder" withArrow>
+                <ActionIcon
+                  size="lg"
+                  radius="xl"
+                  variant="default"
+                  className="daze-glass-pill"
+                  onClick={() => handleOpenFolder()}
+                >
+                  <FolderOpen size={15} />
+                </ActionIcon>
+              </Tooltip>
+            )}
+
+            <Tooltip label="Link Sources" withArrow>
+              <ActionIcon
+                size="lg"
+                radius="xl"
+                variant="default"
+                className="daze-glass-pill"
+                onClick={() => setIsSourceLinkerOpen(true)}
+              >
+                <Link2 size={15} />
+              </ActionIcon>
+            </Tooltip>
+
+            {onEdit && (
+              <Tooltip label="Edit Info" withArrow>
+                <ActionIcon
+                  size="lg"
+                  radius="xl"
+                  variant="default"
+                  className="daze-glass-pill"
+                  onClick={() => {
+                    if (onCloseModal) onCloseModal();
+                    onEdit(currentGame);
+                  }}
+                >
+                  <Edit3 size={15} />
+                </ActionIcon>
+              </Tooltip>
+            )}
+
+            {currentGame.exePath && onUninstall && (
+              <HoldToConfirmButton
+                label="UNINSTALL"
+                holdDurationMs={2000}
+                onConfirmed={() => {
+                  onUninstall(currentGame.id);
+                  if (onCloseModal) onCloseModal();
+                }}
+              />
+            )}
+
+            {currentGame.exePath && currentGame.exePath.trim() !== "" ? (
+              <Button
+                size="md"
+                radius="xl"
+                px="xl"
+                disabled={isAnyGameRunning && !isPlaying}
+                leftSection={
+                  isPlaying ? (
+                    <Square size={15} fill="currentColor" />
+                  ) : (
+                    <Play size={16} fill="currentColor" />
+                  )
+                }
+                style={{
+                  backgroundColor: isPlaying
+                    ? "#ef4444"
+                    : isAnyGameRunning
+                      ? "#374151"
+                      : "#ffffff",
+                  color: isPlaying || isAnyGameRunning ? "#ffffff" : "#0b0c0f",
+                  fontWeight: 800,
+                  boxShadow: isPlaying
+                    ? "0 0 20px rgba(239, 68, 68, 0.45)"
+                    : "0 4px 18px rgba(255, 255, 255, 0.22)",
+                  transition: "transform 150ms ease, box-shadow 150ms ease",
+                }}
+                onClick={() => {
+                  onLaunch(currentGame);
+                  if (onCloseModal) onCloseModal();
+                }}
+              >
+                {isPlaying
+                  ? "Stop"
+                  : isAnyGameRunning
+                    ? "Running..."
+                    : "Play"}
+              </Button>
+            ) : !currentGame.isInstalled && primaryMagnet ? (
+              <Button
+                size="md"
+                radius="xl"
+                px="xl"
+                color="grape"
+                leftSection={<DownloadCloud size={16} />}
+                onClick={() => handleStartMagnetDownload(primaryMagnet)}
+              >
+                Download
+              </Button>
+            ) : !currentGame.isInstalled ? (
+              <Button
+                size="md"
+                radius="xl"
+                px="lg"
+                variant="light"
+                color="indigo"
+                leftSection={<Link2 size={16} />}
+                onClick={() => setIsSourceLinkerOpen(true)}
+              >
+                Link Sources
+              </Button>
+            ) : null}
+          </Group>
+        </Group>
+      </Paper>
 
       {/* Dedicated Source Linker Modal */}
       <SourceLinkerModal

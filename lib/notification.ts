@@ -2,6 +2,7 @@ export interface RepackNotificationPayload {
   title: string;
   body: string;
   icon?: string;
+  image?: string;
 }
 
 function isTauri(): boolean {
@@ -70,13 +71,14 @@ export async function sendDesktopNotification(
 ): Promise<boolean> {
   if (typeof window === "undefined") return false;
 
-  const { title, body, icon } = payload;
+  const { title, body, icon, image } = payload;
   console.log("[sendDesktopNotification] Sending notification:", { title, body });
 
   if (isTauri()) {
     try {
       const plugin = await import("@tauri-apps/plugin-notification");
-      
+      const { invoke } = await import("@tauri-apps/api/core");
+
       try {
         let isGranted = await plugin.isPermissionGranted();
         if (!isGranted) {
@@ -87,16 +89,51 @@ export async function sendDesktopNotification(
         console.warn("[sendDesktopNotification] Permission check:", pErr);
       }
 
-      // On desktop, only use icon if it is a local file path; web paths/svgs cause Windows Toast failures
-      const safeIcon =
-        icon && !icon.startsWith("/") && !icon.startsWith("http")
-          ? icon
-          : undefined;
+      const targetImage = image || (icon && icon.startsWith("http") ? icon : undefined);
+
+      // Prefer native rich Windows toast (supports hero cover image + app icon)
+      try {
+        await invoke("send_rich_notification", {
+          title,
+          body,
+          imageUrl: targetImage ?? null,
+        });
+        console.log("[sendDesktopNotification] Tauri send_rich_notification succeeded.");
+        return true;
+      } catch (richErr) {
+        console.warn("[sendDesktopNotification] Rich toast unavailable, falling back to plugin:", richErr);
+      }
+
+      let appIconPath: string | undefined;
+      let attachmentPath: string | undefined;
+
+      try {
+        appIconPath = await invoke<string>("prepare_notification_image", {
+          imageUrl: icon && !icon.startsWith("/") ? icon : null,
+        });
+        if (targetImage) {
+          attachmentPath = await invoke<string>("prepare_notification_image", {
+            imageUrl: targetImage,
+          });
+        }
+      } catch (imgErr) {
+        console.warn("[sendDesktopNotification] Image prep failed:", imgErr);
+      }
+
+      const fileUri = (p: string) => {
+        const normalized = p.replace(/\\/g, "/");
+        return normalized.startsWith("/") ? `file://${normalized}` : `file:///${normalized}`;
+      };
+
+      const heroOrLogo = attachmentPath || appIconPath;
 
       plugin.sendNotification({
         title,
         body,
-        icon: safeIcon,
+        icon: appIconPath,
+        attachments: heroOrLogo
+          ? [{ id: "cover", url: fileUri(heroOrLogo) }]
+          : undefined,
       });
       console.log("[sendDesktopNotification] Tauri sendNotification succeeded.");
       return true;

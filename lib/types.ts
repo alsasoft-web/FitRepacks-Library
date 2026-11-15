@@ -9,7 +9,7 @@ export type ActiveTab =
   | "scanner";
 
 
-export type ViewMode = "grid" | "list";
+export type ViewMode = "grid" | "list" | "full-grid";
 
 export type SortOption =
   | "title-asc"

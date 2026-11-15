@@ -4,6 +4,7 @@ import { Game, PlaySession } from "./types";
 import { RepackPost } from "./repackTypes";
 import { extractGameVersion, cleanGameTitle } from "./gameLinker";
 import { ab } from "./alsabase";
+import { getRecompCatalogPosts } from "./recompCatalog";
 import {
   detectGameExeLastModified,
   isGameUpToDateByDate,
@@ -200,8 +201,12 @@ function getInitialCachedGames(): Game[] {
 // In-memory cache so synchronous getters work immediately for React renders
 let cachedGames: Game[] = getInitialCachedGames();
 
+let lastLocalGamesMutationAt = 0;
+let fileDialogActive = false;
+
 function persistCachedGames(games: Game[]): void {
   cachedGames = games;
+  lastLocalGamesMutationAt = Date.now();
   if (typeof window !== "undefined") {
     try {
       localStorage.setItem(GAMES_STORAGE_CACHE_KEY, JSON.stringify(games));
@@ -577,7 +582,12 @@ export async function getAppSetting(key: string): Promise<string | null> {
 
 /** Async entry point called on app mount to load SQLite data */
 export async function syncTauriLibraryData(): Promise<Game[]> {
+  if (fileDialogActive) return getStoredGames();
+  const syncStartedAt = Date.now();
   const games = await loadGamesFromSQLite();
+  if (fileDialogActive || lastLocalGamesMutationAt > syncStartedAt) {
+    return getStoredGames();
+  }
 
   if (isTauri()) {
     try {
@@ -1718,9 +1728,37 @@ export function toggleWishlistGame(id: string): Game[] {
   return updateGameInStorage(updatedGame);
 }
 
+export async function promptForGameExePath(
+  gameTitle?: string,
+): Promise<string | null> {
+  if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
+    return null;
+  }
+  fileDialogActive = true;
+  try {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const chosen = await open({
+      title: gameTitle
+        ? `Select Executable for ${gameTitle}`
+        : "Select Game Executable (.exe)",
+      filters: [{ name: "Executable", extensions: ["exe"] }],
+      multiple: false,
+    });
+    return typeof chosen === "string" && chosen.trim() ? chosen.trim() : null;
+  } catch (err) {
+    console.warn("Failed to open exe picker:", err);
+    return null;
+  } finally {
+    setTimeout(() => {
+      fileDialogActive = false;
+    }, 500);
+  }
+}
+
 export function setGameStatus(
   id: string,
   status: "installed" | "wishlist" | "completed" | "none",
+  exePath?: string,
 ): Game[] {
   const games = getStoredGames();
   const target = games.find((g) => g.id === id);
@@ -1760,6 +1798,7 @@ export function setGameStatus(
     isWishlisted: nextWishlisted,
     isCompleted: nextCompleted,
     isInstalled: nextInstalled,
+    exePath: status === "none" ? "" : exePath ? exePath : target.exePath,
     completedAt: nextCompleted ? nextCompletedAt : undefined,
     tags: Array.from(new Set(nextTags)),
   };
@@ -1938,7 +1977,12 @@ export {
 
 /** Convert a RepackPost into a minimal Game entry for the library. */
 function repackToGame(post: RepackPost): Game {
-  const source = post.source === "steamrip" ? "steamrip" : "fitgirl";
+  const source =
+    post.source === "steamrip"
+      ? "steamrip"
+      : post.source === "recomp"
+        ? "recomp"
+        : "fitgirl";
   const version = extractGameVersion(post.title, post.description);
   return {
     id: `repack-${post.id}`,
@@ -2146,13 +2190,18 @@ export function setRepackStatus(
   id: string,
   post: RepackPost | undefined,
   status: "installed" | "wishlist" | "completed" | "none",
+  exePath?: string,
 ): void {
   const existing = getGameForRepack(id, post);
   if (existing) {
-    if (status === "none" && !existing.isFavorite && !existing.exePath) {
+    if (
+      status === "none" &&
+      !existing.isFavorite &&
+      (existing.id.startsWith("repack-") || !existing.exePath)
+    ) {
       deleteGameFromStorage(existing.id);
     } else {
-      setGameStatus(existing.id, status);
+      setGameStatus(existing.id, status, exePath);
     }
   } else if (post && status !== "none") {
     const base = repackToGame(post);
@@ -2160,6 +2209,7 @@ export function setRepackStatus(
       base.isInstalled = true;
       base.isWishlisted = false;
       base.isCompleted = false;
+      if (exePath) base.exePath = exePath;
       base.tags = Array.from(new Set([...(base.tags || []), "Installed"]));
     } else if (status === "completed") {
       base.isCompleted = true;
@@ -2414,7 +2464,7 @@ export interface RepackPaginationOptions {
   popularFilter?: "all" | "popular_month" | "popular_year";
   selectedCategories?: string[];
   readFilter?: "all" | "unread" | "read";
-  dataSource?: "fitgirl" | "steamrip";
+  dataSource?: "fitgirl" | "steamrip" | "recomp";
   forceJson?: boolean;
 }
 
@@ -2823,6 +2873,94 @@ async function loadSteamRipFromSQLite(
 }
 
 /**
+ * Load paginated Recomp catalog entries from recomplauncher.com/pc-catalog.json
+ */
+async function loadRecompPaginated(
+  options: RepackPaginationOptions,
+  cleanSearch: string,
+  cacheKey: string,
+): Promise<PaginatedRepacksResult> {
+  const {
+    page = 1,
+    perPage = 10,
+    sortBy = "newest",
+    selectedCategories = ["All"],
+    readFilter = "all",
+    forceJson = false,
+  } = options;
+
+  try {
+    const allPosts = await getRecompCatalogPosts(forceJson);
+    const searchLower = cleanSearch.toLowerCase();
+    const activeCats = selectedCategories.filter((c) => c !== "All");
+
+    let filtered = allPosts.map((p) => ({
+      ...p,
+      isRead: isPostReadInStorage(p.id, p.date, "recomp"),
+    }));
+
+    if (searchLower) {
+      filtered = filtered.filter(
+        (p) =>
+          p.title.toLowerCase().includes(searchLower) ||
+          p.companies.toLowerCase().includes(searchLower) ||
+          p.description.toLowerCase().includes(searchLower) ||
+          p.genres.some((g) => g.toLowerCase().includes(searchLower)),
+      );
+    }
+
+    if (activeCats.length > 0) {
+      filtered = filtered.filter((p) =>
+        activeCats.some((cat) => {
+          const catLower = cat.toLowerCase();
+          return p.genres.some((g) => g.toLowerCase().includes(catLower));
+        }),
+      );
+    }
+
+    if (readFilter === "unread") {
+      filtered = filtered.filter((p) => !p.isRead);
+    } else if (readFilter === "read") {
+      filtered = filtered.filter((p) => p.isRead);
+    }
+
+    if (sortBy === "title") {
+      filtered.sort((a, b) => a.title.localeCompare(b.title));
+    } else if (sortBy === "oldest") {
+      filtered.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+    } else {
+      filtered.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+    }
+
+    const totalItems = filtered.length;
+    const totalPages = Math.max(1, Math.ceil(totalItems / perPage));
+    const safePage = Math.min(Math.max(1, page), totalPages);
+    const start = (safePage - 1) * perPage;
+    const items = filtered.slice(start, start + perPage);
+
+    const result: PaginatedRepacksResult = {
+      items,
+      totalItems,
+      totalPages,
+      page: safePage,
+      perPage,
+    };
+    paginationCache.set(cacheKey, { result, timestamp: Date.now() });
+    return result;
+  } catch (err: any) {
+    console.error("Failed to load Recomp catalog:", err);
+    return {
+      items: [],
+      totalItems: 0,
+      totalPages: 1,
+      page,
+      perPage,
+      error: err?.message || "Failed to fetch Recomp catalog",
+    };
+  }
+}
+
+/**
  * Load paginated repacks on-demand directly from AlsaBase (or local SQLite for SteamRIP)
  */
 export async function loadRepacksPaginated(
@@ -2873,6 +3011,11 @@ export async function loadRepacksPaginated(
   // Route SteamRIP directly to local SQLite
   if (dataSource === "steamrip") {
     return await loadSteamRipFromSQLite(options, cleanSearch, cacheKey);
+  }
+
+  // Route Recomp to recomplauncher.com/pc-catalog.json
+  if (dataSource === "recomp") {
+    return await loadRecompPaginated(options, cleanSearch, cacheKey);
   }
 
   // AlsaBase on-demand pagination for FitGirl
@@ -3277,6 +3420,7 @@ const explicitlyUnreadPostIdsSet: Set<string> = new Set();
 const allReadAtMap: Record<string, string> = {
   fitgirl: "",
   steamrip: "",
+  recomp: "",
 };
 
 /**
@@ -3317,6 +3461,10 @@ function persistCachedReadPostsToLocalStorage(): void {
       "fitrepacks_all_read_at_steamrip",
       allReadAtMap.steamrip || "",
     );
+    localStorage.setItem(
+      "fitrepacks_all_read_at_recomp",
+      allReadAtMap.recomp || "",
+    );
     // Persist per-post read timestamps so post-date changes invalidate stale reads
     localStorage.setItem(
       "fitrepacks_read_post_timestamps",
@@ -3332,7 +3480,7 @@ function persistCachedReadPostsToLocalStorage(): void {
 export function isPostReadInStorage(
   id: string,
   date?: string,
-  dataSource: "fitgirl" | "steamrip" = "fitgirl",
+  dataSource: "fitgirl" | "steamrip" | "recomp" = "fitgirl",
 ): boolean {
   if (!id) return false;
   const cleanId = String(id).trim();
@@ -3410,6 +3558,8 @@ async function syncReadPostsFromSQLite(): Promise<string[]> {
       if (fgAll) allReadAtMap.fitgirl = fgAll;
       const srAll = localStorage.getItem("fitrepacks_all_read_at_steamrip");
       if (srAll) allReadAtMap.steamrip = srAll;
+      const rcAll = localStorage.getItem("fitrepacks_all_read_at_recomp");
+      if (rcAll) allReadAtMap.recomp = rcAll;
       // Load per-post read timestamps
       const rawTimestamps = localStorage.getItem(
         "fitrepacks_read_post_timestamps",
@@ -3447,6 +3597,9 @@ async function syncReadPostsFromSQLite(): Promise<string[]> {
       const srAllSetting = await getAppSetting("all_read_at_steamrip");
       if (srAllSetting) allReadAtMap.steamrip = srAllSetting;
 
+      const rcAllSetting = await getAppSetting("all_read_at_recomp");
+      if (rcAllSetting) allReadAtMap.recomp = rcAllSetting;
+
       const unreadSetting = await getAppSetting("explicitly_unread_posts");
       if (unreadSetting) {
         try {
@@ -3475,7 +3628,7 @@ if (typeof window !== "undefined") {
 export function markPostAsRead(
   id: string,
   date?: string,
-  dataSource: "fitgirl" | "steamrip" = "fitgirl",
+  dataSource: "fitgirl" | "steamrip" | "recomp" = "fitgirl",
 ): boolean {
   if (!id) return false;
   const cleanId = String(id).trim();
@@ -3535,7 +3688,7 @@ export function markPostAsRead(
 export function togglePostReadState(
   id: string,
   date?: string,
-  dataSource: "fitgirl" | "steamrip" = "fitgirl",
+  dataSource: "fitgirl" | "steamrip" | "recomp" = "fitgirl",
 ): boolean {
   const cleanId = String(id).trim();
   const compositeId = buildPostCompositeId(cleanId, date);
@@ -3677,13 +3830,13 @@ export async function markPostsAsReadBatch(
  * Mark all repacks in the entire dataset as read
  */
 export async function markAllRepacksAsRead(
-  dataSource: "fitgirl" | "steamrip" = "fitgirl",
+  dataSource: "fitgirl" | "steamrip" | "recomp" = "fitgirl",
 ): Promise<void> {
   const now = new Date().toISOString();
   allReadAtMap[dataSource] = now;
   explicitlyUnreadPostIdsSet.clear();
 
-  datasetStatsCache.delete(dataSource === "steamrip" ? "steamrip" : "repacks");
+  datasetStatsCache.delete(dataSource === "fitgirl" ? "repacks" : dataSource);
   matchingCandidatesCache.clear();
   paginationCache.clear();
   persistCachedReadPostsToLocalStorage();
@@ -3721,9 +3874,9 @@ const DATASET_STATS_CACHE_TTL_MS = 60 * 1000; // 60 seconds
  * Get total counts and read/unread metrics across the entire dataset via AlsaBase
  */
 export async function getRepackDatasetStats(
-  dataSource: "fitgirl" | "steamrip" = "fitgirl",
+  dataSource: "fitgirl" | "steamrip" | "recomp" = "fitgirl",
 ): Promise<RepackDatasetStats> {
-  const collectionName = dataSource === "steamrip" ? "steamrip" : "repacks";
+  const collectionName = dataSource === "fitgirl" ? "repacks" : dataSource;
   if (cachedReadPostIds.length === 0) {
     await syncReadPostsFromSQLite();
   }
@@ -3731,6 +3884,33 @@ export async function getRepackDatasetStats(
   const cached = datasetStatsCache.get(collectionName);
   if (cached && Date.now() - cached.timestamp < DATASET_STATS_CACHE_TTL_MS) {
     return cached.stats;
+  }
+
+  if (dataSource === "recomp") {
+    try {
+      const posts = await getRecompCatalogPosts();
+      const totalCount = posts.length;
+      const readCount = posts.filter((p) =>
+        isPostReadInStorage(p.id, p.date, "recomp"),
+      ).length;
+      const stats: RepackDatasetStats = {
+        totalCount,
+        unreadCount: Math.max(0, totalCount - readCount),
+        readCount,
+        topMonthCount: 0,
+        topYearCount: 0,
+      };
+      datasetStatsCache.set("recomp", { stats, timestamp: Date.now() });
+      return stats;
+    } catch {
+      return {
+        totalCount: 0,
+        unreadCount: 0,
+        readCount: 0,
+        topMonthCount: 0,
+        topYearCount: 0,
+      };
+    }
   }
 
   if (dataSource === "steamrip") {
