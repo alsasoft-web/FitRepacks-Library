@@ -1,5 +1,6 @@
 "use client";
 import { isMediaOrBadDownloadUrl } from "../../lib/urlFilters";
+import { searchRomsFunArchive } from "../../lib/recompCatalog";
 import React, { useState, useEffect, useMemo } from "react";
 import {
   Modal,
@@ -410,6 +411,34 @@ export const RepackDetailModal: React.FC<RepackDetailModalProps> = ({
         window.removeEventListener("fitrepacks-games-updated", sync);
     }
   }, [post]);
+
+  const [romsFunLinks, setRomsFunLinks] = useState<{ name: string; url: string }[] | null>(null);
+
+  useEffect(() => {
+    setRomsFunLinks(null);
+    if (!opened || !post || post.source !== "recomp") return;
+    let cancelled = false;
+    searchRomsFunArchive(post.title, post.originalSize).then((links) => {
+      if (!cancelled && links.length > 0) {
+        setRomsFunLinks(links);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [opened, post]);
+
+  const effectiveMirrorGroups = useMemo(() => {
+    const groups = post?.mirrorGroups ?? [];
+    if (!romsFunLinks || romsFunLinks.length === 0) return groups;
+    const hasArchiveGroup = groups.some((g) => g.category === "ROM / ISO Archive");
+    if (hasArchiveGroup) {
+      return groups.map((g) =>
+        g.category === "ROM / ISO Archive" ? { ...g, links: romsFunLinks } : g,
+      );
+    }
+    return [...groups, { category: "ROM / ISO Archive", links: romsFunLinks }];
+  }, [post?.mirrorGroups, romsFunLinks]);
 
   if (!post) return null;
 
@@ -905,7 +934,7 @@ export const RepackDetailModal: React.FC<RepackDetailModalProps> = ({
                   style={{ fontWeight: 600, cursor: "pointer" }}
                 >
                   Download Mirrors (
-                  {post.mirrorGroups.reduce(
+                  {effectiveMirrorGroups.reduce(
                     (acc, g) => acc + g.links.length,
                     0,
                   )}
@@ -959,8 +988,8 @@ export const RepackDetailModal: React.FC<RepackDetailModalProps> = ({
               <Tabs.Panel value="links">
                 <ScrollArea h={340} offsetScrollbars type="auto">
                   <Stack gap="md" pr="xs">
-                    {post.mirrorGroups.length > 0 ? (
-                      post.mirrorGroups.map((group, idx) => {
+                    {effectiveMirrorGroups.length > 0 ? (
+                      effectiveMirrorGroups.map((group, idx) => {
                         const isMagnetGroup = group.category
                           .toLowerCase()
                           .includes("magnet");

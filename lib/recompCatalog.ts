@@ -1,7 +1,7 @@
 import type { RepackPost, RepackMirrorGroup } from "./repackTypes";
 
 const RECOMP_CATALOG_URL = "https://recomplauncher.com/pc-catalog.json";
-const RECOMP_CACHE_KEY = "recomp_catalog_cache_v2";
+const RECOMP_CACHE_KEY = "recomp_catalog_cache_v4";
 const RECOMP_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 function toRecompThumbUrl(url?: string): string {
@@ -81,6 +81,106 @@ function titleCase(str: string): string {
     .join(" ");
 }
 
+const ROMSFUN_CONSOLE_PATTERNS: Record<string, RegExp> = {
+  n64: /\b(n64|nintendo 64)\b/i,
+  ps1: /\b(ps1|psx|playstation \(ps\)|playstation)\b/i,
+  psx: /\b(ps1|psx|playstation \(ps\)|playstation)\b/i,
+  ps2: /\b(ps2|playstation 2)\b/i,
+  psp: /\b(psp|playstation portable)\b/i,
+  xbox360: /\b(xbox 360|x360)\b/i,
+  xbox: /\bxbox\b/i,
+  gc: /\b(gc|gamecube|ngc)\b/i,
+  gamecube: /\b(gc|gamecube|ngc)\b/i,
+  wii: /\bwii\b/i,
+  dreamcast: /\b(dc|dreamcast)\b/i,
+  saturn: /\bsaturn\b/i,
+  gba: /\b(gba|game boy advance)\b/i,
+  nds: /\b(nds|nintendo ds|ds)\b/i,
+  snes: /\b(snes|super nintendo)\b/i,
+  nes: /\bnes\b/i,
+};
+
+function decodeHtmlEntities(str: string): string {
+  return str
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(Number(dec)))
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;|&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .trim();
+}
+
+export async function searchRomsFunArchive(
+  gameName: string,
+  origin?: string,
+): Promise<{ name: string; url: string }[]> {
+  const cleanQuery = gameName.replace(/\s+Recomp(iled)?$/i, "").trim();
+  if (!cleanQuery) return [];
+
+  const apiUrl = `https://romsfun.com/api/search?s=${encodeURIComponent(cleanQuery)}`;
+  let items: Array<{ title?: string; url?: string; console?: string; size?: string }> = [];
+
+  try {
+    if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const resp = await invoke<{ status: number; body: string }>("fetch_http_url", {
+        url: apiUrl,
+        headers: { Accept: "application/json, text/plain, */*" },
+      });
+      if (resp.status >= 200 && resp.status < 300 && resp.body) {
+        const parsed = JSON.parse(resp.body);
+        if (Array.isArray(parsed)) items = parsed;
+      }
+    } else {
+      const resp = await fetch(apiUrl, { headers: { Accept: "application/json" } });
+      if (resp.ok) {
+        const parsed = await resp.json();
+        if (Array.isArray(parsed)) items = parsed;
+      }
+    }
+  } catch (err) {
+    console.warn("[RomsFun] search failed:", err);
+  }
+
+  if (items.length === 0) return [];
+
+  const originKey = (origin || "").trim().toLowerCase().replace(/[\s_-]+/g, "");
+  const consolePattern = ROMSFUN_CONSOLE_PATTERNS[originKey];
+
+  const valid = items.filter((it) => it && typeof it.url === "string" && it.url.startsWith("http"));
+  const consoleMatches = consolePattern
+    ? valid.filter((it) => consolePattern.test(it.console || ""))
+    : [];
+  const chosen = (consoleMatches.length > 0 ? consoleMatches : valid).slice(0, 4);
+
+  return chosen.map((it) => {
+    const cleanTitle = decodeHtmlEntities(it.title || cleanQuery);
+    const meta = [it.console?.trim(), it.size?.trim()].filter(Boolean).join(" • ");
+    return {
+      name: meta ? `${cleanTitle} (${meta})` : cleanTitle,
+      url: it.url!,
+    };
+  });
+}
+
+function buildRomArchiveLinks(app: RecompRawApp, fallbackTitle: string): { name: string; url: string }[] {
+  const originKey = (app.origin || "").trim().toLowerCase().replace(/[\s_-]+/g, "");
+  if (originKey === "pc" || originKey === "windows" || originKey === "dos") {
+    return [];
+  }
+
+  const gameName = (app.game || fallbackTitle.replace(/\s+Recomp(iled)?$/i, "")).trim();
+  const originLabel = app.origin ? app.origin.toUpperCase() : "ROM";
+
+  return [
+    {
+      name: `Search RomsFun (${gameName} ${originLabel})`,
+      url: `https://romsfun.com/?s=${encodeURIComponent(gameName)}`,
+    },
+  ];
+}
+
 function mapRecompAppToPost(app: RecompRawApp): RepackPost | null {
   if (!app || !app.id) return null;
   const id = `recomp-${app.id}`;
@@ -146,6 +246,14 @@ function mapRecompAppToPost(app: RecompRawApp): RepackPost | null {
     mirrorGroups.push({
       category: "Direct Links",
       links: directLinks,
+    });
+  }
+
+  const romArchiveLinks = buildRomArchiveLinks(app, title);
+  if (romArchiveLinks.length > 0) {
+    mirrorGroups.push({
+      category: "ROM / ISO Archive",
+      links: romArchiveLinks,
     });
   }
 
