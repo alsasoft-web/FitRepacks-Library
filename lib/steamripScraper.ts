@@ -62,7 +62,7 @@ function updateScrapeState(patch: Partial<SteamRipScrapeProgress>) {
 }
 
 function cleanText(html: string): string {
-  if (!html) return "";
+  if (!html) {return "";}
   return html
     .replace(/<\/?[^>]+(>|$)/g, "")
     .trim()
@@ -83,16 +83,16 @@ function cleanText(html: string): string {
 }
 
 function normalizeUrl(u: string): string {
-  if (!u) return "";
+  if (!u) {return "";}
   let clean = u.toLowerCase().trim();
   clean = clean.replace(/^https?:\/\//, "https://");
-  if (!clean.endsWith("/")) clean += "/";
+  if (!clean.endsWith("/")) {clean += "/";}
   return clean;
 }
 
 export function parseSteamRipGamePost(post: any): RepackPost | null {
   try {
-    if (!post || !post.link) return null;
+    if (!post || !post.link) {return null;}
 
     const gameUrl = post.link;
     const contentHtml = post.content?.rendered || "";
@@ -101,9 +101,9 @@ export function parseSteamRipGamePost(post: any): RepackPost | null {
       .replace(/\s*Free Download\s*/gi, " ")
       .trim();
 
-    if (!rawTitle) return null;
+    if (!rawTitle) {return null;}
 
-    let id =
+    const id =
       post.slug ||
       gameUrl.replace(/https?:\/\/steamrip\.com\//, "").replace(/\/$/, "");
 
@@ -126,10 +126,10 @@ export function parseSteamRipGamePost(post: any): RepackPost | null {
     let date = new Date().toISOString();
     if (post.date_gmt) {
       const parsed = new Date(`${post.date_gmt}Z`);
-      if (!isNaN(parsed.getTime())) date = parsed.toISOString();
+      if (!isNaN(parsed.getTime())) {date = parsed.toISOString();}
     } else if (post.date) {
       const parsed = new Date(post.date);
-      if (!isNaN(parsed.getTime())) date = parsed.toISOString();
+      if (!isNaN(parsed.getTime())) {date = parsed.toISOString();}
     }
 
     let coverUrl = "";
@@ -145,18 +145,18 @@ export function parseSteamRipGamePost(post: any): RepackPost | null {
       const featMatch = contentHtml.match(
         /<figure[^>]*class="[^"]*single-featured-image[^"]*"[^>]*>[\s\S]*?<img[^>]+(?:src|data-src)=["']([^"']+)["']/i,
       );
-      if (featMatch) coverUrl = featMatch[1];
+      if (featMatch) {coverUrl = featMatch[1];}
       else {
         const entryImgMatch = contentHtml.match(
           /<img[^>]+(?:src|data-src)=["']([^"']+)["']/i,
         );
-        if (entryImgMatch) coverUrl = entryImgMatch[1];
+        if (entryImgMatch) {coverUrl = entryImgMatch[1];}
       }
     }
 
-    if (coverUrl.startsWith("//")) coverUrl = `https:${coverUrl}`;
+    if (coverUrl.startsWith("//")) {coverUrl = `https:${coverUrl}`;}
     else if (coverUrl.startsWith("/"))
-      coverUrl = `https://steamrip.com${coverUrl}`;
+      {coverUrl = `https://steamrip.com${coverUrl}`;}
 
     const screenshots: string[] = [];
     const ssMatch = contentHtml.match(
@@ -170,8 +170,8 @@ export function parseSteamRipGamePost(post: any): RepackPost | null {
     ];
     for (const im of imgMatches) {
       let src = im[1];
-      if (src.startsWith("//")) src = `https:${src}`;
-      else if (src.startsWith("/")) src = `https://steamrip.com${src}`;
+      if (src.startsWith("//")) {src = `https:${src}`;}
+      else if (src.startsWith("/")) {src = `https://steamrip.com${src}`;}
       if (
         src &&
         src !== coverUrl &&
@@ -228,7 +228,7 @@ export function parseSteamRipGamePost(post: any): RepackPost | null {
     const liItems = [...contentHtml.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi)];
     for (const li of liItems) {
       const text = cleanText(li[1]);
-      if (!text) continue;
+      if (!text) {continue;}
       if (/^Genre:/i.test(text)) {
         const genreVal = text.replace(/^Genre:/i, "").trim();
         genreVal.split(",").forEach((g) => {
@@ -260,7 +260,7 @@ export function parseSteamRipGamePost(post: any): RepackPost | null {
         contentHtml.match(/<strong>Game Size:<\/strong>\s*([^<]+)/i) ||
         contentHtml.match(/Game Size:<\/strong>\s*([^<]+)/i) ||
         contentHtml.match(/Game Size:?\s*([\d.,]+\s*(?:GB|MB|TB))/i);
-      if (sizeMatch) gameSize = cleanText(sizeMatch[1]);
+      if (sizeMatch) {gameSize = cleanText(sizeMatch[1]);}
     }
 
     const companyParts = [developer, releasedBy].filter(Boolean).join(" / ");
@@ -271,8 +271,8 @@ export function parseSteamRipGamePost(post: any): RepackPost | null {
     let match;
     while ((match = aRegex.exec(contentHtml)) !== null) {
       let href = match[1];
-      if (href.startsWith("//")) href = `https:${href}`;
-      if (!href.startsWith("http")) continue;
+      if (href.startsWith("//")) {href = `https:${href}`;}
+      if (!href.startsWith("http")) {continue;}
 
       if (isMediaOrBadDownloadUrl(href)) {
         if (
@@ -297,23 +297,23 @@ export function parseSteamRipGamePost(post: any): RepackPost | null {
             ? hostParts[hostParts.length - 2]
             : parsedUrl.hostname.toLowerCase();
         if (rawHost === "bzzhr" || rawHost === "buzzheavier")
-          providerName = "BuzzHeavier";
-        else if (rawHost === "gofile") providerName = "GoFile";
+          {providerName = "BuzzHeavier";}
+        else if (rawHost === "gofile") {providerName = "GoFile";}
         else if (rawHost === "megadb" || rawHost === "mega")
-          providerName = "MegaDB";
-        else if (rawHost === "1fichier") providerName = "1Fichier";
-        else if (rawHost === "qiwi") providerName = "Qiwi";
+          {providerName = "MegaDB";}
+        else if (rawHost === "1fichier") {providerName = "1Fichier";}
+        else if (rawHost === "qiwi") {providerName = "Qiwi";}
         else if (parsedUrl.hostname.toLowerCase().includes("fileditch"))
-          providerName = "FileDitch";
-        else if (rawHost === "datanodes") providerName = "DataNodes";
-        else if (rawHost === "pixeldrain") providerName = "PixelDrain";
-        else if (rawHost === "vikingfile") providerName = "VikingFile";
-        else if (rawHost === "krakenfiles") providerName = "KrakenFiles";
-        else if (rawHost === "rapidgator") providerName = "Rapidgator";
-        else if (rawHost === "ddownload") providerName = "DDownload";
-        else if (rawHost === "mediafire") providerName = "MediaFire";
-        else if (rawHost === "filecrypt") providerName = "FileCrypt";
-        else providerName = rawHost.charAt(0).toUpperCase() + rawHost.slice(1);
+          {providerName = "FileDitch";}
+        else if (rawHost === "datanodes") {providerName = "DataNodes";}
+        else if (rawHost === "pixeldrain") {providerName = "PixelDrain";}
+        else if (rawHost === "vikingfile") {providerName = "VikingFile";}
+        else if (rawHost === "krakenfiles") {providerName = "KrakenFiles";}
+        else if (rawHost === "rapidgator") {providerName = "Rapidgator";}
+        else if (rawHost === "ddownload") {providerName = "DDownload";}
+        else if (rawHost === "mediafire") {providerName = "MediaFire";}
+        else if (rawHost === "filecrypt") {providerName = "FileCrypt";}
+        else {providerName = rawHost.charAt(0).toUpperCase() + rawHost.slice(1);}
       } catch (_) {}
 
       if (!downloadLinks.some((l) => l.url === href)) {
@@ -349,7 +349,7 @@ export function parseSteamRipGamePost(post: any): RepackPost | null {
     }
     let description = paragraphs.join("\n\n");
     if (description.length > 1000)
-      description = description.substring(0, 1000) + "...";
+      {description = description.substring(0, 1000) + "...";}
 
     return {
       id,
@@ -524,7 +524,7 @@ export async function startSteamRipScrape(options?: {
       const parsedBatch: RepackPost[] = [];
       for (const rawPost of page1Posts) {
         const parsed = parseSteamRipGamePost(rawPost);
-        if (parsed) parsedBatch.push(parsed);
+        if (parsed) {parsedBatch.push(parsed);}
       }
       if (parsedBatch.length > 0) {
         await saveSteamRipPosts(parsedBatch);
@@ -545,7 +545,7 @@ export async function startSteamRipScrape(options?: {
     // 2. Fetch remaining pages with concurrency pool
     const remainingPages: number[] = [];
     for (let p = 2; p <= determinedTotalPages; p++) {
-      if (options?.maxPages && p > options.maxPages) break;
+      if (options?.maxPages && p > options.maxPages) {break;}
       remainingPages.push(p);
     }
 
@@ -564,7 +564,7 @@ export async function startSteamRipScrape(options?: {
               const batch: RepackPost[] = [];
               for (const rawPost of posts) {
                 const parsed = parseSteamRipGamePost(rawPost);
-                if (parsed) batch.push(parsed);
+                if (parsed) {batch.push(parsed);}
               }
 
               if (batch.length > 0 && !isScrapeCancellationRequested) {
@@ -625,7 +625,7 @@ export async function startSteamRipScrape(options?: {
 }
 
 export function stopSteamRipScrape(): void {
-  if (!scrapeState.isRunning) return;
+  if (!scrapeState.isRunning) {return;}
   isScrapeCancellationRequested = true;
   updateScrapeState({
     statusMessage: "Stopping scraper...",

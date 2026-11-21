@@ -64,20 +64,20 @@ interface TorrentDownloadModalProps {
 
 // Helper to parse file size string to bytes/MB
 const parseSizeMB = (sizeStr?: string): number => {
-  if (!sizeStr) return 0;
+  if (!sizeStr) {return 0;}
   const match = sizeStr.match(/([\d.,]+)\s*(TB|GB|MB|KB|B)/i);
   if (!match) {
     const numOnly = parseFloat(sizeStr.replace(",", "."));
     return isNaN(numOnly) ? 0 : numOnly;
   }
   const num = parseFloat(match[1].replace(",", "."));
-  if (isNaN(num)) return 0;
+  if (isNaN(num)) {return 0;}
   const unit = match[2].toUpperCase();
-  if (unit === "TB") return num * 1024 * 1024;
-  if (unit === "GB") return num * 1024;
-  if (unit === "MB") return num;
-  if (unit === "KB") return num / 1024;
-  if (unit === "B") return num / (1024 * 1024);
+  if (unit === "TB") {return num * 1024 * 1024;}
+  if (unit === "GB") {return num * 1024;}
+  if (unit === "MB") {return num;}
+  if (unit === "KB") {return num / 1024;}
+  if (unit === "B") {return num / (1024 * 1024);}
   return num;
 };
 
@@ -160,8 +160,8 @@ const generateTorrentFiles = (
 
     files.push({
       id: `f-data-${part}`,
-      name: `setup-fitgirl-${part < 10 ? "0" + part : part}.bin`,
-      url: `setup-fitgirl-${part < 10 ? "0" + part : part}.bin`,
+      name: `setup-fitgirl-${part < 10 ? `0${  part}` : part}.bin`,
+      url: `setup-fitgirl-${part < 10 ? `0${  part}` : part}.bin`,
       size: sizeFormatted,
       status: "pending",
       isOptional: false,
@@ -179,8 +179,8 @@ const generateTorrentFiles = (
       : `${remainingMB.toFixed(0)} MB`;
   files.push({
     id: `f-data-${part}`,
-    name: `setup-fitgirl-${part < 10 ? "0" + part : part}.bin`,
-    url: `setup-fitgirl-${part < 10 ? "0" + part : part}.bin`,
+    name: `setup-fitgirl-${part < 10 ? `0${  part}` : part}.bin`,
+    url: `setup-fitgirl-${part < 10 ? `0${  part}` : part}.bin`,
     size: mainRemainingFormatted,
     status: "pending",
     isOptional: false,
@@ -298,7 +298,7 @@ export const TorrentDownloadModal: React.FC<TorrentDownloadModalProps> = ({
 
   const effectiveDownloadDir = useMemo(() => {
     const base = downloadDir.trim().replace(/[\\/]+$/, "");
-    if (!createSubfolder) return base;
+    if (!createSubfolder) {return base;}
     const rawName = title || magnetInfo.name || "Game";
     const folderName = formatRepackFolderName(rawName, "Fitgirl-Repacks");
     return base ? `${base}\\${folderName}` : folderName;
@@ -314,8 +314,8 @@ export const TorrentDownloadModal: React.FC<TorrentDownloadModalProps> = ({
   );
 
   const displayedFiles = useMemo(() => {
-    if (fileFilter === "optional") return files.filter((f) => f.isOptional);
-    if (fileFilter === "required") return files.filter((f) => !f.isOptional);
+    if (fileFilter === "optional") {return files.filter((f) => f.isOptional);}
+    if (fileFilter === "required") {return files.filter((f) => !f.isOptional);}
     return files;
   }, [files, fileFilter]);
 
@@ -350,7 +350,7 @@ export const TorrentDownloadModal: React.FC<TorrentDownloadModalProps> = ({
 
   // Fetch actual live torrent metadata from swarm / torrent caches
   useEffect(() => {
-    if (!opened) return;
+    if (!opened) {return;}
     setIsResolving(true);
     setResolveProgress(20);
     setIsLiveMetadata(false);
@@ -481,8 +481,8 @@ export const TorrentDownloadModal: React.FC<TorrentDownloadModalProps> = ({
   const toggleFile = (fileId: string) => {
     setFiles((prev) =>
       prev.map((f) => {
-        if (f.id !== fileId) return f;
-        if (!f.isOptional) return f; // Mandatory files cannot be deselected
+        if (f.id !== fileId) {return f;}
+        if (!f.isOptional) {return f;} // Mandatory files cannot be deselected
         const nextSelected = !f.isSelected;
         return {
           ...f,
@@ -496,7 +496,7 @@ export const TorrentDownloadModal: React.FC<TorrentDownloadModalProps> = ({
   const handleSelectAll = (select: boolean) => {
     setFiles((prev) =>
       prev.map((f) => {
-        if (!f.isOptional && !select) return f; // keep mandatory checked
+        if (!f.isOptional && !select) {return f;} // keep mandatory checked
         return {
           ...f,
           isSelected: select,
@@ -562,7 +562,7 @@ export const TorrentDownloadModal: React.FC<TorrentDownloadModalProps> = ({
     // Map selected files to indices if selective
     const selectedIndices: number[] = [];
     files.forEach((f, idx) => {
-      if (f.isSelected) selectedIndices.push(idx);
+      if (f.isSelected) {selectedIndices.push(idx);}
     });
 
     const resolvedHash = magnetInfo.hash;
@@ -867,7 +867,7 @@ export const TorrentDownloadModal: React.FC<TorrentDownloadModalProps> = ({
                 <Table striped highlightOnHover verticalSpacing={6} fz="xs">
                   <Table.Thead>
                     <Table.Tr>
-                      <Table.Th style={{ width: 36 }}></Table.Th>
+                      <Table.Th style={{ width: 36 }} />
                       <Table.Th>File Name</Table.Th>
                       <Table.Th style={{ width: 100 }}>Type</Table.Th>
                       <Table.Th style={{ width: 90, textAlign: "right" }}>
@@ -898,7 +898,7 @@ export const TorrentDownloadModal: React.FC<TorrentDownloadModalProps> = ({
                             cursor: file.isOptional ? "pointer" : "default",
                           }}
                           onClick={() => {
-                            if (file.isOptional) toggleFile(file.id);
+                            if (file.isOptional) {toggleFile(file.id);}
                           }}
                         >
                           <Table.Td onClick={(e) => e.stopPropagation()}>

@@ -84,7 +84,7 @@ export const DownloadsView: React.FC = () => {
   } | null>(null);
 
   const handleOpenFolder = async (dir?: string) => {
-    if (!dir) return;
+    if (!dir) {return;}
     if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
       try {
         await invoke("open_folder_in_explorer", { folderPath: dir });
@@ -283,7 +283,7 @@ export const DownloadsView: React.FC = () => {
             if (dl && dl.magnetUrl) {
               const selectedIndices: number[] = [];
               dl.files?.forEach((f, idx) => {
-                if (f.isSelected) selectedIndices.push(idx);
+                if (f.isSelected) {selectedIndices.push(idx);}
               });
               const newHash = await invoke<string>("start_torrent_download", {
                 magnetUrl: dl.magnetUrl,
@@ -310,7 +310,7 @@ export const DownloadsView: React.FC = () => {
   };
 
   const handleRecheckMagnet = async (item: MagnetDownloadItem) => {
-    if (!item.magnetUrl) return;
+    if (!item.magnetUrl) {return;}
     if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
       try {
         useDownloadQueueStore.setState((prev) => ({
@@ -327,7 +327,7 @@ export const DownloadsView: React.FC = () => {
 
         const selectedIndices: number[] = [];
         item.files?.forEach((f, idx) => {
-          if (f.isSelected) selectedIndices.push(idx);
+          if (f.isSelected) {selectedIndices.push(idx);}
         });
 
         const newHash = await invoke<string>("recheck_torrent_download", {
@@ -373,7 +373,7 @@ export const DownloadsView: React.FC = () => {
   };
 
   const handleConfirmDeleteFiles = async () => {
-    if (!deleteTarget) return;
+    if (!deleteTarget) {return;}
     const target = deleteTarget;
     setDeleteTarget(null);
 
@@ -396,7 +396,7 @@ export const DownloadsView: React.FC = () => {
   };
 
   const handleRemoveAppOnly = async () => {
-    if (!deleteTarget) return;
+    if (!deleteTarget) {return;}
     const target = deleteTarget;
     setDeleteTarget(null);
     await handleRemoveMagnet(target.id, target.infoHash);
@@ -405,7 +405,7 @@ export const DownloadsView: React.FC = () => {
   const handleAddMagnet = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanMagnet = magnetInput.trim();
-    if (!cleanMagnet) return;
+    if (!cleanMagnet) {return;}
 
     const existing = isTorrentAlreadyInQueue(magnetDownloads, {
       magnetUrl: cleanMagnet,
@@ -454,7 +454,7 @@ export const DownloadsView: React.FC = () => {
 
   const calculateGameProgress = (game: QueuedGame) => {
     const selectedFiles = game.files.filter((f) => f.isSelected);
-    if (selectedFiles.length === 0) return 0;
+    if (selectedFiles.length === 0) {return 0;}
     const completedFiles = selectedFiles.filter((f) => f.status === "completed").length;
     return Math.round((completedFiles / selectedFiles.length) * 100);
   };

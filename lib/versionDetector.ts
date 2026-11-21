@@ -48,7 +48,7 @@ function parseIniVersion(content: string): string | null {
       const eqIdx = trimmed.indexOf("=");
       if (eqIdx !== -1) {
         const val = trimmed.substring(eqIdx + 1).trim();
-        if (val) buildId = val;
+        if (val) {buildId = val;}
       }
     } else if (
       lower.startsWith("version=") ||
@@ -58,7 +58,7 @@ function parseIniVersion(content: string): string | null {
       const eqIdx = trimmed.indexOf("=");
       if (eqIdx !== -1) {
         const val = trimmed.substring(eqIdx + 1).trim();
-        if (val) version = val;
+        if (val) {version = val;}
       }
     }
   }
@@ -100,12 +100,12 @@ const VERSION_FILE_NAMES = new Set([
 async function checkVersionFile(filePath: string): Promise<string | null> {
   const normalized = filePath.replace(/\\/g, "/");
   const fileName = (normalized.split("/").pop() || "").toLowerCase();
-  if (!VERSION_FILE_NAMES.has(fileName)) return null;
+  if (!VERSION_FILE_NAMES.has(fileName)) {return null;}
 
   try {
     const { readTextFile } = await import("@tauri-apps/plugin-fs");
     const content = await readTextFile(filePath);
-    if (!content) return null;
+    if (!content) {return null;}
 
     if (fileName === "codex.cfg") {
       return parseCodexCfg(content);
@@ -141,7 +141,7 @@ export async function detectInstalledGameVersion(
     ? clean.substring(0, clean.lastIndexOf("/"))
     : clean;
 
-  if (!baseDir) return undefined;
+  if (!baseDir) {return undefined;}
 
   try {
     const { readDir, exists } = await import("@tauri-apps/plugin-fs");
@@ -152,7 +152,7 @@ export async function detectInstalledGameVersion(
     ];
     while (queue.length > 0) {
       const current = queue.shift()!;
-      if (current.depth > 3) continue;
+      if (current.depth > 3) {continue;}
 
       if (await exists(current.dir)) {
         const entries = await readDir(current.dir);
@@ -169,7 +169,7 @@ export async function detectInstalledGameVersion(
             }
           } else if (entry.isFile) {
             const ver = await checkVersionFile(entryPath);
-            if (ver) return ver;
+            if (ver) {return ver;}
           }
         }
       }
@@ -178,13 +178,13 @@ export async function detectInstalledGameVersion(
     // 2. Search upwards parent directories (up to 3 levels)
     let parentDir = baseDir.substring(0, baseDir.lastIndexOf("/"));
     for (let i = 0; i < 3; i++) {
-      if (!parentDir || parentDir.length <= 3) break;
+      if (!parentDir || parentDir.length <= 3) {break;}
       if (await exists(parentDir)) {
         const entries = await readDir(parentDir);
         for (const entry of entries) {
           if (entry.isFile) {
             const ver = await checkVersionFile(`${parentDir}/${entry.name}`);
-            if (ver) return ver;
+            if (ver) {return ver;}
           }
         }
       }
@@ -203,7 +203,7 @@ export async function detectInstalledGameVersion(
 export async function detectGameExeLastModified(
   exePath: string,
 ): Promise<Date | null> {
-  if (!exePath || !exePath.trim()) return null;
+  if (!exePath || !exePath.trim()) {return null;}
   const clean = exePath.trim();
 
   // 1. Try Tauri invoke command first
@@ -233,7 +233,7 @@ export async function detectGameExeLastModified(
 }
 
 export function parseDateSafe(val?: Date | string | number | null): number | null {
-  if (!val) return null;
+  if (!val) {return null;}
   if (val instanceof Date) {
     const t = val.getTime();
     return isNaN(t) ? null : t;
@@ -243,10 +243,10 @@ export function parseDateSafe(val?: Date | string | number | null): number | nul
   }
   if (typeof val === "string") {
     let clean = val.trim();
-    if (!clean) return null;
+    if (!clean) {return null;}
     if (/^\d{10,}$/.test(clean)) {
       const num = Number(clean);
-      if (!isNaN(num)) return num;
+      if (!isNaN(num)) {return num;}
     }
 
     // Strip common leading words like "Updated on", "Date:", etc.
@@ -271,7 +271,7 @@ export function parseDateSafe(val?: Date | string | number | null): number | nul
         m = p1 - 1;
       }
       const customDate = new Date(y, m, d, hh, mm, ss).getTime();
-      if (!isNaN(customDate)) return customDate;
+      if (!isNaN(customDate)) {return customDate;}
     }
 
     // 2. Handle YYYY-MM-DD or YYYY/MM/DD
@@ -286,11 +286,11 @@ export function parseDateSafe(val?: Date | string | number | null): number | nul
       const mm = ymd[5] ? parseInt(ymd[5], 10) : 0;
       const ss = ymd[6] ? parseInt(ymd[6], 10) : 0;
       const customDate = new Date(y, m, d, hh, mm, ss).getTime();
-      if (!isNaN(customDate)) return customDate;
+      if (!isNaN(customDate)) {return customDate;}
     }
 
     const parsed = Date.parse(clean);
-    if (!isNaN(parsed)) return parsed;
+    if (!isNaN(parsed)) {return parsed;}
   }
   return null;
 }
@@ -311,7 +311,7 @@ export function isGameUpToDateByDate(
   const modTime = parseDateSafe(lastModified);
   const postTime = parseDateSafe(postDate);
 
-  if (modTime === null || postTime === null) return true;
+  if (modTime === null || postTime === null) {return true;}
 
   const thresholdMs = thresholdDays * 24 * 60 * 60 * 1000;
   // If last modified date is >= (post date - threshold), the game is up to date

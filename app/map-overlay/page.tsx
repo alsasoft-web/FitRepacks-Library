@@ -99,7 +99,7 @@ function MapOverlayContent() {
 
   const [activeMapSlug, setActiveMapSlug] = useState(() => {
     const saved = getLastOpenedMapSlug(cleanGameSlug);
-    if (initialMapSlug && initialMapSlug !== "default") return initialMapSlug;
+    if (initialMapSlug && initialMapSlug !== "default") {return initialMapSlug;}
     return saved || initialMapSlug || "default";
   });
   const [availableMaps, setAvailableMaps] = useState<MapItem[]>([]);
@@ -122,11 +122,11 @@ function MapOverlayContent() {
           setLibraryGames(g);
         } else {
           const stored = getStoredGames();
-          if (stored.length > 0) setLibraryGames(stored);
+          if (stored.length > 0) {setLibraryGames(stored);}
         }
       } catch (_) {
         const stored = getStoredGames();
-        if (stored.length > 0) setLibraryGames(stored);
+        if (stored.length > 0) {setLibraryGames(stored);}
       }
     }
     loadLibrary();
@@ -260,7 +260,7 @@ function MapOverlayContent() {
       const isInstalled = Boolean(
         g.isInstalled || (g.exePath && g.exePath.trim() !== ""),
       );
-      if (!isInstalled) return;
+      if (!isInstalled) {return;}
 
       const matched = findMatchingMap(g.title, g.id);
       if (matched) {
@@ -332,7 +332,7 @@ function MapOverlayContent() {
 
   const filteredInstalledGames = useMemo(() => {
     const query = gameSearchQuery.trim().toLowerCase();
-    if (!query) return installedGamesWithMaps;
+    if (!query) {return installedGamesWithMaps;}
     return installedGamesWithMaps.filter(
       (g) =>
         g.title.toLowerCase().includes(query) ||
@@ -348,7 +348,7 @@ function MapOverlayContent() {
     const others = popularGamesWithMaps.filter(
       (g) => !installedSlugSet.has(g.gameSlug.toLowerCase()),
     );
-    if (!query) return others;
+    if (!query) {return others;}
     return others.filter(
       (g) =>
         g.title.toLowerCase().includes(query) ||
@@ -425,7 +425,7 @@ function MapOverlayContent() {
           : initialGameSlug;
         if (clean) {
           const saved = localStorage.getItem(`fitrepacks_map_sidebar_${clean}`);
-          if (saved !== null) return JSON.parse(saved);
+          if (saved !== null) {return JSON.parse(saved);}
         }
       } catch (_) {}
     }
@@ -487,7 +487,7 @@ function MapOverlayContent() {
                 setActiveMapSlug(savedMap);
               }
             }
-            if (event.payload.gameTitle) setGameTitle(event.payload.gameTitle);
+            if (event.payload.gameTitle) {setGameTitle(event.payload.gameTitle);}
           }
           if (typeof window !== "undefined") {
             window.focus();
@@ -501,14 +501,14 @@ function MapOverlayContent() {
       });
     }
     return () => {
-      if (unlisten) unlisten();
+      if (unlisten) {unlisten();}
     };
   }, []);
 
   // Window drag start handler
   const handleStartDrag = useCallback(async (e?: React.MouseEvent | MouseEvent) => {
     if (e) {
-      if (e.button !== 0 && e.button !== 1) return;
+      if (e.button !== 0 && e.button !== 1) {return;}
       if (e.target) {
         const target = e.target as HTMLElement;
         if (
@@ -543,7 +543,7 @@ function MapOverlayContent() {
 
   // Load and apply per-game / global saved settings
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined") {return;}
     try {
       // 1. Pinned
       const savedPinned = cleanGameSlug
@@ -605,7 +605,7 @@ function MapOverlayContent() {
       typeof window === "undefined" ||
       !isRestoredRef.current
     )
-      return;
+      {return;}
     try {
       localStorage.setItem(
         `fitrepacks_map_sidebar_${cleanGameSlug}`,
@@ -627,11 +627,11 @@ function MapOverlayContent() {
     let unlistenResize: (() => void) | undefined;
 
     getOverlayWindow().then(async (win) => {
-      if (!win) return;
+      if (!win) {return;}
       try {
         if (typeof (win as any).onResized === "function") {
           unlistenResize = await (win as any).onResized((event: any) => {
-            if (!isRestoredRef.current) return;
+            if (!isRestoredRef.current) {return;}
             const size = event?.payload || event;
             if (
               size &&
@@ -925,7 +925,7 @@ function MapOverlayContent() {
           [rawData, mapHtml] = await Promise.all([mapPromise, htmlPromise]);
         }
 
-        if (fetchId !== activeFetchIdRef.current) return;
+        if (fetchId !== activeFetchIdRef.current) {return;}
 
         let htmlMapData: any = null;
         if (mapHtml) {
@@ -952,7 +952,7 @@ function MapOverlayContent() {
           );
         }
 
-        if (fetchId !== activeFetchIdRef.current || !rawData) return;
+        if (fetchId !== activeFetchIdRef.current || !rawData) {return;}
 
         let extractedSpritePositions: Record<string, any> = {};
         let extractedMarkerUrl = "";
@@ -1261,8 +1261,8 @@ function MapOverlayContent() {
     const found = allAvailableMaps.find(
       (m) => m.slug.toLowerCase() === activeMapSlug.toLowerCase(),
     );
-    if (found?.title) return found.title;
-    if (loadedMapData?.mapConfig?.title) return loadedMapData.mapConfig.title;
+    if (found?.title) {return found.title;}
+    if (loadedMapData?.mapConfig?.title) {return loadedMapData.mapConfig.title;}
     return activeMapSlug || "Select Map";
   }, [allAvailableMaps, activeMapSlug, loadedMapData?.mapConfig?.title]);
 
@@ -1931,7 +1931,7 @@ function MapOverlayContent() {
               currentMapSlug={activeMapSlug}
               minZoom={initialMinZoom}
               maxZoom={initialMaxZoom}
-              isOverlay={true}
+              isOverlay
               isSidebarOpen={isSidebarOpen}
               onSelectMap={handleSelectSubMap}
               onToggleSidebar={() => setIsSidebarOpen((v) => !v)}

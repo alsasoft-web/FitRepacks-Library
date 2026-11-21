@@ -79,7 +79,7 @@ export const SourceLinkerModal: React.FC<SourceLinkerModalProps> = ({
 
   const handleSearch = async (queryOverride?: string) => {
     const q = (queryOverride !== undefined ? queryOverride : searchQuery).trim();
-    if (!q) return;
+    if (!q) {return;}
 
     setIsLoading(true);
     setFeedback(null);
@@ -103,7 +103,7 @@ export const SourceLinkerModal: React.FC<SourceLinkerModalProps> = ({
   };
 
   const handleApplyMatch = (candidate: SourceCandidate) => {
-    if (!game) return;
+    if (!game) {return;}
     const updated = applyCandidateMatch(game, candidate);
     onGameUpdated(updated);
     setFeedback({
@@ -115,7 +115,7 @@ export const SourceLinkerModal: React.FC<SourceLinkerModalProps> = ({
   };
 
   const handleAutoLinkAll = async () => {
-    if (!game) return;
+    if (!game) {return;}
     setIsLoading(true);
     setFeedback(null);
     try {
@@ -123,9 +123,9 @@ export const SourceLinkerModal: React.FC<SourceLinkerModalProps> = ({
       if (res.igdbSuccess || res.fitgirlSuccess || res.steamripSuccess) {
         onGameUpdated(res.game);
         const linked: string[] = [];
-        if (res.igdbSuccess) linked.push("IGDB");
-        if (res.fitgirlSuccess) linked.push("FitGirl");
-        if (res.steamripSuccess) linked.push("SteamRIP");
+        if (res.igdbSuccess) {linked.push("IGDB");}
+        if (res.fitgirlSuccess) {linked.push("FitGirl");}
+        if (res.steamripSuccess) {linked.push("SteamRIP");}
         setFeedback({
           type: "success",
           text: `Auto-linked ${linked.join(", ")} successfully!`,
@@ -146,7 +146,7 @@ export const SourceLinkerModal: React.FC<SourceLinkerModalProps> = ({
     }
   };
 
-  if (!game) return null;
+  if (!game) {return null;}
 
   const igdbCandidates = candidates.filter((c) => c.source === "igdb");
   const fitgirlCandidates = candidates.filter((c) => c.source === "fitgirl");
@@ -200,7 +200,7 @@ export const SourceLinkerModal: React.FC<SourceLinkerModalProps> = ({
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") handleSearch();
+                  if (e.key === "Enter") {handleSearch();}
                 }}
                 style={{ flex: 1 }}
                 radius="md"

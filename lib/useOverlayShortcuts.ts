@@ -34,7 +34,7 @@ export function useOverlayShortcuts(options: UseOverlayShortcutsOptions = {}) {
           localStorage.setItem("fitrepacks_active_game_title", gTitle);
           localStorage.setItem("fitrepacks_last_valid_map_game", gSlug);
         } catch (_) {}
-        if (Boolean((window as any).__TAURI_INTERNALS__)) {
+        if ((window as any).__TAURI_INTERNALS__) {
           import("@tauri-apps/api/core").then(({ invoke }) => {
             invoke("set_active_overlay_game", {
               gameSlug: gSlug,
@@ -154,11 +154,11 @@ export function useOverlayShortcuts(options: UseOverlayShortcutsOptions = {}) {
       const shortcut = settings.keyboardShortcut.trim();
       let matched = false;
 
-      if (shortcut === "F9" && e.key === "F9") matched = true;
-      else if (shortcut === "F8" && e.key === "F8") matched = true;
-      else if (shortcut === "F10" && e.key === "F10") matched = true;
-      else if (shortcut === "F11" && e.key === "F11") matched = true;
-      else if (shortcut === "F7" && e.key === "F7") matched = true;
+      if (shortcut === "F9" && e.key === "F9") {matched = true;}
+      else if (shortcut === "F8" && e.key === "F8") {matched = true;}
+      else if (shortcut === "F10" && e.key === "F10") {matched = true;}
+      else if (shortcut === "F11" && e.key === "F11") {matched = true;}
+      else if (shortcut === "F7" && e.key === "F7") {matched = true;}
       else if (
         (shortcut === "Ctrl+M" || shortcut === "Ctrl + M") &&
         (e.ctrlKey || e.metaKey) &&
@@ -267,7 +267,7 @@ export function useOverlayShortcuts(options: UseOverlayShortcutsOptions = {}) {
     intervalId = setInterval(checkGamepads, 32); // ~30 FPS poll
 
     return () => {
-      if (intervalId) clearInterval(intervalId);
+      if (intervalId) {clearInterval(intervalId);}
     };
   }, [settings.enabled, settings.controllerShortcut, enabledOverride, triggerOverlayToggle]);
 

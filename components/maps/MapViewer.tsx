@@ -62,7 +62,7 @@ const TRANSPARENT_TILE =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='256' height='256' fill='none'/%3E";
 
 function formatDescription(desc?: string | null): string {
-  if (!desc) return "No additional details available.";
+  if (!desc) {return "No additional details available.";}
   return String(desc)
     .replace(
       /\[([^\]]+)\]\(([^)]*?(?:location_?ids?|location_?id|loc_?id|locations?)=(\d+)[^)]*)\)/gi,
@@ -75,7 +75,7 @@ function formatDescription(desc?: string | null): string {
         `<button type="button" class="loc-ref-btn" data-loc-id="${locId}" title="Jump to ${title}">${title}</button>`,
     )
     .replace(
-      /\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/gi,
+      /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/gi,
       (_match, title, url) => {
         const match = url.match(
           /[?&#](?:location_?ids?|location_?id|loc_?id|locations?)=(\d+)/i,
@@ -86,7 +86,7 @@ function formatDescription(desc?: string | null): string {
         return `<button type="button" class="loc-ref-btn" data-loc-title="${encodeURIComponent(title)}" title="Jump to ${title}">${title}</button>`;
       },
     )
-    .replace(/\[([^\]]+)\]\(\/([^\s\)]+)\)/gi, (_match, title, path) => {
+    .replace(/\[([^\]]+)\]\(\/([^\s)]+)\)/gi, (_match, title, path) => {
       const match = path.match(
         /[?&#](?:location_?ids?|location_?id|loc_?id|locations?)=(\d+)/i,
       );
@@ -170,7 +170,7 @@ export function MapViewer({
 
   // Restore saved per-game sidebar state when game changes
   useEffect(() => {
-    if (!cleanSlug || typeof window === "undefined") return;
+    if (!cleanSlug || typeof window === "undefined") {return;}
     try {
       const saved = localStorage.getItem(`fitrepacks_map_sidebar_${cleanSlug}`);
       if (saved !== null) {
@@ -181,7 +181,7 @@ export function MapViewer({
 
   // Persist per-game sidebar state on change
   useEffect(() => {
-    if (!cleanSlug || typeof window === "undefined") return;
+    if (!cleanSlug || typeof window === "undefined") {return;}
     try {
       localStorage.setItem(
         `fitrepacks_map_sidebar_${cleanSlug}`,
@@ -270,7 +270,7 @@ export function MapViewer({
     let isMounted = true;
     if (effectiveGameSlug && effectiveMapSlug) {
       isMapOfflineReady(effectiveGameSlug, effectiveMapSlug).then(async (ready) => {
-        if (!isMounted) return;
+        if (!isMounted) {return;}
         setIsOfflineReady(ready);
 
         if (ready && mapData) {
@@ -323,7 +323,7 @@ export function MapViewer({
     } else if (Array.isArray(mapData?.groups)) {
       mapData.groups.forEach((g) => {
         g.categories?.forEach((c) => {
-          if (Array.isArray(c.locations)) locs.push(...c.locations);
+          if (Array.isArray(c.locations)) {locs.push(...c.locations);}
         });
       });
     }
@@ -333,7 +333,7 @@ export function MapViewer({
         typeof l.latitude === "string" ? parseFloat(l.latitude) : l.latitude;
       const lng =
         typeof l.longitude === "string" ? parseFloat(l.longitude) : l.longitude;
-      if (isNaN(lat) || isNaN(lng)) return false;
+      if (isNaN(lat) || isNaN(lng)) {return false;}
       const cId = String(l.category_id);
       counts[cId] = (counts[cId] || 0) + 1;
       return true;
@@ -350,7 +350,7 @@ export function MapViewer({
         next.add(id);
         next.add(String(id));
         const num = Number(id);
-        if (!isNaN(num)) next.add(num);
+        if (!isNaN(num)) {next.add(num);}
       });
     }
     return next;
@@ -359,7 +359,7 @@ export function MapViewer({
   // Load Saved Found Progress from SQLite Database & Sync across windows
   useEffect(() => {
     let isCancelled = false;
-    if (!effectiveGameSlug) return;
+    if (!effectiveGameSlug) {return;}
 
     // 1. Initial quick load from localStorage for instant display
     if (finalStorageKey) {
@@ -418,7 +418,7 @@ export function MapViewer({
 
   // Load Saved Category Visibility State or apply default rule (>100 markers if map > 1000)
   useEffect(() => {
-    if (!categoryStorageKey && !effectiveGameSlug) return;
+    if (!categoryStorageKey && !effectiveGameSlug) {return;}
     try {
       const saved =
         (categoryStorageKey && localStorage.getItem(categoryStorageKey)) ||
@@ -447,14 +447,14 @@ export function MapViewer({
 
   // Load Saved Hide Found Toggle
   useEffect(() => {
-    if (!hideFoundStorageKey && !effectiveGameSlug) return;
+    if (!hideFoundStorageKey && !effectiveGameSlug) {return;}
     try {
       const saved =
         (hideFoundStorageKey && localStorage.getItem(hideFoundStorageKey)) ||
         (effectiveGameSlug &&
           localStorage.getItem(`map_hide_found_${effectiveGameSlug}`));
-      if (saved !== null) setHideFound(JSON.parse(saved));
-      else setHideFound(false);
+      if (saved !== null) {setHideFound(JSON.parse(saved));}
+      else {setHideFound(false);}
     } catch {}
   }, [hideFoundStorageKey, effectiveGameSlug]);
 
@@ -485,11 +485,11 @@ export function MapViewer({
         if (isNowFound) {
           next.add(locId);
           next.add(strId);
-          if (!isNaN(numId)) next.add(numId);
+          if (!isNaN(numId)) {next.add(numId);}
         } else {
           next.delete(locId);
           next.delete(strId);
-          if (!isNaN(numId)) next.delete(numId);
+          if (!isNaN(numId)) {next.delete(numId);}
         }
 
         // 1. Save to SQLite database
@@ -576,7 +576,7 @@ export function MapViewer({
 
   const toggleGroupCategories = useCallback(
     (categories?: MapCategory[]) => {
-      if (!categories || categories.length === 0) return;
+      if (!categories || categories.length === 0) {return;}
       updateCategoryState((prev) => {
         const isAnyVisible = categories.some(
           (c) => prev[String(c.id)] !== false,
@@ -605,7 +605,7 @@ export function MapViewer({
       });
     }
     normalizedLocations.forEach((l) => {
-      if (l.category_id != null) allVisible[String(l.category_id)] = true;
+      if (l.category_id != null) {allVisible[String(l.category_id)] = true;}
     });
     updateCategoryState(allVisible);
   }, [
@@ -628,7 +628,7 @@ export function MapViewer({
       });
     }
     normalizedLocations.forEach((l) => {
-      if (l.category_id != null) allHidden[String(l.category_id)] = false;
+      if (l.category_id != null) {allHidden[String(l.category_id)] = false;}
     });
     updateCategoryState(allHidden);
   }, [
@@ -641,7 +641,7 @@ export function MapViewer({
   const jumpToLocation = useCallback(
     (targetIdOrTitle: string | number) => {
       const map = mapInstanceRef.current;
-      if (!map) return;
+      if (!map) {return;}
 
       const raw = String(targetIdOrTitle).trim();
       const rawLower = raw.toLowerCase();
@@ -675,7 +675,7 @@ export function MapViewer({
         }
       }
 
-      if (!targetLoc) return;
+      if (!targetLoc) {return;}
 
       const lat =
         typeof targetLoc.latitude === "string"
@@ -685,7 +685,7 @@ export function MapViewer({
         typeof targetLoc.longitude === "string"
           ? parseFloat(targetLoc.longitude)
           : targetLoc.longitude;
-      if (isNaN(lat) || isNaN(lng)) return;
+      if (isNaN(lat) || isNaN(lng)) {return;}
 
       // Ensure category is visible
       const cId = String(targetLoc.category_id);
@@ -729,7 +729,7 @@ export function MapViewer({
 
   const handleStartDownload = async () => {
     if (downloading || !mapData || !effectiveGameSlug || !effectiveMapSlug)
-      return;
+      {return;}
     setDownloading(true);
     abortRef.current = { aborted: false };
     setDownloadProgress({
@@ -774,7 +774,7 @@ export function MapViewer({
   };
 
   const handleDeleteOffline = async () => {
-    if (!effectiveGameSlug || !effectiveMapSlug) return;
+    if (!effectiveGameSlug || !effectiveMapSlug) {return;}
     await deleteOfflineMap(effectiveGameSlug, effectiveMapSlug);
     setIsOfflineReady(false);
     setOfflineSpriteUrl(null);
@@ -794,7 +794,7 @@ export function MapViewer({
     (cId: string, isFound: boolean, L: typeof import("leaflet")): L.DivIcon => {
       const cacheKey = `${cId}_${isFound ? "found" : "normal"}`;
       const cached = iconCacheRef.current.get(cacheKey);
-      if (cached) return cached;
+      if (cached) {return cached;}
 
       const spriteMap = mapData?.mapConfig?.markerSpritePositions || {};
       const spriteImgUrl =
@@ -916,7 +916,7 @@ export function MapViewer({
     let isCancelled = false;
 
     async function loadFontsAndStyles() {
-      if (typeof window === "undefined") return;
+      if (typeof window === "undefined") {return;}
 
       const loadFont = async (
         name: string,
@@ -935,7 +935,7 @@ export function MapViewer({
           }
         }
         for (const url of urls) {
-          if (isCancelled || !url) continue;
+          if (isCancelled || !url) {continue;}
           try {
             const font = new FontFace(name, `url("${url}")`);
             const loaded = await font.load();
@@ -1035,13 +1035,13 @@ export function MapViewer({
         }
       }
 
-      if (isCancelled) return;
+      if (isCancelled) {return;}
 
       let iconRules = "";
       if (cssText) {
         iconRules += `\n${cssText}\n`;
         const pathRegex =
-          /\.icon-([a-zA-Z0-9_\-]+)\s+([.a-zA-Z0-9_\-]+:before)\s*\{([^}]+)\}/g;
+          /\.icon-([a-zA-Z0-9_-]+)\s+([.a-zA-Z0-9_-]+:before)\s*\{([^}]+)\}/g;
         let pathMatch;
         while ((pathMatch = pathRegex.exec(cssText)) !== null) {
           const rawName = pathMatch[1];
@@ -1057,7 +1057,7 @@ export function MapViewer({
           }
         }
 
-        const iconRegex = /\.icon-([a-zA-Z0-9_\-]+):before\s*\{([^}]+)\}/g;
+        const iconRegex = /\.icon-([a-zA-Z0-9_-]+):before\s*\{([^}]+)\}/g;
         let match;
         while ((match = iconRegex.exec(cssText)) !== null) {
           const rawName = match[1];
@@ -1264,7 +1264,7 @@ export function MapViewer({
         document.head.appendChild(styleTag);
       }
       styleTag.innerHTML =
-        (cssText || "") + "\n" + fontOverrides + "\n" + iconRules;
+        `${cssText || ""  }\n${  fontOverrides  }\n${  iconRules}`;
     }
 
     loadFontsAndStyles();
@@ -1401,12 +1401,12 @@ export function MapViewer({
         !mapContainerRef.current ||
         mapInstanceRef.current
       )
-        return;
+        {return;}
 
       const leaflet = await import("leaflet");
       const L = ((leaflet as any).default ||
         leaflet) as typeof import("leaflet");
-      if (isCancelled || !mapContainerRef.current) return;
+      if (isCancelled || !mapContainerRef.current) {return;}
       leafletModuleRef.current = L;
 
       const tileSets =
@@ -1482,8 +1482,8 @@ export function MapViewer({
           startLng = Number(normalizedLocations[0].longitude) || 0;
         }
       }
-      if (startLat == null) startLat = 0;
-      if (startLng == null) startLng = 0;
+      if (startLat == null) {startLat = 0;}
+      if (startLng == null) {startLng = 0;}
 
       const initialZoom = Math.max(
         minZoom,
@@ -1835,7 +1835,7 @@ export function MapViewer({
       // Save map position & zoom on move/zoom with debounce
       let saveViewTimer: any = null;
       map.on("moveend zoomend", () => {
-        if (!effectiveGameSlug || typeof window === "undefined") return;
+        if (!effectiveGameSlug || typeof window === "undefined") {return;}
         clearTimeout(saveViewTimer);
         saveViewTimer = setTimeout(() => {
           try {
@@ -1911,7 +1911,7 @@ export function MapViewer({
   // 1. Build all markers once when map and data are ready
   useEffect(() => {
     const L = leafletModuleRef.current;
-    if (!mapReady || !L) return;
+    if (!mapReady || !L) {return;}
 
     iconCacheRef.current.clear();
     markersMapRef.current.clear();
@@ -1933,7 +1933,7 @@ export function MapViewer({
         typeof loc.longitude === "string"
           ? parseFloat(loc.longitude)
           : loc.longitude;
-      if (isNaN(lat) || isNaN(lng)) return;
+      if (isNaN(lat) || isNaN(lng)) {return;}
 
       if (lat !== 0 || lng !== 0) {
         locMinLat = Math.min(locMinLat, lat);
@@ -2086,7 +2086,7 @@ export function MapViewer({
                   (firstMedia.file_name
                     ? `https://media.mapgenie.io/storage/media/${firstMedia.file_name}`
                     : "");
-                if (imgUrl) setLightboxImage(imgUrl);
+                if (imgUrl) {setLightboxImage(imgUrl);}
               });
             }
           }
@@ -2121,9 +2121,9 @@ export function MapViewer({
       layerGroup.clearLayers();
       const term = debouncedSearch.trim().toLowerCase();
       created.forEach((item) => {
-        if (categoryState[item.cId] === false) return;
+        if (categoryState[item.cId] === false) {return;}
         const isFound = foundIds.has(item.id);
-        if (hideFound && isFound) return;
+        if (hideFound && isFound) {return;}
         if (term) {
           const title = item.loc.title || "";
           const desc = item.loc.description || "";
@@ -2131,7 +2131,7 @@ export function MapViewer({
             !title.toLowerCase().includes(term) &&
             !desc.toLowerCase().includes(term)
           )
-            return;
+            {return;}
         }
         layerGroup.addLayer(item.marker);
       });
@@ -2142,15 +2142,15 @@ export function MapViewer({
   useEffect(() => {
     const layerGroup = markerGroupRef.current;
     const L = leafletModuleRef.current;
-    if (!layerGroup || !L) return;
+    if (!layerGroup || !L) {return;}
 
     layerGroup.clearLayers();
     const term = debouncedSearch.trim().toLowerCase();
 
     allMarkersRef.current.forEach((item) => {
-      if (categoryState[item.cId] === false) return;
+      if (categoryState[item.cId] === false) {return;}
       const isFound = foundIds.has(item.id);
-      if (hideFound && isFound) return;
+      if (hideFound && isFound) {return;}
       if (term) {
         const title = item.loc.title || "";
         const desc = item.loc.description || "";
@@ -2158,7 +2158,7 @@ export function MapViewer({
           !title.toLowerCase().includes(term) &&
           !desc.toLowerCase().includes(term)
         )
-          return;
+          {return;}
       }
 
       // Ensure icon reflects current found status
@@ -2173,7 +2173,7 @@ export function MapViewer({
   const totalFound = useMemo(() => {
     let count = 0;
     normalizedLocations.forEach((l) => {
-      if (foundIds.has(l.id)) count++;
+      if (foundIds.has(l.id)) {count++;}
     });
     return count;
   }, [normalizedLocations, foundIds]);
@@ -2316,13 +2316,13 @@ export function MapViewer({
             onMouseDown={
               isOverlay
                 ? async (e) => {
-                    if (e.button !== 0 && e.button !== 1) return;
+                    if (e.button !== 0 && e.button !== 1) {return;}
                     if (
                       (e.target as HTMLElement).closest(
                         "button, [role='button'], input, [data-tauri-drag-region='false']",
                       )
                     )
-                      return;
+                      {return;}
                     if (
                       typeof window !== "undefined" &&
                       (window as any).__TAURI_INTERNALS__
@@ -3132,13 +3132,13 @@ export function MapViewer({
             <Box
               data-tauri-drag-region
               onMouseDown={async (e) => {
-                if (e.button !== 0 && e.button !== 1) return;
+                if (e.button !== 0 && e.button !== 1) {return;}
                 if (
                   (e.target as HTMLElement).closest(
                     "button, [role='button'], input, [data-tauri-drag-region='false']",
                   )
                 )
-                  return;
+                  {return;}
                 if (
                   typeof window !== "undefined" &&
                   (window as any).__TAURI_INTERNALS__
@@ -3180,7 +3180,7 @@ export function MapViewer({
                         minZoom: customMinZoom,
                         maxZoom: customMaxZoom,
                       });
-                      if (onClose) onClose();
+                      if (onClose) {onClose();}
                     }
                   }}
                   style={{

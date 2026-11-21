@@ -34,7 +34,7 @@ function hashString(str: string): number {
  * - Media: <gameSlug>/media/<safeFilename>.jpg
  */
 export function keyToRelativePath(key: string): string {
-  if (!key) return "misc/unknown.bin";
+  if (!key) {return "misc/unknown.bin";}
 
   // 1. Tile keys: tile_v3_game_map_z_x_y or tile_v2_... or tile_...
   const tileMatch = key.match(/^tile(?:_v\d+)?_([^_]+)_([^_]+)_(\d+)_(\d+)_(\d+)$/);
@@ -99,7 +99,7 @@ export async function getMapsFolder(): Promise<string> {
 }
 
 export async function fetchAssetBlob(url: string): Promise<Blob | null> {
-  if (!url) return null;
+  if (!url) {return null;}
   if (isTauri()) {
     try {
       const { fetch: tauriFetch } = await import("@tauri-apps/plugin-http");
@@ -130,10 +130,10 @@ export async function fetchAndCacheOfflineAsset(
   url: string,
   force: boolean = false,
 ): Promise<Blob | null> {
-  if (!key || !url) return null;
+  if (!key || !url) {return null;}
   if (!force) {
     const existing = await getOfflineAsset(key);
-    if (existing) return existing;
+    if (existing) {return existing;}
   }
 
   const blob = await fetchAssetBlob(url);
@@ -175,7 +175,7 @@ export async function saveOfflineAsset(key: string, data: Blob | string | Uint8A
 }
 
 export async function getOfflineAsset(key: string): Promise<Blob | null> {
-  if (!key) return null;
+  if (!key) {return null;}
   const relPath = keyToRelativePath(key);
 
   if (isTauri()) {
@@ -194,7 +194,7 @@ export async function getOfflineAsset(key: string): Promise<Blob | null> {
 }
 
 export async function getOfflineAssetUrl(key: string): Promise<string | null> {
-  if (!key) return null;
+  if (!key) {return null;}
   const blob = await getOfflineAsset(key);
   if (blob) {
     return URL.createObjectURL(blob);
@@ -203,7 +203,7 @@ export async function getOfflineAssetUrl(key: string): Promise<string | null> {
 }
 
 export async function getOfflineAssetText(key: string): Promise<string | null> {
-  if (!key) return null;
+  if (!key) {return null;}
   const relPath = keyToRelativePath(key);
 
   if (isTauri()) {
@@ -212,7 +212,7 @@ export async function getOfflineAssetText(key: string): Promise<string | null> {
       const exists = await invoke<boolean>("map_file_exists", { relativePath: relPath });
       if (exists) {
         const text = await invoke<string>("read_map_text_file", { relativePath: relPath });
-        if (text) return text;
+        if (text) {return text;}
       }
     } catch (_) {}
   }
@@ -223,7 +223,7 @@ export async function getValidOfflineSpriteUrl(
   gameSlug: string,
   targetUrl?: string,
 ): Promise<string | null> {
-  if (!gameSlug) return null;
+  if (!gameSlug) {return null;}
   const spriteKey = `sprite_${gameSlug}`;
   const spriteUrlKey = `sprite_url_${gameSlug}`;
 
@@ -245,7 +245,7 @@ export async function getValidOfflineSpriteUrl(
 // ----------------- File-based Map JSON Storage -----------------
 
 export async function saveOfflineMapData(gameSlug: string, mapSlug: string, data: any): Promise<void> {
-  if (!gameSlug || !mapSlug || !data) return;
+  if (!gameSlug || !mapSlug || !data) {return;}
   const relPath = `${gameSlug}/${mapSlug}/map.json`;
 
   if (isTauri()) {
@@ -260,7 +260,7 @@ export async function saveOfflineMapData(gameSlug: string, mapSlug: string, data
 }
 
 export async function getOfflineMapData(gameSlug: string, mapSlug: string): Promise<any | null> {
-  if (!gameSlug || !mapSlug) return null;
+  if (!gameSlug || !mapSlug) {return null;}
   const relPath = `${gameSlug}/${mapSlug}/map.json`;
 
   if (isTauri()) {
@@ -306,7 +306,7 @@ export interface OfflineMapUpdateCheckResult {
 }
 
 export async function isMapOfflineReady(gameSlug: string, mapSlug: string): Promise<boolean> {
-  if (!gameSlug || !mapSlug) return false;
+  if (!gameSlug || !mapSlug) {return false;}
   // A map is fully offline ready only if its offline download metadata (meta.json) exists,
   // indicating all map tiles & assets were actually downloaded (not merely that map.json was viewed/cached).
   const relPath = `${gameSlug}/${mapSlug}/meta.json`;
@@ -331,7 +331,7 @@ export async function listOfflineMaps(): Promise<string[]> {
 }
 
 export async function getOfflineMetadata(gameSlug: string, mapSlug: string): Promise<OfflineMapMeta | null> {
-  if (!gameSlug || !mapSlug) return null;
+  if (!gameSlug || !mapSlug) {return null;}
   const relPath = `${gameSlug}/${mapSlug}/meta.json`;
 
   if (isTauri()) {
@@ -358,17 +358,17 @@ export async function checkOfflineMapUpdateAvailable(
   mapSlug: string,
   onlineMapData?: any | null
 ): Promise<OfflineMapUpdateCheckResult> {
-  if (!gameSlug || !mapSlug) return { hasUpdate: false };
+  if (!gameSlug || !mapSlug) {return { hasUpdate: false };}
 
   // 1. Must be downloaded / offline ready
   const isReady = await isMapOfflineReady(gameSlug, mapSlug);
-  if (!isReady) return { hasUpdate: false };
+  if (!isReady) {return { hasUpdate: false };}
 
   // 2. Fetch local metadata and/or local map.json
   const meta = await getOfflineMetadata(gameSlug, mapSlug);
   const localMap = await getOfflineMapData(gameSlug, mapSlug);
 
-  if (!meta && !localMap) return { hasUpdate: false };
+  if (!meta && !localMap) {return { hasUpdate: false };}
 
   const offlineLocCount =
     meta?.locationsCount ?? (Array.isArray(localMap?.locations) ? localMap.locations.length : 0);
@@ -388,7 +388,7 @@ export async function checkOfflineMapUpdateAvailable(
   const offlineDownloadedAt = meta?.downloadedAt || 0;
 
   // 3. Online Data Comparison
-  let onlineData = onlineMapData;
+  const onlineData = onlineMapData;
 
   // If onlineMapData was not passed directly, try to get from global map cache
   if (!onlineData && typeof window !== "undefined") {
@@ -429,7 +429,7 @@ export async function checkOfflineMapUpdateAvailable(
     return { hasUpdate: false };
   }
 
-  if (!onlineData) return { hasUpdate: false };
+  if (!onlineData) {return { hasUpdate: false };}
 
   const onlineLocCount = Array.isArray(onlineData?.locations) ? onlineData.locations.length : 0;
   const onlineCatCount = Array.isArray(onlineData?.categories) ? onlineData.categories.length : 0;
@@ -524,7 +524,7 @@ export async function checkOfflineMapUpdateAvailable(
 }
 
 export async function deleteOfflineMap(gameSlug: string, mapSlug: string): Promise<void> {
-  if (!gameSlug || !mapSlug) return;
+  if (!gameSlug || !mapSlug) {return;}
 
   if (isTauri()) {
     try {
@@ -563,7 +563,7 @@ export async function downloadFullOfflineMap(
   onProgress?: (p: DownloadProgress) => void,
   abortSignal?: { aborted: boolean }
 ): Promise<boolean> {
-  if (!gameSlug || !mapSlug || !mapData) return false;
+  if (!gameSlug || !mapSlug || !mapData) {return false;}
 
   const tileSets = (mapData as any)?.tile_sets || mapData?.map?.tile_sets || mapData?.mapConfig?.tile_sets || [];
   const primaryTileSet = (Array.isArray(tileSets) && tileSets[0]) || {};
@@ -574,7 +574,7 @@ export async function downloadFullOfflineMap(
   const bounds = primaryTileSet.bounds || (mapData?.mapConfig?.tile_sets?.[0]?.bounds) || {};
 
   const latLngToTile = (lat: number, lng: number, zoom: number): { x: number; y: number } => {
-    const n = Math.pow(2, zoom);
+    const n = 2 ** zoom;
     const x = Math.floor(((lng + 180) / 360) * n);
     const latRad = (lat * Math.PI) / 180;
     const y = Math.floor(
@@ -607,9 +607,9 @@ export async function downloadFullOfflineMap(
   for (let z = minZoom; z <= maxZoom; z++) {
     const b = bounds[String(z)] || bounds[z];
     let minX = 0;
-    let maxX = Math.pow(2, z) - 1;
+    let maxX = 2 ** z - 1;
     let minY = 0;
-    let maxY = Math.pow(2, z) - 1;
+    let maxY = 2 ** z - 1;
 
     if (b && b.x && b.y) {
       minX = b.x.min;
@@ -625,26 +625,26 @@ export async function downloadFullOfflineMap(
           Math.abs(curr - z) < Math.abs(prev - z) ? curr : prev
         );
         const refB = bounds[closestZ];
-        const scale = Math.pow(2, z - closestZ);
+        const scale = 2 ** (z - closestZ);
         minX = Math.max(0, Math.floor(refB.x.min * scale));
-        maxX = Math.min(Math.pow(2, z) - 1, Math.ceil((refB.x.max + 1) * scale) - 1);
+        maxX = Math.min(2 ** z - 1, Math.ceil((refB.x.max + 1) * scale) - 1);
         minY = Math.max(0, Math.floor(refB.y.min * scale));
-        maxY = Math.min(Math.pow(2, z) - 1, Math.ceil((refB.y.max + 1) * scale) - 1);
+        maxY = Math.min(2 ** z - 1, Math.ceil((refB.y.max + 1) * scale) - 1);
       } else if (hasValidLocs) {
         const p1 = latLngToTile(locMaxLat, locMinLng, z);
         const p2 = latLngToTile(locMinLat, locMaxLng, z);
         minX = Math.max(0, Math.min(p1.x, p2.x) - 1);
-        maxX = Math.min(Math.pow(2, z) - 1, Math.max(p1.x, p2.x) + 1);
+        maxX = Math.min(2 ** z - 1, Math.max(p1.x, p2.x) + 1);
         minY = Math.max(0, Math.min(p1.y, p2.y) - 1);
-        maxY = Math.min(Math.pow(2, z) - 1, Math.max(p1.y, p2.y) + 1);
+        maxY = Math.min(2 ** z - 1, Math.max(p1.y, p2.y) + 1);
       } else {
         const startLat = mapData?.mapConfig?.start_lat ?? mapData?.map?.start_lat ?? 0;
         const startLng = mapData?.mapConfig?.start_lng ?? mapData?.map?.start_lng ?? 0;
         const centerTile = latLngToTile(startLat, startLng, z);
         minX = Math.max(0, centerTile.x - 2);
-        maxX = Math.min(Math.pow(2, z) - 1, centerTile.x + 2);
+        maxX = Math.min(2 ** z - 1, centerTile.x + 2);
         minY = Math.max(0, centerTile.y - 2);
-        maxY = Math.min(Math.pow(2, z) - 1, centerTile.y + 2);
+        maxY = Math.min(2 ** z - 1, centerTile.y + 2);
       }
     }
 
@@ -763,12 +763,12 @@ export async function downloadFullOfflineMap(
 
   async function worker() {
     while (taskIndex < allDownloadTasks.length) {
-      if (abortSignal?.aborted) break;
+      if (abortSignal?.aborted) {break;}
       const task = allDownloadTasks[taskIndex++];
-      if (!task) continue;
+      if (!task) {continue;}
 
       for (const url of task.urls) {
-        if (!url) continue;
+        if (!url) {continue;}
         try {
           const blob = await fetchAssetBlob(url);
           if (blob && blob.size > 0) {

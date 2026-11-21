@@ -87,11 +87,11 @@ export const GameCard = React.memo<GameCardProps>(
       status: "installed" | "wishlist" | "completed" | "none",
     ) => {
       let targetStatus = status;
-      if (status === "installed" && game.isInstalled) targetStatus = "none";
+      if (status === "installed" && game.isInstalled) {targetStatus = "none";}
       else if (status === "wishlist" && game.isWishlisted)
-        targetStatus = "none";
+        {targetStatus = "none";}
       else if (status === "completed" && game.isCompleted)
-        targetStatus = "none";
+        {targetStatus = "none";}
 
       if (onStatusChange) {
         onStatusChange(game.id, targetStatus);
@@ -150,7 +150,7 @@ export const GameCard = React.memo<GameCardProps>(
     };
 
     const updateData = React.useMemo(() => {
-      if (!isGameInstalled) return null;
+      if (!isGameInstalled) {return null;}
 
       const fitgirlDate =
         game.fitgirlUploadDate ||
@@ -165,13 +165,13 @@ export const GameCard = React.memo<GameCardProps>(
           : undefined);
 
       const isIgnored = (postDate?: string) => {
-        if (!effectiveIgnoredDate) return false;
-        if (!postDate) return true;
-        if (effectiveIgnoredDate === postDate) return true;
+        if (!effectiveIgnoredDate) {return false;}
+        if (!postDate) {return true;}
+        if (effectiveIgnoredDate === postDate) {return true;}
         const ignTime = parseDateSafe(effectiveIgnoredDate);
         const postTime = parseDateSafe(postDate);
         if (ignTime !== null && postTime !== null && ignTime >= postTime)
-          return true;
+          {return true;}
         return false;
       };
 
@@ -190,10 +190,10 @@ export const GameCard = React.memo<GameCardProps>(
       );
 
       const isGenericUpdateOutdated = (() => {
-        if (!game.hasUpdate) return false;
+        if (!game.hasUpdate) {return false;}
         const targetPostDate =
           game.updateInfo?.date || fitgirlDate || steamripDate;
-        if (isIgnored(targetPostDate)) return false;
+        if (isIgnored(targetPostDate)) {return false;}
         if (effectiveLastMod && targetPostDate) {
           return !isGameUpToDateByDate(effectiveLastMod, targetPostDate, 10);
         }
@@ -205,7 +205,7 @@ export const GameCard = React.memo<GameCardProps>(
       const hasUpdate = Boolean(
         isGenericUpdateOutdated || hasFitgirlUpdate || hasSteamripUpdate,
       );
-      if (!hasUpdate) return null;
+      if (!hasUpdate) {return null;}
 
       const activePostDate = hasFitgirlUpdate
         ? fitgirlDate
@@ -237,7 +237,7 @@ export const GameCard = React.memo<GameCardProps>(
     ]);
 
     const playtimeLabel = React.useMemo(() => {
-      if (!game.playtimeMinutes || game.playtimeMinutes <= 0) return null;
+      if (!game.playtimeMinutes || game.playtimeMinutes <= 0) {return null;}
       return game.playtimeMinutes >= 60
         ? `${(game.playtimeMinutes / 60).toFixed(1)}h`
         : `${Math.floor(game.playtimeMinutes)}m`;

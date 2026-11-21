@@ -34,7 +34,7 @@ export const DEFAULT_LINUX_SETTINGS: LinuxCompatibilitySettings = {
  * Check if the current client platform is Linux
  */
 export function isLinuxPlatform(): boolean {
-  if (typeof window === "undefined") return false;
+  if (typeof window === "undefined") {return false;}
   const ua = window.navigator.userAgent.toLowerCase();
   return (
     ua.includes("linux") && !ua.includes("android") && !ua.includes("windows")
@@ -48,7 +48,7 @@ export async function getLinuxHomeDir(): Promise<string> {
   try {
     const { homeDir } = await import("@tauri-apps/api/path");
     const h = await homeDir();
-    if (h) return h.replace(/\/$/, "");
+    if (h) {return h.replace(/\/$/, "");}
   } catch {}
   return "/home/deck";
 }
@@ -62,7 +62,7 @@ export async function fetchLatestGeProtonRelease(): Promise<{
   name: string;
   sizeBytes: number;
 } | null> {
-  if (!isLinuxPlatform()) return null;
+  if (!isLinuxPlatform()) {return null;}
 
   try {
     const { fetch: tauriFetch } = await import("@tauri-apps/plugin-http");
@@ -120,7 +120,7 @@ export async function discoverLinuxRunners(): Promise<LinuxRunner[]> {
     isManaged: true,
   });
 
-  if (!isLinuxPlatform()) return runners;
+  if (!isLinuxPlatform()) {return runners;}
 
   try {
     const { exists, readDir } = await import("@tauri-apps/plugin-fs");
@@ -315,7 +315,7 @@ export async function saveLinuxCompatibilitySettings(
 export async function ensureProtonGeInstalled(
   onProgress?: (status: string) => void,
 ): Promise<boolean> {
-  if (!isLinuxPlatform()) return true;
+  if (!isLinuxPlatform()) {return true;}
 
   onProgress?.("Checking latest GE-Proton release...");
   const release = await fetchLatestGeProtonRelease();
@@ -358,7 +358,7 @@ export async function buildLinuxLaunchConfiguration(
     ensureProtonGeInstalled().catch(console.error);
   }
 
-  let selectedRunner =
+  const selectedRunner =
     overrideRunner ||
     runners.find((r) => r.id === settings.preferredRunnerId) ||
     runners.find((r) => r.type === "proton-ge" || r.type === "steam-proton") ||
@@ -440,7 +440,7 @@ export async function buildLinuxInstallerLaunchConfiguration(
   const settings = await getLinuxCompatibilitySettings();
   const runners = await discoverLinuxRunners();
 
-  let selectedRunner =
+  const selectedRunner =
     overrideRunner ||
     runners.find((r) => r.id === settings.preferredRunnerId) ||
     runners.find((r) => r.type === "proton-ge" || r.type === "steam-proton") ||
@@ -460,7 +460,7 @@ export async function buildLinuxInstallerLaunchConfiguration(
   }
 
   const workingDir = targetDir;
-  let runnerCommand = selectedRunner ? selectedRunner.path : "wine";
+  const runnerCommand = selectedRunner ? selectedRunner.path : "wine";
   let runnerArgs: string[] = [];
 
   if (

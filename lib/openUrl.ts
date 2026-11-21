@@ -2,7 +2,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 
 export async function openInBrowser(url?: string): Promise<void> {
   const target = url?.trim();
-  if (!target) return;
+  if (!target) {return;}
   try {
     await openUrl(target);
   } catch {

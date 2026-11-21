@@ -13,7 +13,7 @@ function isTauri(): boolean {
  * Check if notification permission is granted across Tauri and Web environments
  */
 async function checkNotificationPermission(): Promise<boolean> {
-  if (typeof window === "undefined") return false;
+  if (typeof window === "undefined") {return false;}
 
   if (isTauri()) {
     try {
@@ -37,7 +37,7 @@ async function checkNotificationPermission(): Promise<boolean> {
  * Request notification permissions from the user
  */
 export async function requestNotificationPermission(): Promise<boolean> {
-  if (typeof window === "undefined") return false;
+  if (typeof window === "undefined") {return false;}
 
   if (isTauri()) {
     try {
@@ -69,10 +69,12 @@ export async function requestNotificationPermission(): Promise<boolean> {
 export async function sendDesktopNotification(
   payload: RepackNotificationPayload,
 ): Promise<boolean> {
-  if (typeof window === "undefined") return false;
+  if (typeof window === "undefined") {return false;}
 
   const { title, body, icon, image } = payload;
-  console.log("[sendDesktopNotification] Sending notification:", { title, body });
+  if (process.env.NODE_ENV === "development") {
+    console.log("[sendDesktopNotification] Sending notification:", { title, body });
+  }
 
   if (isTauri()) {
     try {
@@ -80,7 +82,7 @@ export async function sendDesktopNotification(
       const { invoke } = await import("@tauri-apps/api/core");
 
       try {
-        let isGranted = await plugin.isPermissionGranted();
+        const isGranted = await plugin.isPermissionGranted();
         if (!isGranted) {
           const perm = await plugin.requestPermission();
           console.log("[sendDesktopNotification] Permission request result:", perm);

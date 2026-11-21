@@ -123,7 +123,7 @@ export const IgdbSearchModal: React.FC<IgdbSearchModalProps> = ({
       const updated = getStoredGames();
       setLibraryGames(updated);
       const updatedGame = updated.find((g) => g.id === existing.id);
-      if (updatedGame) onGameAdded?.(updatedGame);
+      if (updatedGame) {onGameAdded?.(updatedGame);}
     } else {
       const newGame: Game = {
         id: `igdb-${igdbGame.id}-${Date.now()}`,
@@ -167,7 +167,7 @@ export const IgdbSearchModal: React.FC<IgdbSearchModalProps> = ({
       const updated = getStoredGames();
       setLibraryGames(updated);
       const updatedGame = updated.find((g) => g.id === existing.id);
-      if (updatedGame) onGameAdded?.(updatedGame);
+      if (updatedGame) {onGameAdded?.(updatedGame);}
     } else {
       const newGame: Game = {
         id: `igdb-${igdbGame.id}-${Date.now()}`,
@@ -212,7 +212,7 @@ export const IgdbSearchModal: React.FC<IgdbSearchModalProps> = ({
       const updated = getStoredGames();
       setLibraryGames(updated);
       const updatedGame = updated.find((g) => g.id === existing.id);
-      if (updatedGame) onGameAdded?.(updatedGame);
+      if (updatedGame) {onGameAdded?.(updatedGame);}
     } else {
       const newGame: Game = {
         id: `igdb-${igdbGame.id}-${Date.now()}`,
@@ -249,7 +249,7 @@ export const IgdbSearchModal: React.FC<IgdbSearchModalProps> = ({
   };
 
   const renderStars = (rating?: number) => {
-    if (!rating) return null;
+    if (!rating) {return null;}
     const stars = Math.round(rating / 20);
     return (
       <Group gap={2}>

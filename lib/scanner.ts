@@ -96,7 +96,7 @@ function resolveGameRootFolder(
   cleanTitle: string;
 } {
   const normalizedFile = fullFilePath.replace(/\\/g, "/");
-  let fileParts = normalizedFile.split("/").filter(Boolean);
+  const fileParts = normalizedFile.split("/").filter(Boolean);
 
   if (targetScanFolder) {
     let normTarget = targetScanFolder.replace(/\\/g, "/");
@@ -243,13 +243,13 @@ export async function scanDirectory(
 
   try {
     const { readDir, exists } = await import("@tauri-apps/plugin-fs");
-    if (!(await exists(clean))) return [];
+    if (!(await exists(clean))) {return [];}
 
     const queue: { dir: string; depth: number }[] = [{ dir: clean, depth: 0 }];
 
     while (queue.length > 0) {
       const current = queue.shift()!;
-      if (current.depth > 5) continue;
+      if (current.depth > 5) {continue;}
 
       try {
         const entries = await readDir(current.dir);
@@ -309,19 +309,19 @@ export async function detectIsFitgirlRepack(
       : clean;
 
     for (let i = 0; i < 5; i++) {
-      if (!currentDir || currentDir.length <= 3) break;
+      if (!currentDir || currentDir.length <= 3) {break;}
 
       if (await exists(currentDir)) {
         // Direct checks
-        if (await exists(`${currentDir}/fitgirl.md5`)) return true;
-        if (await exists(`${currentDir}/_Redist/fitgirl.md5`)) return true;
-        if (await exists(`${currentDir}/redist/fitgirl.md5`)) return true;
+        if (await exists(`${currentDir}/fitgirl.md5`)) {return true;}
+        if (await exists(`${currentDir}/_Redist/fitgirl.md5`)) {return true;}
+        if (await exists(`${currentDir}/redist/fitgirl.md5`)) {return true;}
 
         try {
           const entries = await readDir(currentDir);
           for (const entry of entries) {
             const lower = entry.name.toLowerCase();
-            if (entry.isFile && lower === "fitgirl.md5") return true;
+            if (entry.isFile && lower === "fitgirl.md5") {return true;}
             if (
               entry.isDirectory &&
               (lower === "_redist" || lower === "redist")
@@ -373,7 +373,7 @@ export async function checkUninstallerExe(
       : clean;
 
     for (let i = 0; i < 4; i++) {
-      if (!currentDir || currentDir.length <= 3) break;
+      if (!currentDir || currentDir.length <= 3) {break;}
 
       if (await exists(currentDir)) {
         for (const name of uninstallerNames) {
@@ -414,7 +414,7 @@ export async function checkUninstallerExe(
  */
 export async function uninstallGameExe(exePath: string): Promise<boolean> {
   const uninstaller = await checkUninstallerExe(exePath);
-  if (!uninstaller) return false;
+  if (!uninstaller) {return false;}
 
   try {
     const { openPath } = await import("@tauri-apps/plugin-opener");

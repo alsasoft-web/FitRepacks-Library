@@ -114,7 +114,7 @@ export function parseGameUpdateItem(item: RepackUpdateLink): ParsedUpdateItem {
     const parsed = new URL(url);
     let h = parsed.hostname.replace(/^www\./, "");
     const parts = h.split(".");
-    if (parts.length > 2) h = parts.slice(-2).join(".");
+    if (parts.length > 2) {h = parts.slice(-2).join(".");}
     hoster = h;
   } catch {}
 
@@ -386,14 +386,14 @@ const DirectHosterAccordion: React.FC<{
 };
 
 function cleanGameSummary(raw?: string): string {
-  if (!raw) return "";
+  if (!raw) {return "";}
   let text = raw;
   text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "");
   text = text.replace(/\.dlinks\s*\{[^}]*\}/gi, "");
   text = text.replace(/\{margin:[^}]*\}/gi, "");
   text = text.replace(/\[IDM\]\s*Click to show direct links/gi, "");
   text = text.replace(/Filehoster:\s*[^\n,]*/gi, "");
-  text = text.replace(/Download Mirror\s*\([^\)]*\)/gi, "");
+  text = text.replace(/Download Mirror\s*\([^)]*\)/gi, "");
   return text.trim();
 }
 
@@ -452,7 +452,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
               };
               setCurrentGame(updated);
               updateGameInStorage(updated);
-              if (onGameUpdated) onGameUpdated(updated);
+              if (onGameUpdated) {onGameUpdated(updated);}
             }
           });
         }
@@ -482,7 +482,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
               };
               setCurrentGame(updated);
               updateGameInStorage(updated);
-              if (onGameUpdated) onGameUpdated(updated);
+              if (onGameUpdated) {onGameUpdated(updated);}
             }
           });
         }
@@ -534,7 +534,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
   };
 
   const handleSaveExePath = async () => {
-    if (!currentGame) return;
+    if (!currentGame) {return;}
     const cleanExe = exePathInput.trim();
     let detectedVersion: string | undefined = currentGame.installedVersion;
     if (cleanExe && !detectedVersion) {
@@ -551,7 +551,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
     };
     updateGameInStorage(updatedGame);
     setCurrentGame(updatedGame);
-    if (onGameUpdated) onGameUpdated(updatedGame);
+    if (onGameUpdated) {onGameUpdated(updatedGame);}
     setIsEditingExePath(false);
   };
 
@@ -575,7 +575,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
         target = cleanExe;
       }
     }
-    if (!target) return;
+    if (!target) {return;}
     try {
       if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
         const { invoke } = await import("@tauri-apps/api/core");
@@ -597,7 +597,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
 
   const sortedScreenshots = useMemo(() => {
     if (!currentGame.screenshots || currentGame.screenshots.length === 0)
-      return [];
+      {return [];}
     const allScreenshots = currentGame.screenshots || [];
     const gifScreenshots = allScreenshots.filter(
       (s) => s && /\.gif(?:\?.*)?$/i.test(s),
@@ -609,7 +609,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
   }, [currentGame.screenshots]);
 
   const bannerBackground = useMemo(() => {
-    if (currentGame.bannerUrl) return currentGame.bannerUrl;
+    if (currentGame.bannerUrl) {return currentGame.bannerUrl;}
     if (currentGame.screenshots && currentGame.screenshots.length > 0) {
       return currentGame.screenshots[0];
     }
@@ -660,14 +660,14 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
 
     if (isLinkedFitgirl && isLinkedSteamrip) {
       const cmp = compareReleaseSources(fg, sr);
-      if (cmp > 0) return { fitgirlIsNewest: true, steamripIsNewest: false };
-      if (cmp < 0) return { fitgirlIsNewest: false, steamripIsNewest: true };
+      if (cmp > 0) {return { fitgirlIsNewest: true, steamripIsNewest: false };}
+      if (cmp < 0) {return { fitgirlIsNewest: false, steamripIsNewest: true };}
       return { fitgirlIsNewest: false, steamripIsNewest: false };
     }
     if (isLinkedFitgirl)
-      return { fitgirlIsNewest: true, steamripIsNewest: false };
+      {return { fitgirlIsNewest: true, steamripIsNewest: false };}
     if (isLinkedSteamrip)
-      return { fitgirlIsNewest: false, steamripIsNewest: true };
+      {return { fitgirlIsNewest: false, steamripIsNewest: true };}
     return { fitgirlIsNewest: false, steamripIsNewest: false };
   }, [
     isLinkedFitgirl,
@@ -679,14 +679,14 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
   ]);
 
   const isIgnored = (postDate?: string) => {
-    if (!currentGame.ignoredUpdateDate) return false;
-    if (!postDate) return true;
-    if (currentGame.ignoredUpdateDate === postDate) return true;
+    if (!currentGame.ignoredUpdateDate) {return false;}
+    if (!postDate) {return true;}
+    if (currentGame.ignoredUpdateDate === postDate) {return true;}
     const ignTime = parseDateSafe(currentGame.ignoredUpdateDate);
     const postTime = parseDateSafe(postDate);
     if (ignTime !== null && postTime !== null && ignTime >= postTime)
-      return true;
-    if (ignTime !== null && postTime === null) return true;
+      {return true;}
+    if (ignTime !== null && postTime === null) {return true;}
     return false;
   };
 
@@ -708,7 +708,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
     setCurrentGame(updated);
     ignoreGameUpdate(currentGame.id, dateToIgnore);
     updateGameInStorage(updated);
-    if (onGameUpdated) onGameUpdated(updated);
+    if (onGameUpdated) {onGameUpdated(updated);}
   };
 
   const handleUnignoreUpdate = () => {
@@ -719,7 +719,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
     setCurrentGame(updated);
     unignoreGameUpdate(currentGame.id);
     updateGameInStorage(updated);
-    if (onGameUpdated) onGameUpdated(updated);
+    if (onGameUpdated) {onGameUpdated(updated);}
   };
 
   const handleStatusChange = (
@@ -745,7 +745,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
       tags: nextTags,
     };
     setCurrentGame(updated);
-    if (onGameUpdated) onGameUpdated(updated);
+    if (onGameUpdated) {onGameUpdated(updated);}
   };
 
   const handleToggleFavorite = () => {
@@ -755,7 +755,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
       isFavorite: !currentGame.isFavorite,
     };
     setCurrentGame(updated);
-    if (onGameUpdated) onGameUpdated(updated);
+    if (onGameUpdated) {onGameUpdated(updated);}
   };
 
   const hasFitgirlUpdate = Boolean(
@@ -781,7 +781,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
   );
 
   const displayInstalledVer = useMemo(() => {
-    if (!installedVer) return null;
+    if (!installedVer) {return null;}
     const trimmed = installedVer.trim();
     if (
       trimmed.toLowerCase().startsWith("build") ||
@@ -2307,10 +2307,10 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                             "",
                           );
                           const parts = h.split(".");
-                          if (parts.length > 2) h = parts.slice(-2).join(".");
+                          if (parts.length > 2) {h = parts.slice(-2).join(".");}
                           hoster = h;
                         } catch {}
-                        if (!acc[hoster]) acc[hoster] = [];
+                        if (!acc[hoster]) {acc[hoster] = [];}
                         acc[hoster].push(link);
                         return acc;
                       }, {});
@@ -2580,8 +2580,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                       }
                     />
                     <Stack gap={0}>
-                      <Text size="10px" c="dimmed" fw={600}>
-                      </Text>
+                      <Text size="10px" c="dimmed" fw={600} />
                       <Group gap={4} align="center">
                         <Text size="xs" fw={700}>
                           {statusLabel}
@@ -2704,7 +2703,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                   variant="default"
                   className="daze-glass-pill"
                   onClick={() => {
-                    if (onCloseModal) onCloseModal();
+                    if (onCloseModal) {onCloseModal();}
                     onEdit(currentGame);
                   }}
                 >
@@ -2719,7 +2718,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                 holdDurationMs={2000}
                 onConfirmed={() => {
                   onUninstall(currentGame.id);
-                  if (onCloseModal) onCloseModal();
+                  if (onCloseModal) {onCloseModal();}
                 }}
               />
             )}
@@ -2752,7 +2751,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
                 }}
                 onClick={() => {
                   onLaunch(currentGame);
-                  if (onCloseModal) onCloseModal();
+                  if (onCloseModal) {onCloseModal();}
                 }}
               >
                 {isPlaying
@@ -2796,7 +2795,7 @@ export const GameDetailView: React.FC<GameDetailViewProps> = ({
         onClose={() => setIsSourceLinkerOpen(false)}
         onGameUpdated={(updated) => {
           setCurrentGame(updated);
-          if (onGameUpdated) onGameUpdated(updated);
+          if (onGameUpdated) {onGameUpdated(updated);}
         }}
       />
 

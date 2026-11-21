@@ -52,7 +52,7 @@ export const PlaytimeStats: React.FC<PlaytimeStatsProps> = ({
 
   // Filter games based on search query
   const filteredGames = useMemo(() => {
-    if (!searchQuery.trim()) return games;
+    if (!searchQuery.trim()) {return games;}
     const q = searchQuery.toLowerCase().trim();
     const tokens = q
       .split(/[\s:,\-_/\\|.]+/)
@@ -217,9 +217,9 @@ export const PlaytimeStats: React.FC<PlaytimeStatsProps> = ({
   const activeGenreList = useMemo(() => {
     return [...genreRankings]
       .filter((item) => {
-        if (genreCategory === "wishlisted") return item.wishlistedCount > 0;
-        if (genreCategory === "installed") return item.installedCount > 0;
-        if (genreCategory === "completed") return item.completedCount > 0;
+        if (genreCategory === "wishlisted") {return item.wishlistedCount > 0;}
+        if (genreCategory === "installed") {return item.installedCount > 0;}
+        if (genreCategory === "completed") {return item.completedCount > 0;}
         return item.totalPlaytimeHours > 0 || item.installedCount > 0;
       })
       .sort((a, b) => {
@@ -237,11 +237,11 @@ export const PlaytimeStats: React.FC<PlaytimeStatsProps> = ({
   }, [genreRankings, genreCategory]);
 
   const maxGenreValue = useMemo(() => {
-    if (activeGenreList.length === 0) return 1;
+    if (activeGenreList.length === 0) {return 1;}
     if (genreCategory === "wishlisted")
-      return activeGenreList[0].wishlistedCount;
-    if (genreCategory === "installed") return activeGenreList[0].installedCount;
-    if (genreCategory === "completed") return activeGenreList[0].completedCount;
+      {return activeGenreList[0].wishlistedCount;}
+    if (genreCategory === "installed") {return activeGenreList[0].installedCount;}
+    if (genreCategory === "completed") {return activeGenreList[0].completedCount;}
     return activeGenreList[0].totalPlaytimeHours;
   }, [activeGenreList, genreCategory]);
 

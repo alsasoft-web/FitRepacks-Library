@@ -104,7 +104,7 @@ export const ProcessBoosterModal: React.FC<ProcessBoosterModalProps> = ({
   };
 
   const handleKill = async () => {
-    if (selectedPids.length === 0) return;
+    if (selectedPids.length === 0) {return;}
     setKilling(true);
     setResultMessage(null);
     try {

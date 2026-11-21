@@ -18,7 +18,7 @@ let dbInitPromise: Promise<Database> | null = null;
  * Get or initialize the SQLite database instance using @tauri-apps/plugin-sql
  */
 async function getDatabase(): Promise<Database> {
-  if (dbInstance) return dbInstance;
+  if (dbInstance) {return dbInstance;}
   if (!dbInitPromise) {
     dbInitPromise = (async () => {
       const db = await Database.load("sqlite:library.db");
@@ -214,7 +214,7 @@ function persistCachedGames(games: Game[]): void {
   }
 }
 
-let cachedWishlistIds: string[] = [];
+const cachedWishlistIds: string[] = [];
 let cachedLastScanPath: string = "";
 let cachedDefaultDownloadDir: string = "C:\\Games\\Downloads";
 let cachedPreferredLanguages: string[] = ["english"];
@@ -267,7 +267,7 @@ function isTauri(): boolean {
 
 /** Load games array from Tauri SQLite database using @tauri-apps/plugin-sql */
 async function loadGamesFromSQLite(): Promise<Game[]> {
-  if (!isTauri()) return cachedGames;
+  if (!isTauri()) {return cachedGames;}
   try {
     await sqliteWriteQueue;
     const db = await getDatabase();
@@ -504,7 +504,7 @@ async function upsertGameToSQLite(g: Game, db: Database): Promise<void> {
 /** Non-destructive queued save to SQLite database */
 function saveGamesToSQLite(games: Game[]): void {
   persistCachedGames(games);
-  if (!isTauri()) return;
+  if (!isTauri()) {return;}
 
   sqliteWriteQueue = sqliteWriteQueue
     .then(async () => {
@@ -521,7 +521,7 @@ function saveGamesToSQLite(games: Game[]): void {
 /** Delete a single game from SQLite */
 function deleteSingleGameFromSQLite(id: string): void {
   persistCachedGames(cachedGames.filter((g) => g.id !== id));
-  if (!isTauri()) return;
+  if (!isTauri()) {return;}
 
   sqliteWriteQueue = sqliteWriteQueue
     .then(async () => {
@@ -545,7 +545,7 @@ export async function saveAppSetting(
   key: string,
   value: string,
 ): Promise<void> {
-  if (!isTauri()) return;
+  if (!isTauri()) {return;}
   sqliteWriteQueue = sqliteWriteQueue
     .then(async () => {
       const db = await getDatabase();
@@ -564,7 +564,7 @@ export async function saveAppSetting(
  * Generic SQLite Setting Getter using @tauri-apps/plugin-sql
  */
 export async function getAppSetting(key: string): Promise<string | null> {
-  if (!isTauri()) return null;
+  if (!isTauri()) {return null;}
   try {
     const db = await getDatabase();
     const rows = await db.select<{ value: string }[]>(
@@ -582,7 +582,7 @@ export async function getAppSetting(key: string): Promise<string | null> {
 
 /** Async entry point called on app mount to load SQLite data */
 export async function syncTauriLibraryData(): Promise<Game[]> {
-  if (fileDialogActive) return getStoredGames();
+  if (fileDialogActive) {return getStoredGames();}
   const syncStartedAt = Date.now();
   const games = await loadGamesFromSQLite();
   if (fileDialogActive || lastLocalGamesMutationAt > syncStartedAt) {
@@ -699,12 +699,39 @@ export async function syncTauriLibraryData(): Promise<Game[]> {
       const closeToTrayVal = await getAppSetting("close_to_tray");
       if (closeToTrayVal !== null && closeToTrayVal !== undefined) {
         cachedCloseToTray = closeToTrayVal === "true" || closeToTrayVal === "1";
-      }
-      if (isTauri()) {
-        try {
-          const { invoke } = await import("@tauri-apps/api/core");
-          await invoke("set_close_to_tray", { enabled: cachedCloseToTray });
-        } catch (_) {}
+        if (typeof window !== "undefined") {
+          try {
+            localStorage.setItem(
+              "fitrepacks_close_to_tray",
+              cachedCloseToTray ? "true" : "false",
+            );
+          } catch (_) {}
+        }
+        if (isTauri()) {
+          try {
+            const { invoke } = await import("@tauri-apps/api/core");
+            await invoke("set_close_to_tray", { enabled: cachedCloseToTray });
+          } catch (_) {}
+        }
+      } else {
+        const local =
+          typeof window !== "undefined"
+            ? localStorage.getItem("fitrepacks_close_to_tray")
+            : null;
+        if (local !== null) {
+          cachedCloseToTray = local === "true" || local === "1";
+          if (isTauri()) {
+            try {
+              const { invoke } = await import("@tauri-apps/api/core");
+              await invoke("set_close_to_tray", { enabled: cachedCloseToTray });
+            } catch (_) {}
+          }
+        } else if (isTauri()) {
+          try {
+            const { invoke } = await import("@tauri-apps/api/core");
+            cachedCloseToTray = await invoke<boolean>("get_close_to_tray");
+          } catch (_) {}
+        }
       }
 
       const mapOverlayShortcutsJson = await getAppSetting("map_overlay_shortcuts");
@@ -1135,7 +1162,7 @@ export function unignoreGameUpdate(gameId: string): Game[] {
  * Normalize game title for accurate cross-source and scanner matching
  */
 export function normalizeGameTitle(rawTitle: string): string {
-  if (!rawTitle) return "";
+  if (!rawTitle) {return "";}
   return rawTitle
     .replace(/^#\d+\s*/i, "")
     .replace(/\bUpdated\b/gi, "")
@@ -1164,11 +1191,11 @@ export function findMatchingGameInLibrary(
   game: Game,
   existingGames: Game[],
 ): Game | null {
-  if (!existingGames || existingGames.length === 0) return null;
+  if (!existingGames || existingGames.length === 0) {return null;}
 
   // 1. Direct ID match
   const directId = existingGames.find((g) => g.id === game.id);
-  if (directId) return directId;
+  if (directId) {return directId;}
 
   // 2. Executable path match (case-insensitive on Windows)
   if (game.exePath && game.exePath.trim()) {
@@ -1176,7 +1203,7 @@ export function findMatchingGameInLibrary(
     const exeMatch = existingGames.find(
       (g) => g.exePath && g.exePath.trim().toLowerCase() === cleanExe,
     );
-    if (exeMatch) return exeMatch;
+    if (exeMatch) {return exeMatch;}
   }
 
   // 3. Direct IGDB ID match
@@ -1184,7 +1211,7 @@ export function findMatchingGameInLibrary(
     const igdbMatch = existingGames.find(
       (g) => g.igdbId && g.igdbId === game.igdbId,
     );
-    if (igdbMatch) return igdbMatch;
+    if (igdbMatch) {return igdbMatch;}
   }
 
   // 4. Exact normalized title match
@@ -1194,7 +1221,7 @@ export function findMatchingGameInLibrary(
       const normExisting = normalizeGameTitle(g.title);
       return normExisting === normNew;
     });
-    if (exactTitleMatch) return exactTitleMatch;
+    if (exactTitleMatch) {return exactTitleMatch;}
   }
 
   return null;
@@ -1205,7 +1232,7 @@ export function findMatchingGameInLibrary(
  * (e.g. sharing identical exePath, or matching IGDB ID / normalized title).
  */
 export function deduplicateGamesList(games: Game[]): Game[] {
-  if (!Array.isArray(games) || games.length <= 1) return games;
+  if (!Array.isArray(games) || games.length <= 1) {return games;}
 
   const result: Game[] = [];
   const removedIds: string[] = [];
@@ -1281,16 +1308,16 @@ export function deduplicateGamesList(games: Game[]): Game[] {
  * Deduplicate play sessions that were recorded concurrently due to race conditions or duplicate exit triggers.
  */
 export function deduplicatePlaySessions(sessions: PlaySession[]): PlaySession[] {
-  if (!Array.isArray(sessions) || sessions.length === 0) return [];
+  if (!Array.isArray(sessions) || sessions.length === 0) {return [];}
   const deduplicated: PlaySession[] = [];
   const sorted = [...sessions].sort(
     (a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime(),
   );
 
   for (const session of sorted) {
-    if (!session || !session.startTime) continue;
+    if (!session || !session.startTime) {continue;}
     const sessionTime = new Date(session.startTime).getTime();
-    if (isNaN(sessionTime)) continue;
+    if (isNaN(sessionTime)) {continue;}
 
     // Check if another session was recorded within 120 seconds of this session
     const existingIndex = deduplicated.findIndex((s) => {
@@ -1498,7 +1525,7 @@ export function addGameToStorage(game: Game): Game[] {
 }
 
 export function addGamesBatchToStorage(newGames: Game[]): Game[] {
-  if (!newGames || newGames.length === 0) return getStoredGames();
+  if (!newGames || newGames.length === 0) {return getStoredGames();}
   const updated = [...getStoredGames()];
 
   for (const newGame of newGames) {
@@ -1590,7 +1617,7 @@ export function deleteGameFromStorage(id: string): Game[] {
 }
 
 function autoMarkRepackAsReadForGame(game?: Game): void {
-  if (!game) return;
+  if (!game) {return;}
   const rawId = game.id.startsWith("repack-")
     ? game.id.replace("repack-", "")
     : game.id;
@@ -1603,7 +1630,7 @@ function autoMarkRepackAsReadForGame(game?: Game): void {
 export function toggleFavoriteGame(id: string): Game[] {
   const games = getStoredGames();
   const target = games.find((g) => g.id === id);
-  if (!target) return games;
+  if (!target) {return games;}
 
   const nextFavorite = !target.isFavorite;
   const updatedGame = { ...target, isFavorite: nextFavorite };
@@ -1633,7 +1660,7 @@ export function toggleFavoriteGame(id: string): Game[] {
 export function toggleCompletedGame(id: string): Game[] {
   const games = getStoredGames();
   const target = games.find((g) => g.id === id);
-  if (!target) return games;
+  if (!target) {return games;}
 
   const now = new Date().toISOString();
   const nextCompleted = !target.isCompleted;
@@ -1680,7 +1707,7 @@ export function toggleCompletedGame(id: string): Game[] {
 export function toggleWishlistGame(id: string): Game[] {
   const games = getStoredGames();
   const target = games.find((g) => g.id === id);
-  if (!target) return games;
+  if (!target) {return games;}
 
   const nextWishlist = !target.isWishlisted;
   let nextTags = target.tags || [];
@@ -1762,14 +1789,14 @@ export function setGameStatus(
 ): Game[] {
   const games = getStoredGames();
   const target = games.find((g) => g.id === id);
-  if (!target) return games;
+  if (!target) {return games;}
 
   const now = new Date().toISOString();
   let nextWishlisted = false;
   let nextCompleted = false;
   let nextInstalled = false;
   let nextCompletedAt = target.completedAt;
-  let nextTags = (target.tags || []).filter(
+  const nextTags = (target.tags || []).filter(
     (t) =>
       t !== "Wishlist" &&
       t !== "Completed" &&
@@ -1810,7 +1837,7 @@ export function updateGamePlaytime(
   id: string,
   additionalMinutes: number,
 ): Game[] {
-  if (!additionalMinutes || additionalMinutes <= 0) return getStoredGames();
+  if (!additionalMinutes || additionalMinutes <= 0) {return getStoredGames();}
   const games = getStoredGames();
   const now = new Date().toISOString();
   const sessionDuration = Math.max(Math.round(additionalMinutes), 1);
@@ -1912,7 +1939,7 @@ export function getRecentInstalledGames(
 export async function syncRecentGamesToTrayAndTaskbar(
   customList?: Game[],
 ): Promise<void> {
-  if (!isTauri()) return;
+  if (!isTauri()) {return;}
   try {
     const recent = getRecentInstalledGames(5, customList);
     const payload: RecentGamePayload[] = recent.map((g) => ({
@@ -2101,7 +2128,7 @@ export function getGameForRepack(
   const postUrl = post?.url || "";
 
   return games.find((g) => {
-    if (g.id === rawId || g.id === `repack-${rawId}`) return true;
+    if (g.id === rawId || g.id === `repack-${rawId}`) {return true;}
     if (
       cleanPostId &&
       (g.id === cleanPostId || g.id === `repack-${cleanPostId}`)
@@ -2123,9 +2150,9 @@ export function getGameForRepack(
       const hasRepackLink = Boolean(
         g.repackUrl || g.linkedFitgirlUrl || g.linkedSteamripUrl,
       );
-      if (!hasRepackLink) return false;
+      if (!hasRepackLink) {return false;}
 
-      if (g.title.toLowerCase().trim() === postTitle) return true;
+      if (g.title.toLowerCase().trim() === postTitle) {return true;}
       const gClean = cleanGameTitle(g.title).toLowerCase().trim();
       const pClean = cleanGameTitle(post ? post.title : "")
         .toLowerCase()
@@ -2209,7 +2236,7 @@ export function setRepackStatus(
       base.isInstalled = true;
       base.isWishlisted = false;
       base.isCompleted = false;
-      if (exePath) base.exePath = exePath;
+      if (exePath) {base.exePath = exePath;}
       base.tags = Array.from(new Set([...(base.tags || []), "Installed"]));
     } else if (status === "completed") {
       base.isCompleted = true;
@@ -2238,7 +2265,7 @@ export function setRepackStatus(
    ========================================================================== */
 
 export function isIgnoredRepackTitle(title: string): boolean {
-  if (!title) return true;
+  if (!title) {return true;}
   const lower = title.toLowerCase().trim();
   const ignoredKeywords = [
     "upcoming repacks",
@@ -2278,14 +2305,14 @@ export function isIgnoredRepackTitle(title: string): boolean {
 
 /** Build composite key using post ID and date (format: id-date) */
 function buildPostCompositeId(id: string, date?: string): string {
-  if (!id) return "";
+  if (!id) {return "";}
   const cleanId = id.trim();
   const cleanDate = (date || "").trim();
   return cleanDate ? `${cleanId}-${cleanDate}` : cleanId;
 }
 
 function sanitizeStringArray(raw: any): string[] {
-  if (!raw) return [];
+  if (!raw) {return [];}
 
   // Check if raw is a byte array (e.g. [91, 57, 49, ...])
   if (Array.isArray(raw)) {
@@ -2295,7 +2322,7 @@ function sanitizeStringArray(raw: any): string[] {
         let current = raw;
         for (let iter = 0; iter < 5; iter++) {
           const numbers = current.filter((x) => typeof x === "number");
-          if (numbers.length === 0) break;
+          if (numbers.length === 0) {break;}
           const decoded = String.fromCharCode.apply(null, numbers);
           const parsed = JSON.parse(decoded);
           if (Array.isArray(parsed)) {
@@ -2312,7 +2339,7 @@ function sanitizeStringArray(raw: any): string[] {
 
     return raw
       .map((item) => {
-        if (typeof item === "string") return item.trim();
+        if (typeof item === "string") {return item.trim();}
         if (typeof item === "object" && item !== null) {
           return String(item.name || item.title || item.value || "").trim();
         }
@@ -2337,7 +2364,7 @@ function sanitizeStringArray(raw: any): string[] {
 }
 
 function sanitizeMediaArray(raw: any): string[] {
-  if (!raw) return [];
+  if (!raw) {return [];}
 
   // Check if raw is a byte array (e.g. [91, 57, 49, ...])
   if (Array.isArray(raw)) {
@@ -2347,7 +2374,7 @@ function sanitizeMediaArray(raw: any): string[] {
         let current = raw;
         for (let iter = 0; iter < 5; iter++) {
           const numbers = current.filter((x) => typeof x === "number");
-          if (numbers.length === 0) break;
+          if (numbers.length === 0) {break;}
           const decoded = String.fromCharCode.apply(null, numbers);
           const parsed = JSON.parse(decoded);
           if (Array.isArray(parsed)) {
@@ -2364,7 +2391,7 @@ function sanitizeMediaArray(raw: any): string[] {
 
     return raw
       .map((item) => {
-        if (typeof item === "string") return item.trim();
+        if (typeof item === "string") {return item.trim();}
         if (typeof item === "object" && item !== null) {
           return String(item.url || item.src || item.id || item.video_id || "").trim();
         }
@@ -2389,7 +2416,7 @@ function sanitizeMediaArray(raw: any): string[] {
 function mapRecordToRepackPost(rec: any): RepackPost {
   const rawTitle = String(rec.title || "");
   const cleanTitle = rawTitle
-    .replace(/\s*[\-\–\—\(\[\{]?\s*Updated\s*[\)\}\]]?$/i, "")
+    .replace(/\s*[-\–—\([\{]?\s*Updated\s*[)\}\]]?$/i, "")
     .trim();
   const rawUrl = String(rec.url || "");
   const cleanUrl = rawUrl
@@ -2500,7 +2527,7 @@ export function invalidateRepacksCache(): void {
  * Retrieve latest SteamRIP repack IDs/URLs from local SQLite database
  */
 export async function getSteamRipExistingIds(): Promise<Set<string>> {
-  if (!isTauri()) return new Set();
+  if (!isTauri()) {return new Set();}
   try {
     const db = await getDatabase();
     const rows = await db.select<{ id: string; url: string }[]>(
@@ -2508,8 +2535,8 @@ export async function getSteamRipExistingIds(): Promise<Set<string>> {
     );
     const set = new Set<string>();
     for (const r of rows || []) {
-      if (r.id) set.add(String(r.id).trim());
-      if (r.url) set.add(String(r.url).trim());
+      if (r.id) {set.add(String(r.id).trim());}
+      if (r.url) {set.add(String(r.url).trim());}
     }
     return set;
   } catch (err) {
@@ -2538,7 +2565,7 @@ export function isAdultContent(
   const tStr = Array.isArray(tags) ? tags.join(" ") : String(tags || "");
   const combined = `${gStr} ${tStr} ${title || ""}`.toLowerCase();
   return ADULT_KEYWORDS.some((kw) => {
-    if (kw === "18+") return combined.includes("18+");
+    if (kw === "18+") {return combined.includes("18+");}
     return combined.includes(kw);
   });
 }
@@ -2587,7 +2614,7 @@ export function computeSearchRelevance(
   query: string,
 ): number {
   const cleanQ = query.toLowerCase().trim();
-  if (!cleanQ) return 0;
+  if (!cleanQ) {return 0;}
   const tLower = title.toLowerCase();
   const cLower = companies.toLowerCase();
   const cleanT = tLower.replace(/[^a-z0-9\s]/g, " ");
@@ -2624,7 +2651,7 @@ export function computeSearchRelevance(
 export async function saveSteamRipPosts(
   posts: RepackPost[],
 ): Promise<{ inserted: number; updated: number }> {
-  if (!posts || posts.length === 0) return { inserted: 0, updated: 0 };
+  if (!posts || posts.length === 0) {return { inserted: 0, updated: 0 };}
   if (!isTauri()) {
     return { inserted: 0, updated: 0 };
   }
@@ -2640,7 +2667,7 @@ export async function saveSteamRipPosts(
 
     for (const p of chunk) {
       const id = p.id || p.url;
-      if (!id || !p.title) continue;
+      if (!id || !p.title) {continue;}
       const repackId = p.id || "";
       const coverUrl = p.coverUrl || "";
       const repackSize = p.repackSize || "N/A";
@@ -3118,7 +3145,7 @@ export async function loadRepacksPaginated(
         : undefined;
 
     // Only route through candidate matching with relevance ranking when an active search query is typed
-    if (Boolean(cleanSearch)) {
+    if (cleanSearch) {
       const candCacheKey = `${collectionName}__${abFilter || "all"}__${sortExpr}`;
       const cachedCand = matchingCandidatesCache.get(candCacheKey);
       let allMatching: any[] = [];
@@ -3141,7 +3168,7 @@ export async function loadRepacksPaginated(
           });
           if (matchingCandidatesCache.size > 20) {
             const oldest = matchingCandidatesCache.keys().next().value;
-            if (oldest) matchingCandidatesCache.delete(oldest);
+            if (oldest) {matchingCandidatesCache.delete(oldest);}
           }
         }
 
@@ -3296,7 +3323,7 @@ export async function loadRepacksPaginated(
         });
         if (paginationCache.size > 150) {
           const oldest = paginationCache.keys().next().value;
-          if (oldest) paginationCache.delete(oldest);
+          if (oldest) {paginationCache.delete(oldest);}
         }
 
         return finalResult;
@@ -3388,7 +3415,7 @@ export async function loadRepacksPaginated(
       });
       if (paginationCache.size > 150) {
         const oldest = paginationCache.keys().next().value;
-        if (oldest) paginationCache.delete(oldest);
+        if (oldest) {paginationCache.delete(oldest);}
       }
 
       return finalResult;
@@ -3415,8 +3442,8 @@ export async function loadRepacksPaginated(
 }
 
 let cachedReadPostIds: string[] = [];
-let cachedReadPostIdsSet: Set<string> = new Set();
-const explicitlyUnreadPostIdsSet: Set<string> = new Set();
+let cachedReadPostIdsSet = new Set<string>();
+const explicitlyUnreadPostIdsSet = new Set<string>();
 const allReadAtMap: Record<string, string> = {
   fitgirl: "",
   steamrip: "",
@@ -3427,7 +3454,7 @@ const allReadAtMap: Record<string, string> = {
  * Maps cleanId -> ISO timestamp of when the post was marked read.
  * Used to detect if a post has been updated (new date) since it was read.
  */
-const readPostTimestamps: Map<string, string> = new Map();
+const readPostTimestamps = new Map<string, string>();
 
 function updateCachedReadPostIds(
   list: string[],
@@ -3443,7 +3470,7 @@ function updateCachedReadPostIds(
 }
 
 function persistCachedReadPostsToLocalStorage(): void {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined") {return;}
   try {
     localStorage.setItem(
       "fitrepacks_read_posts",
@@ -3482,7 +3509,7 @@ export function isPostReadInStorage(
   date?: string,
   dataSource: "fitgirl" | "steamrip" | "recomp" = "fitgirl",
 ): boolean {
-  if (!id) return false;
+  if (!id) {return false;}
   const cleanId = String(id).trim();
   const compositeId = buildPostCompositeId(cleanId, date);
 
@@ -3516,10 +3543,10 @@ export function isPostReadInStorage(
 
   const allReadAt = allReadAtMap[dataSource];
   if (allReadAt) {
-    if (!date) return true;
+    if (!date) {return true;}
     const postTime = parseDateSafe(date);
     const markTime = parseDateSafe(allReadAt);
-    if (!postTime || !markTime) return true;
+    if (!postTime || !markTime) {return true;}
     // Allow 24h margin for timezone differences
     if (postTime <= markTime + 86400000) {
       // Check if the post has been updated after the global mark-all-read
@@ -3555,11 +3582,11 @@ async function syncReadPostsFromSQLite(): Promise<string[]> {
         }
       }
       const fgAll = localStorage.getItem("fitrepacks_all_read_at_fitgirl");
-      if (fgAll) allReadAtMap.fitgirl = fgAll;
+      if (fgAll) {allReadAtMap.fitgirl = fgAll;}
       const srAll = localStorage.getItem("fitrepacks_all_read_at_steamrip");
-      if (srAll) allReadAtMap.steamrip = srAll;
+      if (srAll) {allReadAtMap.steamrip = srAll;}
       const rcAll = localStorage.getItem("fitrepacks_all_read_at_recomp");
-      if (rcAll) allReadAtMap.recomp = rcAll;
+      if (rcAll) {allReadAtMap.recomp = rcAll;}
       // Load per-post read timestamps
       const rawTimestamps = localStorage.getItem(
         "fitrepacks_read_post_timestamps",
@@ -3568,7 +3595,7 @@ async function syncReadPostsFromSQLite(): Promise<string[]> {
         const parsed = JSON.parse(rawTimestamps);
         if (parsed && typeof parsed === "object") {
           for (const [id, ts] of Object.entries(parsed)) {
-            if (typeof ts === "string") readPostTimestamps.set(id, ts);
+            if (typeof ts === "string") {readPostTimestamps.set(id, ts);}
           }
         }
       }
@@ -3586,19 +3613,19 @@ async function syncReadPostsFromSQLite(): Promise<string[]> {
         const list = rows.map((r) => r.post_id);
         const timestamps: Record<string, string> = {};
         for (const r of rows) {
-          if (r.read_at) timestamps[r.post_id] = r.read_at;
+          if (r.read_at) {timestamps[r.post_id] = r.read_at;}
         }
         updateCachedReadPostIds(list, timestamps);
       }
 
       const fgAllSetting = await getAppSetting("all_read_at_fitgirl");
-      if (fgAllSetting) allReadAtMap.fitgirl = fgAllSetting;
+      if (fgAllSetting) {allReadAtMap.fitgirl = fgAllSetting;}
 
       const srAllSetting = await getAppSetting("all_read_at_steamrip");
-      if (srAllSetting) allReadAtMap.steamrip = srAllSetting;
+      if (srAllSetting) {allReadAtMap.steamrip = srAllSetting;}
 
       const rcAllSetting = await getAppSetting("all_read_at_recomp");
-      if (rcAllSetting) allReadAtMap.recomp = rcAllSetting;
+      if (rcAllSetting) {allReadAtMap.recomp = rcAllSetting;}
 
       const unreadSetting = await getAppSetting("explicitly_unread_posts");
       if (unreadSetting) {
@@ -3630,10 +3657,10 @@ export function markPostAsRead(
   date?: string,
   dataSource: "fitgirl" | "steamrip" | "recomp" = "fitgirl",
 ): boolean {
-  if (!id) return false;
+  if (!id) {return false;}
   const cleanId = String(id).trim();
   const compositeId = buildPostCompositeId(cleanId, date);
-  if (!compositeId) return false;
+  if (!compositeId) {return false;}
 
   explicitlyUnreadPostIdsSet.delete(compositeId);
   explicitlyUnreadPostIdsSet.delete(cleanId);
@@ -3767,7 +3794,7 @@ export function togglePostReadState(
 export async function markPostsAsReadBatch(
   posts: { id: string; date?: string }[],
 ): Promise<void> {
-  if (!posts || posts.length === 0) return;
+  if (!posts || posts.length === 0) {return;}
   const newIds: string[] = [];
   const now = new Date().toISOString();
   for (const p of posts) {
@@ -3836,9 +3863,6 @@ export async function markAllRepacksAsRead(
   allReadAtMap[dataSource] = now;
   explicitlyUnreadPostIdsSet.clear();
 
-  datasetStatsCache.delete(dataSource === "fitgirl" ? "repacks" : dataSource);
-  matchingCandidatesCache.clear();
-  paginationCache.clear();
   persistCachedReadPostsToLocalStorage();
   invalidateRepacksCache();
 
@@ -4086,10 +4110,10 @@ export async function getRepackDatasetStats(
 const PINNED_GAMES_KEY = "fitrepacks_pinned_game_ids";
 
 export function getPinnedGameIds(): string[] {
-  if (typeof window === "undefined") return [];
+  if (typeof window === "undefined") {return [];}
   try {
     const raw = localStorage.getItem(PINNED_GAMES_KEY);
-    if (!raw) return [];
+    if (!raw) {return [];}
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
   } catch {
@@ -4098,7 +4122,7 @@ export function getPinnedGameIds(): string[] {
 }
 
 export function togglePinnedGame(id: string): string[] {
-  if (typeof window === "undefined") return [];
+  if (typeof window === "undefined") {return [];}
   const current = getPinnedGameIds();
   const next = current.includes(id)
     ? current.filter((x) => x !== id)
@@ -4126,7 +4150,7 @@ export async function getMapFoundLocationIds(
   gameSlug: string,
   mapSlug: string = "default",
 ): Promise<string[]> {
-  if (!gameSlug) return [];
+  if (!gameSlug) {return [];}
   const cleanGame = gameSlug.trim().toLowerCase();
   const cleanMap = (mapSlug || "default").trim().toLowerCase();
 
@@ -4172,7 +4196,7 @@ export async function toggleMapFoundLocation(
   locationId: string | number,
   isFound: boolean,
 ): Promise<void> {
-  if (!gameSlug || locationId == null) return;
+  if (!gameSlug || locationId == null) {return;}
   const cleanGame = gameSlug.trim().toLowerCase();
   const cleanMap = (mapSlug || "default").trim().toLowerCase();
   const locIdStr = String(locationId).trim();
@@ -4200,7 +4224,7 @@ export async function setMapFoundLocationsBatch(
   mapSlug: string = "default",
   locationIds: (string | number)[],
 ): Promise<void> {
-  if (!gameSlug) return;
+  if (!gameSlug) {return;}
   const cleanGame = gameSlug.trim().toLowerCase();
   const cleanMap = (mapSlug || "default").trim().toLowerCase();
 
@@ -4229,7 +4253,7 @@ export async function clearMapFoundLocations(
   gameSlug: string,
   mapSlug: string = "default",
 ): Promise<void> {
-  if (!gameSlug) return;
+  if (!gameSlug) {return;}
   const cleanGame = gameSlug.trim().toLowerCase();
   const cleanMap = (mapSlug || "default").trim().toLowerCase();
 

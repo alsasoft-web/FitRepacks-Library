@@ -5,7 +5,7 @@ const RECOMP_CACHE_KEY = "recomp_catalog_cache_v4";
 const RECOMP_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 function toRecompThumbUrl(url?: string): string {
-  if (!url) return "";
+  if (!url) {return "";}
   const prefix = "https://recompstore.com/media/";
   if (url.startsWith(prefix)) {
     const file = url.slice(prefix.length).split("?")[0];
@@ -56,7 +56,7 @@ let inMemoryFetchedAt = 0;
 let inFlightFetch: Promise<RepackPost[]> | null = null;
 
 function resolveRepoUrl(repo?: string): string {
-  if (!repo) return "https://recomplauncher.com/";
+  if (!repo) {return "https://recomplauncher.com/";}
   const trimmed = repo.trim();
   if (trimmed.startsWith("gitlab:")) {
     return `https://gitlab.com/${trimmed.slice("gitlab:".length)}`;
@@ -116,7 +116,7 @@ export async function searchRomsFunArchive(
   origin?: string,
 ): Promise<{ name: string; url: string }[]> {
   const cleanQuery = gameName.replace(/\s+Recomp(iled)?$/i, "").trim();
-  if (!cleanQuery) return [];
+  if (!cleanQuery) {return [];}
 
   const apiUrl = `https://romsfun.com/api/search?s=${encodeURIComponent(cleanQuery)}`;
   let items: Array<{ title?: string; url?: string; console?: string; size?: string }> = [];
@@ -130,20 +130,20 @@ export async function searchRomsFunArchive(
       });
       if (resp.status >= 200 && resp.status < 300 && resp.body) {
         const parsed = JSON.parse(resp.body);
-        if (Array.isArray(parsed)) items = parsed;
+        if (Array.isArray(parsed)) {items = parsed;}
       }
     } else {
       const resp = await fetch(apiUrl, { headers: { Accept: "application/json" } });
       if (resp.ok) {
         const parsed = await resp.json();
-        if (Array.isArray(parsed)) items = parsed;
+        if (Array.isArray(parsed)) {items = parsed;}
       }
     }
   } catch (err) {
     console.warn("[RomsFun] search failed:", err);
   }
 
-  if (items.length === 0) return [];
+  if (items.length === 0) {return [];}
 
   const originKey = (origin || "").trim().toLowerCase().replace(/[\s_-]+/g, "");
   const consolePattern = ROMSFUN_CONSOLE_PATTERNS[originKey];
@@ -182,7 +182,7 @@ function buildRomArchiveLinks(app: RecompRawApp, fallbackTitle: string): { name:
 }
 
 function mapRecompAppToPost(app: RecompRawApp): RepackPost | null {
-  if (!app || !app.id) return null;
+  if (!app || !app.id) {return null;}
   const id = `recomp-${app.id}`;
   const repoUrl = resolveRepoUrl(app.repo);
   const title = (app.name || app.game || app.id).trim();
@@ -195,18 +195,18 @@ function mapRecompAppToPost(app: RecompRawApp): RepackPost | null {
         : [];
 
   const descParts: string[] = [];
-  if (app.blurb) descParts.push(app.blurb.trim());
+  if (app.blurb) {descParts.push(app.blurb.trim());}
   const summary = app.about?.summary || app.description;
   if (summary && summary.trim() !== app.blurb?.trim()) {
     descParts.push(summary.trim());
   }
-  if (app.needs) descParts.push(`Requires: ${app.needs.trim()}`);
+  if (app.needs) {descParts.push(`Requires: ${app.needs.trim()}`);}
   if (Array.isArray(app.features) && app.features.length > 0) {
     descParts.push(`Features:\n• ${app.features.join("\n• ")}`);
   }
 
   const screenshots: string[] = [];
-  if (app.hero && typeof app.hero === "string") screenshots.push(app.hero);
+  if (app.hero && typeof app.hero === "string") {screenshots.push(app.hero);}
   if (Array.isArray(app.media)) {
     for (const item of app.media) {
       if (typeof item === "string" && item.startsWith("http") && !screenshots.includes(item)) {
@@ -321,10 +321,10 @@ async function fetchRecompCatalogJson(): Promise<any> {
 }
 
 function loadFromLocalStorageCache(): { posts: RepackPost[]; fetchedAt: number } | null {
-  if (typeof window === "undefined") return null;
+  if (typeof window === "undefined") {return null;}
   try {
     const raw = localStorage.getItem(RECOMP_CACHE_KEY);
-    if (!raw) return null;
+    if (!raw) {return null;}
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed?.posts) && typeof parsed?.fetchedAt === "number") {
       return parsed;
@@ -336,7 +336,7 @@ function loadFromLocalStorageCache(): { posts: RepackPost[]; fetchedAt: number }
 }
 
 function saveToLocalStorageCache(posts: RepackPost[], fetchedAt: number): void {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined") {return;}
   try {
     localStorage.setItem(RECOMP_CACHE_KEY, JSON.stringify({ posts, fetchedAt }));
   } catch {
@@ -377,7 +377,7 @@ export async function getRecompCatalogPosts(forceRefresh = false): Promise<Repac
       saveToLocalStorageCache(posts, fetchedAt);
       return posts;
     } catch (err) {
-      if (inMemoryPosts) return inMemoryPosts;
+      if (inMemoryPosts) {return inMemoryPosts;}
       const disk = loadFromLocalStorageCache();
       if (disk) {
         inMemoryPosts = disk.posts;

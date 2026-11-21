@@ -228,7 +228,7 @@ export function MapGamepadController({
   navigableItemsRef.current = navigableItems;
 
   const showToast = (msg: string) => {
-    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    if (toastTimeoutRef.current) {clearTimeout(toastTimeoutRef.current);}
     setToastMessage(msg);
     toastTimeoutRef.current = setTimeout(() => {
       setToastMessage(null);
@@ -307,7 +307,7 @@ export function MapGamepadController({
 
   // Keep targetZoom in sync with Leaflet map events
   useEffect(() => {
-    if (!map) return;
+    if (!map) {return;}
     targetZoomRef.current = map.getZoom();
 
     const syncZoom = () => {
@@ -325,7 +325,7 @@ export function MapGamepadController({
 
   // Gamepad Polling and Frame Loop (Pan, Zoom, Target Snap, Button Clicks)
   useEffect(() => {
-    if (!map) return;
+    if (!map) {return;}
 
     let animFrameId: number;
 
@@ -602,14 +602,14 @@ export function MapGamepadController({
           if (isPressed(13)) {
             if (isImageSelectedRef.current) {
               isImageSelectedRef.current = false;
-              if (mediaEl) mediaEl.classList.remove("is-gamepad-selected");
+              if (mediaEl) {mediaEl.classList.remove("is-gamepad-selected");}
             } else if (scrollContainer) {
               scrollContainer.scrollTop += 24;
             }
           } else if (buttons[13]?.pressed) {
             if (isImageSelectedRef.current) {
               isImageSelectedRef.current = false;
-              if (mediaEl) mediaEl.classList.remove("is-gamepad-selected");
+              if (mediaEl) {mediaEl.classList.remove("is-gamepad-selected");}
             }
             if (scrollContainer) {
               scrollContainer.scrollTop += 8;
@@ -692,10 +692,10 @@ export function MapGamepadController({
         const allItems = allMarkersRef.current || [];
         for (let i = 0; i < allItems.length; i++) {
           const item = allItems[i];
-          if (!item.marker || !map.hasLayer(item.marker)) continue;
+          if (!item.marker || !map.hasLayer(item.marker)) {continue;}
 
           try {
-            if (!(map as any)._mapPane || (map as any)._animatingZoom) break;
+            if (!(map as any)._mapPane || (map as any)._animatingZoom) {break;}
             const pt = map.latLngToContainerPoint(item.marker.getLatLng());
 
             // Calculate visual center of marker pin (above the bottom tip anchor point)
@@ -740,7 +740,7 @@ export function MapGamepadController({
 
         if (moveMagnitude > 0.05) {
           const applyCurve = (v: number) =>
-            Math.sign(v) * Math.pow(Math.abs(v), 1.4);
+            Math.sign(v) * Math.abs(v) ** 1.4;
 
           // When near a marker and moving gently, apply sticky friction to make locking easy
           const friction = closestItem && moveMagnitude < 0.65 ? 0.45 : 1.0;
@@ -781,9 +781,9 @@ export function MapGamepadController({
                   let allowedDx = panDx;
                   let allowedDy = panDy;
                   const testX = map.unproject(currentPt.add([panDx, 0]));
-                  if (!allowedBounds.contains(testX)) allowedDx = 0;
+                  if (!allowedBounds.contains(testX)) {allowedDx = 0;}
                   const testY = map.unproject(currentPt.add([0, panDy]));
-                  if (!allowedBounds.contains(testY)) allowedDy = 0;
+                  if (!allowedBounds.contains(testY)) {allowedDy = 0;}
 
                   if (allowedDx !== 0 || allowedDy !== 0) {
                     map.panBy([allowedDx, allowedDy], { animate: false });
@@ -941,7 +941,7 @@ export function MapGamepadController({
           if (isImageSelectedRef.current) {
             isImageSelectedRef.current = false;
             const mediaEl = popupEl?.querySelector<HTMLElement>(".popup-media-container");
-            if (mediaEl) mediaEl.classList.remove("is-gamepad-selected");
+            if (mediaEl) {mediaEl.classList.remove("is-gamepad-selected");}
           } else {
             selectedRefIndexRef.current = -1;
             const refBtns = document.querySelectorAll(".leaflet-popup .loc-ref-btn");

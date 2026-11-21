@@ -7,7 +7,7 @@ const pendingSaves = new Map<string, string>();
 let saveTimeout: ReturnType<typeof setTimeout> | null = null;
 
 async function flushPendingSaves(): Promise<void> {
-  if (pendingSaves.size === 0) return;
+  if (pendingSaves.size === 0) {return;}
   const entries = Array.from(pendingSaves.entries());
   pendingSaves.clear();
   for (const [key, val] of entries) {
@@ -32,7 +32,7 @@ const sqliteStorage: StateStorage = {
   },
   setItem: async (name: string, value: string): Promise<void> => {
     pendingSaves.set(name, value);
-    if (saveTimeout) clearTimeout(saveTimeout);
+    if (saveTimeout) {clearTimeout(saveTimeout);}
     saveTimeout = setTimeout(flushPendingSaves, 1000);
   },
   removeItem: async (name: string): Promise<void> => {
@@ -107,7 +107,7 @@ export interface MagnetDownloadItem {
 }
 
 export function extractHashFromMagnet(url?: string): string {
-  if (!url) return "";
+  if (!url) {return "";}
   const match = url.match(/xt=urn:btih:([a-zA-Z0-9]+)/i);
   return match ? match[1].toLowerCase() : "";
 }
@@ -239,12 +239,12 @@ export const useDownloadQueueStore = create<DownloadQueueState>()(
       toggleFileSelection: (gameId, fileId) =>
         set((state) => ({
           queuedGames: state.queuedGames.map((game) => {
-            if (game.id !== gameId) return game;
+            if (game.id !== gameId) {return game;}
             return {
               ...game,
               files: game.files.map((file) => {
-                if (file.id !== fileId) return file;
-                if (!file.isOptional) return file; // Cannot deselect main files
+                if (file.id !== fileId) {return file;}
+                if (!file.isOptional) {return file;} // Cannot deselect main files
                 return {
                   ...file,
                   isSelected: !file.isSelected,
@@ -258,12 +258,12 @@ export const useDownloadQueueStore = create<DownloadQueueState>()(
       moveFileOrder: (gameId, fileId, direction) =>
         set((state) => ({
           queuedGames: state.queuedGames.map((game) => {
-            if (game.id !== gameId) return game;
+            if (game.id !== gameId) {return game;}
             const index = game.files.findIndex((f) => f.id === fileId);
-            if (index < 0) return game;
+            if (index < 0) {return game;}
 
             const newIndex = direction === "up" ? index - 1 : index + 1;
-            if (newIndex < 0 || newIndex >= game.files.length) return game;
+            if (newIndex < 0 || newIndex >= game.files.length) {return game;}
 
             const newFiles = [...game.files];
             const [moved] = newFiles.splice(index, 1);
@@ -280,11 +280,11 @@ export const useDownloadQueueStore = create<DownloadQueueState>()(
       updateFileStatus: (gameId, fileId, status, directUrl) =>
         set((state) => ({
           queuedGames: state.queuedGames.map((game) => {
-            if (game.id !== gameId) return game;
+            if (game.id !== gameId) {return game;}
             return {
               ...game,
               files: game.files.map((file) => {
-                if (file.id !== fileId) return file;
+                if (file.id !== fileId) {return file;}
                 return {
                   ...file,
                   status,
@@ -298,7 +298,7 @@ export const useDownloadQueueStore = create<DownloadQueueState>()(
       toggleGamePause: (gameId) =>
         set((state) => ({
           queuedGames: state.queuedGames.map((game) => {
-            if (game.id !== gameId) return game;
+            if (game.id !== gameId) {return game;}
             return {
               ...game,
               status: game.status === "downloading" ? "paused" : "downloading",
@@ -385,7 +385,7 @@ export const useDownloadQueueStore = create<DownloadQueueState>()(
         let freedSlot = false;
         set((state) => ({
           magnetDownloads: state.magnetDownloads.map((d) => {
-            if (d.id !== id) return d;
+            if (d.id !== id) {return d;}
             const isCurrentlyActive =
               d.status === "downloading" ||
               d.status === "checking" ||
@@ -404,7 +404,7 @@ export const useDownloadQueueStore = create<DownloadQueueState>()(
                 f.status === "completed" ||
                 f.status === "skipped"
               )
-                return f;
+                {return f;}
               return {
                 ...f,
                 status:
@@ -430,12 +430,12 @@ export const useDownloadQueueStore = create<DownloadQueueState>()(
       toggleMagnetFileSelection: (downloadId, fileId) =>
         set((state) => ({
           magnetDownloads: state.magnetDownloads.map((dl) => {
-            if (dl.id !== downloadId || !dl.files) return dl;
+            if (dl.id !== downloadId || !dl.files) {return dl;}
             return {
               ...dl,
               files: dl.files.map((f) => {
-                if (f.id !== fileId) return f;
-                if (!f.isOptional) return f;
+                if (f.id !== fileId) {return f;}
+                if (!f.isOptional) {return f;}
                 return {
                   ...f,
                   isSelected: !f.isSelected,
@@ -466,7 +466,7 @@ export const useDownloadQueueStore = create<DownloadQueueState>()(
               return false;
             });
 
-            if (!liveMatch) return dl;
+            if (!liveMatch) {return dl;}
 
             const isParentPaused =
               dl.status === "paused" || liveMatch.status === "paused";
@@ -622,7 +622,7 @@ export const useDownloadQueueStore = create<DownloadQueueState>()(
 /** Auto-resume active downloads in the Rust BitTorrent engine on app restart */
 export async function resumeActiveDownloadsOnStartup(): Promise<void> {
   if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window))
-    return;
+    {return;}
 
   const state = useDownloadQueueStore.getState();
 
@@ -632,13 +632,13 @@ export async function resumeActiveDownloadsOnStartup(): Promise<void> {
   const dedupedDownloads = state.magnetDownloads.filter((dl) => {
     const hash = (dl.infoHash || extractHashFromMagnet(dl.magnetUrl))?.toLowerCase().trim();
     if (hash) {
-      if (seenHashes.has(hash)) return false;
+      if (seenHashes.has(hash)) {return false;}
       seenHashes.add(hash);
       return true;
     }
     const cleanTitle = dl.title?.trim().toLowerCase();
     if (cleanTitle) {
-      if (seenTitles.has(cleanTitle)) return false;
+      if (seenTitles.has(cleanTitle)) {return false;}
       seenTitles.add(cleanTitle);
       return true;
     }
@@ -653,14 +653,14 @@ export async function resumeActiveDownloadsOnStartup(): Promise<void> {
     (dl) => dl.status === "downloading" && dl.magnetUrl,
   );
 
-  if (activeDownloads.length === 0) return;
+  if (activeDownloads.length === 0) {return;}
 
   try {
     const { invoke } = await import("@tauri-apps/api/core");
     for (const dl of activeDownloads) {
       const selectedIndices: number[] = [];
       dl.files?.forEach((f, idx) => {
-        if (f.isSelected) selectedIndices.push(idx);
+        if (f.isSelected) {selectedIndices.push(idx);}
       });
 
       try {
@@ -700,7 +700,7 @@ export async function resumeActiveDownloadsOnStartup(): Promise<void> {
 /** Auto-process download queue based on max concurrent torrents setting */
 export async function checkAndProcessDownloadQueue(): Promise<void> {
   if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window))
-    return;
+    {return;}
 
   let maxLimit = 1;
   try {
@@ -721,13 +721,13 @@ export async function checkAndProcessDownloadQueue(): Promise<void> {
     (d) => d.status === "downloading",
   ).length;
 
-  if (activeCount >= maxLimit) return;
+  if (activeCount >= maxLimit) {return;}
 
   const queuedItem = state.magnetDownloads.find(
     (d) => d.status === "queued" && d.progress < 100 && d.magnetUrl,
   );
 
-  if (!queuedItem) return;
+  if (!queuedItem) {return;}
 
   try {
     const { invoke } = await import("@tauri-apps/api/core");
@@ -741,7 +741,7 @@ export async function checkAndProcessDownloadQueue(): Promise<void> {
     if (!resumed && queuedItem.magnetUrl) {
       const selectedIndices: number[] = [];
       queuedItem.files?.forEach((f, idx) => {
-        if (f.isSelected) selectedIndices.push(idx);
+        if (f.isSelected) {selectedIndices.push(idx);}
       });
       const newHash = await invoke<string>("start_torrent_download", {
         magnetUrl: queuedItem.magnetUrl,
@@ -779,7 +779,7 @@ export async function toggleAllDownloadsPause(): Promise<void> {
   const incomplete = state.magnetDownloads.filter(
     (d) => d.status !== "completed",
   );
-  if (incomplete.length === 0) return;
+  if (incomplete.length === 0) {return;}
 
   const hasActive = incomplete.some((d) => d.status === "downloading");
 
@@ -808,7 +808,7 @@ export async function toggleAllDownloadsPause(): Promise<void> {
           if (!resumed && dl.magnetUrl) {
             const selectedIndices: number[] = [];
             dl.files?.forEach((f, idx) => {
-              if (f.isSelected) selectedIndices.push(idx);
+              if (f.isSelected) {selectedIndices.push(idx);}
             });
             const newHash = await invoke<string>("start_torrent_download", {
               magnetUrl: dl.magnetUrl,
@@ -840,7 +840,7 @@ export async function toggleAllDownloadsPause(): Promise<void> {
 }
 
 function formatDirectBytes(bytes: number): string {
-  if (!bytes || bytes <= 0) return "0 MB";
+  if (!bytes || bytes <= 0) {return "0 MB";}
   const mb = bytes / (1024 * 1024);
   return mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${mb.toFixed(1)} MB`;
 }
@@ -848,8 +848,8 @@ function formatDirectBytes(bytes: number): string {
 let directListenerAttached = false;
 
 async function ensureDirectDownloadListener(): Promise<void> {
-  if (directListenerAttached) return;
-  if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) return;
+  if (directListenerAttached) {return;}
+  if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {return;}
   directListenerAttached = true;
   try {
     const { listen } = await import("@tauri-apps/api/event");
@@ -867,7 +867,7 @@ async function ensureDirectDownloadListener(): Promise<void> {
       const p = ev.payload;
       useDownloadQueueStore.setState((prev) => ({
         magnetDownloads: prev.magnetDownloads.map((item) => {
-          if (item.id !== p.download_id) return item;
+          if (item.id !== p.download_id) {return item;}
           const nextStatus: MagnetDownloadItem["status"] =
             p.status === "completed"
               ? "completed"

@@ -74,9 +74,9 @@ const GameMapGridCard = React.memo(function GameMapGridCard({
 
   const imageCandidates = useMemo(() => {
     const list: string[] = [];
-    if (primaryMap.game_card && primaryMap.game_card.startsWith("http")) list.push(primaryMap.game_card);
-    if (primaryMap.game_image && primaryMap.game_image.startsWith("http")) list.push(primaryMap.game_image);
-    if (primaryMap.thumbnail_url && primaryMap.thumbnail_url.startsWith("http")) list.push(primaryMap.thumbnail_url);
+    if (primaryMap.game_card && primaryMap.game_card.startsWith("http")) {list.push(primaryMap.game_card);}
+    if (primaryMap.game_image && primaryMap.game_image.startsWith("http")) {list.push(primaryMap.game_image);}
+    if (primaryMap.thumbnail_url && primaryMap.thumbnail_url.startsWith("http")) {list.push(primaryMap.thumbnail_url);}
     list.push(`https://media.mapgenie.io/v2/assets/prod/games/${gameSlug}/gamecard.jpg`);
     list.push(`https://media.mapgenie.io/v2/assets/prod/games/${gameSlug}/preview.jpg`);
     list.push(`https://cdn.mapgenie.io/images/games/${gameSlug}/gamecard.jpg`);
@@ -99,7 +99,7 @@ const GameMapGridCard = React.memo(function GameMapGridCard({
   const hasMultipleMaps = maps.length > 1;
 
   const isAnyMapUpdated = useMemo(() => {
-    if (!updatedMaps) return false;
+    if (!updatedMaps) {return false;}
     return maps.some((m) => {
       const s = m.map_slug || "default";
       return updatedMaps.has(`${gameSlug}_${s}`);
@@ -107,7 +107,7 @@ const GameMapGridCard = React.memo(function GameMapGridCard({
   }, [maps, gameSlug, updatedMaps]);
 
   const isAnyMapDownloaded = useMemo(() => {
-    if (!downloadedMaps) return false;
+    if (!downloadedMaps) {return false;}
     return maps.some((m) => {
       const s = m.map_slug || "default";
       return downloadedMaps.includes(`${gameSlug}_${s}`);
@@ -390,10 +390,10 @@ export function MapsBrowserModal({ opened, onClose, onSelectMap }: MapsBrowserMo
   const [updatedMaps, setUpdatedMaps] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    if (!opened) return;
+    if (!opened) {return;}
     let isMounted = true;
     listOfflineMaps().then(async (list) => {
-      if (!isMounted) return;
+      if (!isMounted) {return;}
       setDownloadedMaps(list);
 
       const updates = new Set<string>();
@@ -452,7 +452,7 @@ export function MapsBrowserModal({ opened, onClose, onSelectMap }: MapsBrowserMo
 
   // Filter groups by search query
   const filteredGroups = useMemo(() => {
-    if (!search.trim()) return gameGroups;
+    if (!search.trim()) {return gameGroups;}
     const q = search.toLowerCase().trim();
     return gameGroups.filter((g) => {
       return (

@@ -98,7 +98,7 @@ export const EditGameModal: React.FC<EditGameModalProps> = ({
   };
 
   const handleAutoDetectVersion = async () => {
-    if (!exePath) return;
+    if (!exePath) {return;}
     const autoVer = await detectInstalledGameVersion(exePath);
     if (autoVer) {
       setVersion(autoVer);

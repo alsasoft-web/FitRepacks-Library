@@ -35,7 +35,7 @@ export const HoldToConfirmButton: React.FC<HoldToConfirmButtonProps> = ({
     startTimeRef.current = Date.now();
 
     const updateProgress = () => {
-      if (!startTimeRef.current) return;
+      if (!startTimeRef.current) {return;}
       const elapsed = Date.now() - startTimeRef.current;
       const pct = Math.min(100, (elapsed / holdDurationMs) * 100);
       setProgress(pct);

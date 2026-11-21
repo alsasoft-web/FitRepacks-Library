@@ -61,11 +61,6 @@ function getFallbackCover(title: string): string {
   return `https://placehold.co/600x800/0f172a/3b82f6?text=${encoded}`;
 }
 
-function getFallbackBanner(title: string): string {
-  const encoded = encodeURIComponent(title || "Game");
-  return `https://placehold.co/1920x1080/020617/1e293b?text=${encoded}`;
-}
-
 interface RawIgdbGame {
   id: number;
   name: string;
@@ -101,7 +96,7 @@ function parseIgdbResponse(rawGames: RawIgdbGame[]): IgdbGameMetadata[] {
 
     const alternateCovers: string[] = [];
     if (coverUrl && !coverUrl.includes("placehold.co"))
-      alternateCovers.push(coverUrl);
+      {alternateCovers.push(coverUrl);}
 
     // Repurpose screenshots and artworks as alternate covers
     g.artworks?.forEach((a) => {
@@ -156,7 +151,7 @@ function parseIgdbResponse(rawGames: RawIgdbGame[]): IgdbGameMetadata[] {
  * - PRESERVES game editions ("Definitive Edition", "Deluxe Edition", "GOTY", "Remastered", etc.)
  */
 export function cleanGameTitle(rawTitle: string): string {
-  if (!rawTitle) return "";
+  if (!rawTitle) {return "";}
   let clean = rawTitle;
 
   // 1. Remove bracketed / parenthesized repack tags
@@ -196,14 +191,14 @@ export function cleanGameTitle(rawTitle: string): string {
   clean = clean.replace(/\+\s*All\s*Expansions?\b/gi, "");
 
   // 4. Remove build numbers with preceding comma, dash or whitespace (, Build 24657362, - Build 123)
-  clean = clean.replace(/[,–—\-]?\s*\bBuild[\s#.:_-]*\d+\b/gi, "");
+  clean = clean.replace(/[,–—-]?\s*\bBuild[\s#.:_-]*\d+\b/gi, "");
 
   // 5. Remove version tags (, v1.0.4, - v2.12, , v2024.03.15, - v.0210429.72w-cb)
-  clean = clean.replace(/[,–—\-]\s*\b(?:v|ver\.?)\s*\d+[a-z0-9._-]*/gi, "");
+  clean = clean.replace(/[,–—-]\s*\b(?:v|ver\.?)\s*\d+[a-z0-9._-]*/gi, "");
   clean = clean.replace(/\b(?:v|ver\.?)\s*\d+(?:\.\d+)+[a-z0-9._-]*/gi, "");
 
   // 6. Remove update / hotfix / patch numbers (, Update 12, - Hotfix 3)
-  clean = clean.replace(/[,–—\-]?\s*\b(?:Update|Hotfix|Patch)\s*#?\d+\b/gi, "");
+  clean = clean.replace(/[,–—-]?\s*\b(?:Update|Hotfix|Patch)\s*#?\d+\b/gi, "");
 
   // 7. Remove standalone repack / source tags
   clean = clean.replace(
@@ -217,7 +212,7 @@ export function cleanGameTitle(rawTitle: string): string {
   clean = clean.replace(/\{\s*\}/g, "");
 
   // 9. Remove any trailing or leading dangling brackets, commas, pluses, dashes, slashes, or colons
-  clean = clean.replace(/[,\-+–—:/\\|(\[{]+\s*$/g, "").trim();
+  clean = clean.replace(/[,\-+–—:/\\|([{]+\s*$/g, "").trim();
   clean = clean.replace(/^[,\-+–—:/\\|)}\]]+\s*/g, "").trim();
   clean = clean.replace(/\(\s*\)/g, "").replace(/\[\s*\]/g, "");
   clean = clean.replace(/\s+/g, " ");
@@ -285,9 +280,90 @@ export async function searchIgdbMetadata(
   }
 }
 
-async function fetchBestMetadata(
-  gameTitle: string,
-): Promise<IgdbGameMetadata | null> {
-  const matches = await searchIgdbMetadata(gameTitle);
-  return matches.length > 0 ? matches[0] : null;
+export async function fetchTopIgdbGames(
+  limit = 10,
+): Promise<IgdbGameMetadata[]> {
+  const currentYear = new Date().getUTCFullYear();
+  const cacheKey = `__top_igdb_games_${currentYear}_${limit}__`;
+  if (igdbMemoryCache.has(cacheKey)) {
+    return igdbMemoryCache.get(cacheKey)!;
+  }
+
+  const { clientId } = getCredentials();
+  const token = await getAccessToken();
+  if (!token) {
+    return [];
+  }
+
+  const yearStartSec = Math.floor(Date.UTC(currentYear, 0, 1) / 1000);
+  const nowSec = Math.floor(Date.now() / 1000);
+  const fields =
+    "name, summary, storyline, rating, first_release_date, cover.image_id, screenshots.image_id, artworks.image_id, videos.video_id, genres.name, involved_companies.company.name, involved_companies.developer";
+  const bodyQuery = `where first_release_date >= ${yearStartSec} & first_release_date <= ${nowSec} & game_type = 0 & total_rating >= 75 & total_rating_count >= 40 & cover != null & screenshots != null; sort total_rating desc; fields ${fields}; limit ${limit};`;
+
+  try {
+    const response = await httpFetch(IGDB_GAMES_URL, {
+      method: "POST",
+      headers: {
+        "Client-ID": clientId,
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "text/plain",
+      },
+      body: bodyQuery,
+    });
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const rawGames: RawIgdbGame[] = await response.json();
+    const parsed = parseIgdbResponse(rawGames || []);
+    igdbMemoryCache.set(cacheKey, parsed);
+    return parsed;
+  } catch (err) {
+    console.error("IGDB top games exception:", err);
+    return [];
+  }
+}
+
+export async function fetchUpcomingAnticipatedIgdbGames(
+  limit = 10,
+): Promise<IgdbGameMetadata[]> {
+  const cacheKey = `__upcoming_igdb_games_${limit}__`;
+  if (igdbMemoryCache.has(cacheKey)) {
+    return igdbMemoryCache.get(cacheKey)!;
+  }
+
+  const { clientId } = getCredentials();
+  const token = await getAccessToken();
+  if (!token) {
+    return [];
+  }
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  const bodyQuery = `where first_release_date > ${nowSec} & hypes > 0 & cover != null; sort hypes desc; fields name, summary, storyline, rating, first_release_date, cover.image_id, screenshots.image_id, artworks.image_id, videos.video_id, genres.name, involved_companies.company.name, involved_companies.developer; limit ${limit};`;
+
+  try {
+    const response = await httpFetch(IGDB_GAMES_URL, {
+      method: "POST",
+      headers: {
+        "Client-ID": clientId,
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "text/plain",
+      },
+      body: bodyQuery,
+    });
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const rawGames: RawIgdbGame[] = await response.json();
+    const parsed = parseIgdbResponse(rawGames || []);
+    igdbMemoryCache.set(cacheKey, parsed);
+    return parsed;
+  } catch (err) {
+    console.error("IGDB upcoming games exception:", err);
+    return [];
+  }
 }

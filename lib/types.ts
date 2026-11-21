@@ -29,7 +29,7 @@ export type SortOption =
  * Helper to parse file size string (e.g. "45.2 GB", "850 MB", "12.4 GB ~ 28.1 GB") to MB
  */
 export function parseSizeToMB(sizeStr?: string | null): number {
-  if (!sizeStr) return 0;
+  if (!sizeStr) {return 0;}
   const matches = Array.from(
     sizeStr.matchAll(/([\d.,]+)\s*(TB|GB|MB|KB|B)\b/gi)
   );
@@ -54,15 +54,15 @@ export function parseSizeToMB(sizeStr?: string | null): number {
       } else {
         num = parseFloat(cleaned);
       }
-      if (isNaN(num)) continue;
+      if (isNaN(num)) {continue;}
       const unit = m[2].toUpperCase();
       let mb = num;
-      if (unit === "TB") mb = num * 1024 * 1024;
-      else if (unit === "GB") mb = num * 1024;
-      else if (unit === "MB") mb = num;
-      else if (unit === "KB") mb = num / 1024;
-      else if (unit === "B") mb = num / (1024 * 1024);
-      if (mb > maxMB) maxMB = mb;
+      if (unit === "TB") {mb = num * 1024 * 1024;}
+      else if (unit === "GB") {mb = num * 1024;}
+      else if (unit === "MB") {mb = num;}
+      else if (unit === "KB") {mb = num / 1024;}
+      else if (unit === "B") {mb = num / (1024 * 1024);}
+      if (mb > maxMB) {maxMB = mb;}
     }
     return maxMB;
   }

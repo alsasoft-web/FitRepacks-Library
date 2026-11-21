@@ -631,15 +631,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             try {
               const parsed = JSON.parse(savedTorrentSettings);
               if (typeof parsed.downloadLimitKbps === "number")
-                setDownloadLimit(parsed.downloadLimitKbps);
+                {setDownloadLimit(parsed.downloadLimitKbps);}
               if (typeof parsed.uploadLimitKbps === "number")
-                setUploadLimit(parsed.uploadLimitKbps);
+                {setUploadLimit(parsed.uploadLimitKbps);}
               if (typeof parsed.maxActiveDownloads === "number")
-                setMaxActiveTorrents(parsed.maxActiveDownloads);
+                {setMaxActiveTorrents(parsed.maxActiveDownloads);}
               if (typeof parsed.seedAfterComplete === "boolean")
-                setSeedAfterComplete(parsed.seedAfterComplete);
+                {setSeedAfterComplete(parsed.seedAfterComplete);}
               if (typeof parsed.applyFolderCoverIcon === "boolean")
-                setApplyFolderCoverIcon(parsed.applyFolderCoverIcon);
+                {setApplyFolderCoverIcon(parsed.applyFolderCoverIcon);}
             } catch (_) {}
           }
         })
@@ -729,12 +729,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     key: K,
     value: import("../lib/db").TorrentSettings[K],
   ) => {
-    if (key === "downloadLimitKbps") setDownloadLimit(value as number);
-    if (key === "uploadLimitKbps") setUploadLimit(value as number);
-    if (key === "maxActiveDownloads") setMaxActiveTorrents(value as number);
-    if (key === "seedAfterComplete") setSeedAfterComplete(value as boolean);
+    if (key === "downloadLimitKbps") {setDownloadLimit(value as number);}
+    if (key === "uploadLimitKbps") {setUploadLimit(value as number);}
+    if (key === "maxActiveDownloads") {setMaxActiveTorrents(value as number);}
+    if (key === "seedAfterComplete") {setSeedAfterComplete(value as boolean);}
     if (key === "applyFolderCoverIcon")
-      setApplyFolderCoverIcon(value as boolean);
+      {setApplyFolderCoverIcon(value as boolean);}
 
     const updated = {
       downloadLimitKbps:
@@ -1839,7 +1839,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             ]}
                             value={overlayShortcutSettings.keyboardShortcut}
                             onChange={(val) => {
-                              if (val) updateOverlaySetting("keyboardShortcut", val);
+                              if (val) {updateOverlaySetting("keyboardShortcut", val);}
                             }}
                             size="xs"
                             radius="md"
@@ -1890,7 +1890,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             ]}
                             value={overlayShortcutSettings.controllerShortcut}
                             onChange={(val) => {
-                              if (val) updateOverlaySetting("controllerShortcut", val);
+                              if (val) {updateOverlaySetting("controllerShortcut", val);}
                             }}
                             size="xs"
                             radius="md"
@@ -2038,7 +2038,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       }
                       value={linuxSettings.preferredRunnerId}
                       onChange={(val) => {
-                        if (val) updateLinuxSetting("preferredRunnerId", val);
+                        if (val) {updateLinuxSetting("preferredRunnerId", val);}
                       }}
                       style={{ flex: 1 }}
                       size="xs"

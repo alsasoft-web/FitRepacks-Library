@@ -18,6 +18,7 @@
     "sync:fitgirl": "node scripts/scrape_fitgirl.js --sync",
     "sync:fitgirl:full": "node scripts/scrape_fitgirl.js --sync --full",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "test:js": "node --test tests/*.test.mjs",
     "test:notification": "node scripts/test_notification.js"
   },
   "dependencies": {

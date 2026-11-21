@@ -42,11 +42,11 @@ export async function openMapOverlay(options: OpenMapOverlayOptions): Promise<bo
 
   // Web / Browser Fallback
   const queryParams = new URLSearchParams();
-  if (gameSlug) queryParams.set("gameSlug", gameSlug);
-  if (mapSlug) queryParams.set("mapSlug", mapSlug);
-  if (gameTitle) queryParams.set("gameTitle", gameTitle);
-  if (minZoom !== undefined) queryParams.set("minZoom", String(minZoom));
-  if (maxZoom !== undefined) queryParams.set("maxZoom", String(maxZoom));
+  if (gameSlug) {queryParams.set("gameSlug", gameSlug);}
+  if (mapSlug) {queryParams.set("mapSlug", mapSlug);}
+  if (gameTitle) {queryParams.set("gameTitle", gameTitle);}
+  if (minZoom !== undefined) {queryParams.set("minZoom", String(minZoom));}
+  if (maxZoom !== undefined) {queryParams.set("maxZoom", String(maxZoom));}
 
   const popupUrl = `/map-overlay?${queryParams.toString()}`;
   const popup = window.open(
@@ -116,7 +116,7 @@ export async function toggleMapOverlay(
         let targetMapSlug = options.mapSlug || "default";
         if (!options.mapSlug || options.mapSlug === "default") {
           const lastMap = getLastOpenedMapSlug(options.gameSlug);
-          if (lastMap) targetMapSlug = lastMap;
+          if (lastMap) {targetMapSlug = lastMap;}
         }
         await invoke("set_active_overlay_game", {
           gameSlug: options.gameSlug,

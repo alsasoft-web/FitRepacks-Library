@@ -3,7 +3,7 @@ import { isMediaOrBadDownloadUrl } from "../../lib/urlFilters";
 import { searchRomsFunArchive } from "../../lib/recompCatalog";
 import React, { useState, useEffect, useMemo } from "react";
 import {
-  Modal,
+  Drawer,
   Image,
   Title,
   Text,
@@ -47,17 +47,13 @@ import {
   Bookmark,
   ChevronDown,
   ChevronRight,
-  Trophy,
   Star,
   RotateCcw,
 } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
 import { RepackPost } from "../../lib/repackTypes";
 import {
   isWishlistedInStorage,
-  toggleWishlistRepack,
   isCompletedRepackInStorage,
-  toggleCompletedRepack,
   isFavoriteRepackInStorage,
   isInstalledRepackInStorage,
   toggleFavoriteRepack,
@@ -67,7 +63,6 @@ import {
   cleanGameTitle,
   extractGameVersion,
   getRiotpixels240pUrl,
-  getRiotpixelsFullResUrl,
 } from "../../lib/gameLinker";
 import { openInBrowser } from "../../lib/openUrl";
 import { startDirectDownload, useDownloadQueueStore } from "../../lib/downloadQueueStore";
@@ -75,7 +70,7 @@ import { ImageLightboxModal } from "../common/ImageLightboxModal";
 
 /** Extract a clean hoster display name from a URL or link name */
 function getHosterName(url: string, name?: string, isRecomp = false): string {
-  if (!isRecomp && isMediaOrBadDownloadUrl(url)) return "";
+  if (!isRecomp && isMediaOrBadDownloadUrl(url)) {return "";}
   if (!isRecomp && name && name.trim()) {
     const cleanName = name
       .replace(/\[\s*Use\s*(?:JDownloader2?|IDM)[^\]]*\]/gi, "")
@@ -88,45 +83,45 @@ function getHosterName(url: string, name?: string, isRecomp = false): string {
       !/^(download|link|mirror|click\s*here|here|part\s*\d+)$/i.test(cleanName) &&
       cleanName.length < 30
     ) {
-      if (cleanName.toLowerCase().includes("fileditch")) return "FileDitch";
-      if (cleanName.toLowerCase().includes("steamstatic")) return "";
+      if (cleanName.toLowerCase().includes("fileditch")) {return "FileDitch";}
+      if (cleanName.toLowerCase().includes("steamstatic")) {return "";}
       return cleanName;
     }
   }
   try {
     const parsed = new URL(url);
     const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
-    if (host.includes("github.com")) return "GitHub";
-    if (host.includes("gitlab.com")) return "GitLab";
-    if (host.includes("sourceforge.net")) return "SourceForge";
-    if (host.includes("recomplauncher.com")) return "RecompLauncher";
+    if (host.includes("github.com")) {return "GitHub";}
+    if (host.includes("gitlab.com")) {return "GitLab";}
+    if (host.includes("sourceforge.net")) {return "SourceForge";}
+    if (host.includes("recomplauncher.com")) {return "RecompLauncher";}
     if (host.includes("paste.fitgirl-repacks.site") || host.includes("pastefg.")) {
       return "FitGirl Pastebin";
     }
-    if (host.includes("megadb.net")) return "MegaDB";
-    if (host.includes("bzzhr.to") || host.includes("buzzheavier.")) return "BuzzHeavier";
-    if (host.includes("fileditch")) return "FileDitch";
-    if (host.includes("datanodes.to")) return "DataNodes";
-    if (host.includes("fuckingfast.co")) return "FuckingFast";
-    if (host.includes("filekeeper.net")) return "Filekeeper";
-    if (host.includes("krakenfiles.com")) return "KrakenFiles";
-    if (host.includes("multiupload.")) return "MultiUpload";
-    if (host.includes("qiwi.")) return "Qiwi";
-    if (host.includes("pixeldrain.com")) return "Pixeldrain";
-    if (host.includes("1fichier.com")) return "1fichier";
-    if (host.includes("gofile.io")) return "GoFile";
-    if (host.includes("mega.nz") || host.includes("mega.co.nz")) return "Mega";
-    if (host.includes("drive.google.com")) return "Google Drive";
-    if (host.includes("onedrive.") || host.includes("1drv.ms")) return "OneDrive";
-    if (host.includes("mediafire.com")) return "MediaFire";
-    if (host.includes("send.cm")) return "Send.cm";
-    if (host.includes("rapidgator.net")) return "Rapidgator";
-    if (host.includes("1337x.")) return "1337x";
-    if (host.includes("rutor.")) return "RuTor";
-    if (host.includes("tapochek.")) return "Tapochek";
-    if (host.includes("torrentgalaxy.")) return "TorrentGalaxy";
+    if (host.includes("megadb.net")) {return "MegaDB";}
+    if (host.includes("bzzhr.to") || host.includes("buzzheavier.")) {return "BuzzHeavier";}
+    if (host.includes("fileditch")) {return "FileDitch";}
+    if (host.includes("datanodes.to")) {return "DataNodes";}
+    if (host.includes("fuckingfast.co")) {return "FuckingFast";}
+    if (host.includes("filekeeper.net")) {return "Filekeeper";}
+    if (host.includes("krakenfiles.com")) {return "KrakenFiles";}
+    if (host.includes("multiupload.")) {return "MultiUpload";}
+    if (host.includes("qiwi.")) {return "Qiwi";}
+    if (host.includes("pixeldrain.com")) {return "Pixeldrain";}
+    if (host.includes("1fichier.com")) {return "1fichier";}
+    if (host.includes("gofile.io")) {return "GoFile";}
+    if (host.includes("mega.nz") || host.includes("mega.co.nz")) {return "Mega";}
+    if (host.includes("drive.google.com")) {return "Google Drive";}
+    if (host.includes("onedrive.") || host.includes("1drv.ms")) {return "OneDrive";}
+    if (host.includes("mediafire.com")) {return "MediaFire";}
+    if (host.includes("send.cm")) {return "Send.cm";}
+    if (host.includes("rapidgator.net")) {return "Rapidgator";}
+    if (host.includes("1337x.")) {return "1337x";}
+    if (host.includes("rutor.")) {return "RuTor";}
+    if (host.includes("tapochek.")) {return "Tapochek";}
+    if (host.includes("torrentgalaxy.")) {return "TorrentGalaxy";}
     const parts = host.split(".");
-    if (parts.length > 2) return parts.slice(-2).join(".");
+    if (parts.length > 2) {return parts.slice(-2).join(".");}
     return host;
   } catch {
     const m = url.match(/\/\/([^/]+)/);
@@ -161,7 +156,7 @@ interface HosterAccordionProps {
 const HosterAccordion: React.FC<HosterAccordionProps> = ({
   hoster,
   links,
-  onOpenTorrentDownload,
+  onOpenTorrentDownload: _onOpenTorrentDownload,
   postTitle,
   postCoverUrl,
   postRepackSize,
@@ -329,9 +324,9 @@ const HosterAccordion: React.FC<HosterAccordionProps> = ({
 
 // Helper to convert YouTube watch links or raw IDs to embed links
 const getYoutubeEmbedUrl = (urlOrId: string): string | null => {
-  if (!urlOrId) return null;
+  if (!urlOrId) {return null;}
   const str = String(urlOrId).trim();
-  if (!str) return null;
+  if (!str) {return null;}
 
   // Direct 11-char YouTube ID (e.g. from FitGirl / IGDB scrapers)
   if (/^[a-zA-Z0-9_-]{11}$/.test(str)) {
@@ -359,14 +354,14 @@ const getYoutubeEmbedUrl = (urlOrId: string): string | null => {
 
 // Helper to parse size string to numerical gigabytes for comparison
 const parseSizeGB = (sizeStr: string): number | null => {
-  if (!sizeStr) return null;
+  if (!sizeStr) {return null;}
   const match = sizeStr.match(/([\d.,]+)\s*(GB|MB|TB)/i);
-  if (!match) return null;
+  if (!match) {return null;}
   const num = parseFloat(match[1].replace(",", "."));
   const unit = match[2].toUpperCase();
-  if (isNaN(num)) return null;
-  if (unit === "TB") return num * 1024;
-  if (unit === "MB") return num / 1024;
+  if (isNaN(num)) {return null;}
+  if (unit === "TB") {return num * 1024;}
+  if (unit === "MB") {return num / 1024;}
   return num;
 };
 
@@ -386,7 +381,7 @@ export const RepackDetailModal: React.FC<RepackDetailModalProps> = ({
   const [isFavorite, setIsFavorite] = useState<boolean>(false);
 
   const sortedScreenshots = useMemo(() => {
-    if (!post?.screenshots || post.screenshots.length === 0) return [];
+    if (!post?.screenshots || post.screenshots.length === 0) {return [];}
     const allScreenshots = post.screenshots || [];
     const gifScreenshots = allScreenshots.filter(
       (s) => s && /\.gif(?:\?.*)?$/i.test(s),
@@ -416,7 +411,7 @@ export const RepackDetailModal: React.FC<RepackDetailModalProps> = ({
 
   useEffect(() => {
     setRomsFunLinks(null);
-    if (!opened || !post || post.source !== "recomp") return;
+    if (!opened || !post || post.source !== "recomp") {return;}
     let cancelled = false;
     searchRomsFunArchive(post.title, post.originalSize).then((links) => {
       if (!cancelled && links.length > 0) {
@@ -430,7 +425,7 @@ export const RepackDetailModal: React.FC<RepackDetailModalProps> = ({
 
   const effectiveMirrorGroups = useMemo(() => {
     const groups = post?.mirrorGroups ?? [];
-    if (!romsFunLinks || romsFunLinks.length === 0) return groups;
+    if (!romsFunLinks || romsFunLinks.length === 0) {return groups;}
     const hasArchiveGroup = groups.some((g) => g.category === "ROM / ISO Archive");
     if (hasArchiveGroup) {
       return groups.map((g) =>
@@ -440,7 +435,7 @@ export const RepackDetailModal: React.FC<RepackDetailModalProps> = ({
     return [...groups, { category: "ROM / ISO Archive", links: romsFunLinks }];
   }, [post?.mirrorGroups, romsFunLinks]);
 
-  if (!post) return null;
+  if (!post) {return null;}
 
   const handleToggleFavorite = () => {
     const newState = toggleFavoriteRepack(post.id, post);
@@ -449,27 +444,17 @@ export const RepackDetailModal: React.FC<RepackDetailModalProps> = ({
 
   const handleStatusChange = async (status: "installed" | "wishlist" | "completed" | "none") => {
     let targetStatus = status;
-    if (status === "installed" && isInstalled) targetStatus = "none";
-    else if (status === "wishlist" && isWishlisted) targetStatus = "none";
-    else if (status === "completed" && isCompleted) targetStatus = "none";
+    if (status === "installed" && isInstalled) {targetStatus = "none";}
+    else if (status === "wishlist" && isWishlisted) {targetStatus = "none";}
+    else if (status === "completed" && isCompleted) {targetStatus = "none";}
 
     let chosenExePath: string | undefined;
     if (targetStatus === "installed") {
       const picked = await promptForGameExePath(post.title);
-      if (picked) chosenExePath = picked;
+      if (picked) {chosenExePath = picked;}
     }
 
     setRepackStatus(post.id, post, targetStatus, chosenExePath);
-  };
-
-  const handleToggleWishlist = () => {
-    const newState = toggleWishlistRepack(post.id, post);
-    setIsWishlisted(newState);
-  };
-
-  const handleToggleCompleted = () => {
-    const newState = toggleCompletedRepack(post.id, post);
-    setIsCompleted(newState);
   };
 
   // Calculate compression savings percentage if both sizes available
@@ -489,28 +474,33 @@ export const RepackDetailModal: React.FC<RepackDetailModalProps> = ({
 
   return (
     <>
-      <Modal
+      <Drawer
         opened={opened}
         onClose={onClose}
-        size="55rem"
-        radius="lg"
-        padding="0"
-        withCloseButton={true}
-        centered
+        position="right"
+        size="min(860px, 92vw)"
+        padding={0}
+        withCloseButton
+        overlayProps={{ backgroundOpacity: 0.45, blur: 4 }}
         styles={{
           content: {
             backgroundColor: "var(--mantine-color-body)",
-            border: "1px solid var(--mantine-color-default-border)",
-            boxShadow: "0 20px 40px rgba(0, 0, 0, 0.5)",
+            borderLeft: "1px solid var(--mantine-color-default-border)",
+            boxShadow: "-12px 0 40px rgba(0, 0, 0, 0.5)",
             overflow: "hidden",
             color: "var(--mantine-color-text)",
+          },
+          body: {
+            height: "100%",
+            overflowY: "auto",
+            padding: 0,
           },
           header: {
             backgroundColor: "transparent",
             position: "absolute",
             right: 12,
             top: 12,
-            zIndex: 10,
+            zIndex: 20,
           },
           close: {
             color: "var(--mantine-color-dark-2)",
@@ -621,7 +611,7 @@ export const RepackDetailModal: React.FC<RepackDetailModalProps> = ({
                         leftSection={<Calendar size={11} />}
                       >
                         {(() => {
-                          if (!post.date.includes("T")) return post.date;
+                          if (!post.date.includes("T")) {return post.date;}
                           try {
                             const d = new Date(post.date);
                             return isNaN(d.getTime())
@@ -888,7 +878,7 @@ export const RepackDetailModal: React.FC<RepackDetailModalProps> = ({
 
                   <Tooltip
                     label={
-                      post.source && post.source == "steamrip"
+                      post.source && post.source === "steamrip"
                         ? "Open on SteamRip Website"
                         : "Open on FitGirl Website"
                     }
@@ -901,7 +891,7 @@ export const RepackDetailModal: React.FC<RepackDetailModalProps> = ({
                       variant="default"
                       radius="md"
                       aria-label={
-                        post.source && post.source == "steamrip"
+                        post.source && post.source === "steamrip"
                           ? "Open on SteamRip Website"
                           : "Open on FitGirl Website"
                       }
@@ -1087,10 +1077,10 @@ export const RepackDetailModal: React.FC<RepackDetailModalProps> = ({
 
                         // Non-magnet group — group links by hoster with collapsible sections
                         const isRecomp = post.source === "recomp"; const linksByHoster = group.links.reduce<Record<string, typeof group.links>>((acc, link) => {
-                          if (!isRecomp && isMediaOrBadDownloadUrl(link.url)) return acc;
+                          if (!isRecomp && isMediaOrBadDownloadUrl(link.url)) {return acc;}
                           const hoster = getHosterName(link.url, link.name, isRecomp);
-                          if (!hoster) return acc;
-                          if (!acc[hoster]) acc[hoster] = [];
+                          if (!hoster) {return acc;}
+                          if (!acc[hoster]) {acc[hoster] = [];}
                           acc[hoster].push(link);
                           return acc;
                         }, {});
@@ -1144,20 +1134,34 @@ export const RepackDetailModal: React.FC<RepackDetailModalProps> = ({
                         }}
                       >
                         <Text size="sm" c="dimmed" mb="xs">
-                          No direct mirror links extracted automatically.
+                          {post.id.startsWith("igdb-")
+                            ? "No catalog download mirrors found for this IGDB game."
+                            : "No direct mirror links extracted automatically."}
                         </Text>
                         <Button
                           onClick={() => openInBrowser(post.url)}
                           variant="light"
-                          color={post.source === "recomp" ? "violet" : post.source === "steamrip" ? "cyan" : "blue"}
+                          color={
+                            post.id.startsWith("igdb-")
+                              ? "yellow"
+                              : post.source === "recomp"
+                                ? "violet"
+                                : post.source === "steamrip"
+                                  ? "cyan"
+                                  : "blue"
+                          }
                           size="xs"
                           radius="md"
                           rightSection={<ExternalLink size={13} />}
                           style={{ cursor: "pointer" }}
                         >
-                          {post.source === "recomp" ? "View on Official Repository" : post.source === "steamrip" ? "View Mirrors on Official SteamRip Site" : "View Mirrors on Official FitGirl Site"}
-
-
+                          {post.id.startsWith("igdb-")
+                            ? "View Game on IGDB"
+                            : post.source === "recomp"
+                              ? "View on Official Repository"
+                              : post.source === "steamrip"
+                                ? "View Mirrors on Official SteamRip Site"
+                                : "View Mirrors on Official FitGirl Site"}
                         </Button>
                       </Paper>
                     )}
@@ -1434,7 +1438,7 @@ export const RepackDetailModal: React.FC<RepackDetailModalProps> = ({
                         {/* Video Selector Buttons */}
                         {post.videos.length > 1 && (
                           <Group gap="xs" wrap="wrap">
-                            {post.videos.map((vid, idx) => (
+                            {post.videos.map((_vid, idx) => (
                               <Button
                                 key={idx}
                                 size="xs"
@@ -1578,7 +1582,7 @@ export const RepackDetailModal: React.FC<RepackDetailModalProps> = ({
             </Tabs>
           </Box>
         </Box>
-      </Modal>
+      </Drawer>
 
       {/* Lightbox Screenshot Modal */}
       <ImageLightboxModal

@@ -1840,7 +1840,7 @@ export async function fetchRawMapGenieGames(): Promise<MapGenieGameData[]> {
       const { invoke } = await import("@tauri-apps/api/core");
       const resStr = await invoke<string>("fetch_mapgenie_games");
       const data = JSON.parse(resStr);
-      if (Array.isArray(data) && data.length > 0) return data;
+      if (Array.isArray(data) && data.length > 0) {return data;}
     } catch (tauriErr) {
       try {
         const { fetch: tauriFetch } = await import("@tauri-apps/plugin-http");
@@ -1851,7 +1851,7 @@ export async function fetchRawMapGenieGames(): Promise<MapGenieGameData[]> {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
           },
         });
-        if (res.ok) return await res.json();
+        if (res.ok) {return await res.json();}
       } catch (_) {}
     }
   }
@@ -1859,7 +1859,7 @@ export async function fetchRawMapGenieGames(): Promise<MapGenieGameData[]> {
   const res = await fetch("https://mapgenie.io/api/v1/games", {
     headers: { "Accept": "application/json", "Referer": "https://mapgenie.io/" },
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) {throw new Error(`HTTP ${res.status}`);}
   return await res.json();
 }
 
@@ -1907,7 +1907,7 @@ export async function fetchRawMapGenieMapFull(mapId: number | string): Promise<a
             },
           });
         }
-        if (res.ok) result = await res.json();
+        if (res.ok) {result = await res.json();}
       } catch (_) {}
     }
   }
@@ -1921,7 +1921,7 @@ export async function fetchRawMapGenieMapFull(mapId: number | string): Promise<a
         headers: { "Accept": "application/json", "Referer": "https://mapgenie.io/" },
       });
     }
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) {throw new Error(`HTTP ${res.status}`);}
     result = await res.json();
   }
 
@@ -1958,7 +1958,7 @@ export async function fetchRawMapGenieHtml(gameSlug: string, mapSlug: string): P
     try {
       const { invoke } = await import("@tauri-apps/api/core");
       const resHtml = await invoke<string>("fetch_mapgenie_page", { gameSlug, mapSlug });
-      if (resHtml && resHtml.length > 50) html = resHtml;
+      if (resHtml && resHtml.length > 50) {html = resHtml;}
     } catch (tauriErr) {
       try {
         const { fetch: tauriFetch } = await import("@tauri-apps/plugin-http");
@@ -1969,7 +1969,7 @@ export async function fetchRawMapGenieHtml(gameSlug: string, mapSlug: string): P
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
           },
         });
-        if (res.ok) html = await res.text();
+        if (res.ok) {html = await res.text();}
       } catch (_) {}
     }
   }
@@ -1979,7 +1979,7 @@ export async function fetchRawMapGenieHtml(gameSlug: string, mapSlug: string): P
       const res = await fetch(`https://mapgenie.io/${gameSlug}/maps/${mapSlug}`, {
         headers: { "Accept": "text/html,*/*", "Referer": "https://mapgenie.io/" },
       });
-      if (res.ok) html = await res.text();
+      if (res.ok) {html = await res.text();}
     } catch (_) {}
   }
 
@@ -2001,7 +2001,7 @@ export async function loadMapsFromMapGenie(forceRefresh = false): Promise<GameMa
   if (!forceRefresh && mapsCache.length > 50 && gamesCache.length > 0) {
     return mapsCache;
   }
-  if (inFlightMapsPromise) return inFlightMapsPromise;
+  if (inFlightMapsPromise) {return inFlightMapsPromise;}
 
   inFlightMapsPromise = (async () => {
     try {
@@ -2072,7 +2072,7 @@ export async function loadMapsFromMapGenie(forceRefresh = false): Promise<GameMa
 }
 
 export function getCachedMapGenieGames(): MapGenieGameData[] {
-  if (gamesCache.length > 0) return gamesCache;
+  if (gamesCache.length > 0) {return gamesCache;}
   if (typeof window !== "undefined") {
     try {
       const saved = localStorage.getItem(GAMES_STORAGE_KEY);
@@ -2232,9 +2232,9 @@ function normalizeString(str: string): string {
 const matchCache = new Map<string, GameMapInfo | undefined>();
 
 export function findMatchingMap(gameTitle?: string, gameSlug?: string): GameMapInfo | undefined {
-  if (!gameTitle && !gameSlug) return undefined;
+  if (!gameTitle && !gameSlug) {return undefined;}
   const list = mapsCache;
-  if (list.length === 0) return undefined;
+  if (list.length === 0) {return undefined;}
 
   const cacheKey = `${gameTitle || ""}:::${gameSlug || ""}`;
   if (matchCache.has(cacheKey)) {
@@ -2288,7 +2288,7 @@ export function findMatchingMap(gameTitle?: string, gameSlug?: string): GameMapI
 
 export function useGameMap(gameTitle?: string, gameSlug?: string) {
   const [map, setMap] = useState<GameMapInfo | undefined>(() => findMatchingMap(gameTitle, gameSlug));
-  const [isLoading, setIsLoading] = useState<boolean>(!Boolean(findMatchingMap(gameTitle, gameSlug)));
+  const [isLoading, setIsLoading] = useState<boolean>(!findMatchingMap(gameTitle, gameSlug));
 
   useEffect(() => {
     let isMounted = true;
@@ -2307,7 +2307,7 @@ export function useGameMap(gameTitle?: string, gameSlug?: string) {
           }
         })
         .catch(() => {
-          if (isMounted) setIsLoading(false);
+          if (isMounted) {setIsLoading(false);}
         });
     }
 
@@ -2345,7 +2345,7 @@ export function useAllGameMaps() {
   }, []);
 
   useEffect(() => {
-    if (mapsCache.length === 0) refresh();
+    if (mapsCache.length === 0) {refresh();}
     return subscribeMapUpdates(() => setMaps([...mapsCache]));
   }, [refresh]);
 
@@ -2353,18 +2353,18 @@ export function useAllGameMaps() {
 }
 
 export function getLastOpenedMapSlug(gameSlug: string): string | null {
-  if (!gameSlug || typeof window === "undefined") return null;
+  if (!gameSlug || typeof window === "undefined") {return null;}
   const clean = gameSlug.includes("--") ? gameSlug.split("--")[0] : gameSlug;
   try {
     const direct = localStorage.getItem(`fitrepacks_last_map_${clean}`);
-    if (direct) return direct;
+    if (direct) {return direct;}
     for (const [key, aliases] of Object.entries(KNOWN_GAME_ALIASES)) {
       if (key === clean || aliases.includes(clean)) {
         const aliasVal = localStorage.getItem(`fitrepacks_last_map_${key}`);
-        if (aliasVal) return aliasVal;
+        if (aliasVal) {return aliasVal;}
         for (const a of aliases) {
           const v = localStorage.getItem(`fitrepacks_last_map_${a}`);
-          if (v) return v;
+          if (v) {return v;}
         }
       }
     }
@@ -2375,7 +2375,7 @@ export function getLastOpenedMapSlug(gameSlug: string): string | null {
 }
 
 export function saveLastOpenedMapSlug(gameSlug: string, mapSlug: string): void {
-  if (!gameSlug || !mapSlug || mapSlug === "default" || typeof window === "undefined") return;
+  if (!gameSlug || !mapSlug || mapSlug === "default" || typeof window === "undefined") {return;}
   const clean = gameSlug.includes("--") ? gameSlug.split("--")[0] : gameSlug;
   try {
     localStorage.setItem(`fitrepacks_last_map_${clean}`, mapSlug);
@@ -2388,7 +2388,7 @@ export function saveLastOpenedMapSlug(gameSlug: string, mapSlug: string): void {
 }
 
 export function resolveCanonicalMapGenieSlug(gameSlug?: string, gameTitle?: string): string {
-  if (!gameSlug && !gameTitle) return "";
+  if (!gameSlug && !gameTitle) {return "";}
   const raw = (gameSlug || "").includes("--") ? (gameSlug || "").split("--")[0] : (gameSlug || "");
   const clean = raw.toLowerCase().trim();
   const title = (gameTitle || "").toLowerCase().trim();
@@ -2404,7 +2404,7 @@ export function resolveCanonicalMapGenieSlug(gameSlug?: string, gameTitle?: stri
   const matched = findMatchingMap(gameTitle, gameSlug);
   if (matched) {
     const s = matched.game_slug || (matched.slug.includes("--") ? matched.slug.split("--")[0] : matched.slug);
-    if (s) return s;
+    if (s) {return s;}
   }
 
   // 3. Check known aliases

@@ -117,13 +117,13 @@ export const AddOrScanGameModal: React.FC<AddOrScanGameModalProps> = ({
   };
 
   const handleAutoDetectManualVersion = async () => {
-    if (!manualExePath) return;
+    if (!manualExePath) {return;}
     const autoVer = await detectInstalledGameVersion(manualExePath);
-    if (autoVer) setManualVersion(autoVer);
+    if (autoVer) {setManualVersion(autoVer);}
   };
 
   const handleSearchManualIgdb = async () => {
-    if (!manualTitle.trim()) return;
+    if (!manualTitle.trim()) {return;}
     setIsSearchingManualIgdb(true);
     try {
       const results = await searchIgdbMetadata(manualTitle);
@@ -147,7 +147,7 @@ export const AddOrScanGameModal: React.FC<AddOrScanGameModalProps> = ({
 
   const handleManualSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!manualTitle.trim()) return;
+    if (!manualTitle.trim()) {return;}
 
     const cleanExe = (manualExePath || "").trim();
     const isFitgirl = cleanExe ? await detectIsFitgirlRepack(cleanExe) : false;
@@ -210,7 +210,7 @@ export const AddOrScanGameModal: React.FC<AddOrScanGameModalProps> = ({
   };
 
   const handleScan = async () => {
-    if (!folderPath.trim()) return;
+    if (!folderPath.trim()) {return;}
     const rawTarget = folderPath.trim();
     saveLastScannedPath(rawTarget);
 
@@ -276,8 +276,8 @@ export const AddOrScanGameModal: React.FC<AddOrScanGameModalProps> = ({
   const toggleSelectScanItem = (id: string) => {
     setSelectedScanIds((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(id)) {next.delete(id);}
+      else {next.add(id);}
       return next;
     });
   };
@@ -305,7 +305,7 @@ export const AddOrScanGameModal: React.FC<AddOrScanGameModalProps> = ({
   };
 
   const handleExecuteCustomSearch = async () => {
-    if (!customSearchQuery.trim()) return;
+    if (!customSearchQuery.trim()) {return;}
     setIsSearchingItemIgdb(true);
     try {
       const results = await searchIgdbMetadata(customSearchQuery);

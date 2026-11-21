@@ -125,14 +125,14 @@ export const useAppUpdater = create<AppUpdaterState>((set, get) => ({
           hasCheckedOnStartup: true,
         });
         return update;
-      } else {
+      }
         set({
           updateDetails: null,
           status: "up-to-date",
           hasCheckedOnStartup: true,
         });
         return null;
-      }
+      
     } catch (err: any) {
       const msg = err?.message || String(err) || "Failed to check for updates";
 
@@ -166,7 +166,7 @@ export const useAppUpdater = create<AppUpdaterState>((set, get) => ({
 
   installUpdate: async () => {
     const details = get().updateDetails;
-    if (!details?.rawUpdate) return;
+    if (!details?.rawUpdate) {return;}
 
     set({
       status: "downloading",

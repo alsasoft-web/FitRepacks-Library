@@ -1565,18 +1565,16 @@ fn register_windows_aumid() {
 
     // Ensure HKCU\Software\Classes\AppUserModelId registry key exists with DisplayName AND IconUri
     // so Windows Taskbar and Windows Toast display the app icon and title properly instead of a blank page.
-    let script = format!(
-        "$a='com.fitrepacks.library'; $p=\"HKCU:\\Software\\Classes\\AppUserModelId\\$a\"; \
-         $exe='{}'; \
-         if (!(Test-Path $p)) {{ New-Item -Path $p -Force | Out-Null; }} \
+    let script = "$a='com.fitrepacks.library'; $p=\"HKCU:\\Software\\Classes\\AppUserModelId\\$a\"; \
+         $exe=$env:APP_EXE; \
+         if (!(Test-Path $p)) { New-Item -Path $p -Force | Out-Null; } \
          Set-ItemProperty -Path $p -Name 'DisplayName' -Value 'FitRepacks Library' -Force | Out-Null; \
          Set-ItemProperty -Path $p -Name 'ShowInSettings' -Value 1 -Type DWord -Force | Out-Null; \
-         if ($exe) {{ Set-ItemProperty -Path $p -Name 'IconUri' -Value $exe -Force | Out-Null; }}",
-        current_exe.replace("'", "''")
-    );
+         if ($exe) { Set-ItemProperty -Path $p -Name 'IconUri' -Value $exe -Force | Out-Null; }";
 
     let _ = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-Command", &script])
+        .env("APP_EXE", &current_exe)
+        .args(["-NoProfile", "-Command", script])
         .creation_flags(0x08000000) // CREATE_NO_WINDOW
         .spawn();
 }
@@ -1726,13 +1724,11 @@ fn get_desktop_shortcuts() -> Result<Vec<String>, String> {
 
 #[command]
 fn resolve_shortcut_target(shortcut_path: String) -> Result<ShortcutTargetInfo, String> {
-    let ps_cmd = format!(
-        "$sh = New-Object -ComObject WScript.Shell; $s = $sh.CreateShortcut('{}'); @{{ TargetPath = $s.TargetPath; WorkingDirectory = $s.WorkingDirectory }} | ConvertTo-Json",
-        shortcut_path.replace("'", "''")
-    );
+    let ps_cmd = "$sh = New-Object -ComObject WScript.Shell; $s = $sh.CreateShortcut($env:TARGET_LNK); @{ TargetPath = $s.TargetPath; WorkingDirectory = $s.WorkingDirectory } | ConvertTo-Json";
 
     let mut cmd = Command::new("powershell");
-    cmd.args(["-NoProfile", "-Command", &ps_cmd]);
+    cmd.env("TARGET_LNK", &shortcut_path);
+    cmd.args(["-NoProfile", "-Command", ps_cmd]);
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
@@ -1836,29 +1832,25 @@ fn set_autostart(enabled: bool) -> Result<bool, String> {
         } else {
             current_exe
         };
-        let exe_str = exe_path.to_string_lossy().replace("'", "''");
-
         let ps_cmd = if enabled {
-            format!(
-                r#"
-                $rk = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Software\Microsoft\Windows\CurrentVersion\Run', $true);
-                if ($rk) {{ $rk.SetValue('FitRepacksLibrary', '"{}"'); $rk.Close(); }}
-                $ak = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run', $true);
-                if ($ak) {{ try {{ $ak.DeleteValue('FitRepacksLibrary', $false); }} catch {{}}; $ak.Close(); }}
-                "#,
-                exe_str
-            )
+            r#"
+            $rk = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Software\Microsoft\Windows\CurrentVersion\Run', $true);
+            if ($rk) { $rk.SetValue('FitRepacksLibrary', ('"' + $env:AUTOSTART_EXE + '"')); $rk.Close(); }
+            $ak = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run', $true);
+            if ($ak) { try { $ak.DeleteValue('FitRepacksLibrary', $false); } catch {}; $ak.Close(); }
+            "#
         } else {
             r#"
             $rk = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Software\Microsoft\Windows\CurrentVersion\Run', $true);
             if ($rk) { try { $rk.DeleteValue('FitRepacksLibrary', $false); } catch {}; $rk.Close(); }
             $ak = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run', $true);
             if ($ak) { try { $ak.DeleteValue('FitRepacksLibrary', $false); } catch {}; $ak.Close(); }
-            "#.to_string()
+            "#
         };
 
         let mut cmd = Command::new("powershell");
-        cmd.args(["-NoProfile", "-Command", &ps_cmd]);
+        cmd.env("AUTOSTART_EXE", exe_path.as_os_str());
+        cmd.args(["-NoProfile", "-Command", ps_cmd]);
         cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
 
         let output = cmd.output().map_err(|e| e.to_string())?;
@@ -1877,14 +1869,34 @@ fn set_autostart(enabled: bool) -> Result<bool, String> {
     }
 }
 
+fn close_to_tray_file_path(app: &tauri::AppHandle) -> std::path::PathBuf {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .unwrap_or_else(|_| std::env::temp_dir().join("fitrepacks-library"));
+    let _ = std::fs::create_dir_all(&dir);
+    dir.join("close_to_tray.txt")
+}
+
+fn load_close_to_tray_from_disk(app: &tauri::AppHandle) -> bool {
+    let path = close_to_tray_file_path(app);
+    if let Ok(content) = std::fs::read_to_string(&path) {
+        let trimmed = content.trim();
+        return trimmed == "true" || trimmed == "1";
+    }
+    false
+}
+
 #[command]
 fn get_close_to_tray() -> bool {
     CLOSE_TO_TRAY.load(Ordering::Relaxed)
 }
 
 #[command]
-fn set_close_to_tray(enabled: bool) -> bool {
+fn set_close_to_tray(app: tauri::AppHandle, enabled: bool) -> bool {
     CLOSE_TO_TRAY.store(enabled, Ordering::Relaxed);
+    let path = close_to_tray_file_path(&app);
+    let _ = std::fs::write(&path, if enabled { "true" } else { "false" });
     enabled
 }
 
@@ -2556,6 +2568,7 @@ fn fetch_via_curl(
     cmd.arg("-s");
     cmd.arg("-i");
     cmd.arg("-L");
+    cmd.arg("--proto").arg("=http,https");
     cmd.arg("--compressed");
     cmd.arg("-H").arg("User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36");
     cmd.arg("-H").arg("Accept: application/json, text/plain, */*");
@@ -2624,6 +2637,10 @@ async fn fetch_http_url(
     url: String,
     headers: Option<std::collections::HashMap<String, String>>,
 ) -> Result<HttpResponsePayload, String> {
+    if !url.starts_with("https://") && !url.starts_with("http://") {
+        return Err("Only http/https URLs are supported".to_string());
+    }
+
     tokio::task::spawn_blocking(move || {
         #[cfg(windows)]
         {
@@ -4104,13 +4121,15 @@ fn main() {
                 }
             }
 
+            CLOSE_TO_TRAY.store(load_close_to_tray_from_disk(app.handle()), Ordering::Relaxed);
+
             Ok(())
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" {
-                    // If close to tray is enabled (in release) and not quitting, prevent close and hide main window
-                    if !IS_QUITTING.load(Ordering::Relaxed) && !cfg!(debug_assertions) && CLOSE_TO_TRAY.load(Ordering::Relaxed) {
+                    // If close to tray is enabled and not quitting, prevent close and hide main window
+                    if !IS_QUITTING.load(Ordering::Relaxed) && CLOSE_TO_TRAY.load(Ordering::Relaxed) {
                         api.prevent_close();
                         let _ = window.hide();
                     } else {

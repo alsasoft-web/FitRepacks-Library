@@ -55,7 +55,7 @@ export function ImageLightboxModal({
 
   // Keyboard navigation
   useEffect(() => {
-    if (!opened) return;
+    if (!opened) {return;}
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "ArrowLeft") {
@@ -74,7 +74,7 @@ export function ImageLightboxModal({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [opened, handlePrev, handleNext, onClose]);
 
-  if (!images.length) return null;
+  if (!images.length) {return null;}
 
   const currentRawUrl = images[currentIndex] || "";
   const currentFullUrl = getRiotpixelsFullResUrl(currentRawUrl);

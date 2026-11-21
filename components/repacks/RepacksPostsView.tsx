@@ -37,6 +37,7 @@ import {
   TextInput,
   ScrollArea,
   Divider,
+  UnstyledButton,
 } from "@mantine/core";
 import { useDebouncedValue, useHover, useNetwork } from "@mantine/hooks";
 import {
@@ -73,6 +74,11 @@ import {
 } from "lucide-react";
 import { Carousel } from "@mantine/carousel";
 import { RepackPost } from "../../lib/repackTypes";
+import { IgdbGameMetadata } from "../../lib/types";
+import {
+  fetchTopIgdbGames,
+  fetchUpcomingAnticipatedIgdbGames,
+} from "../../lib/igdb";
 import { getRecompCatalogPosts } from "../../lib/recompCatalog";
 import {
   startSteamRipScrape,
@@ -191,8 +197,8 @@ const CATALOG_GENRES = [
 ];
 
 const formatDate = (dateStr: string | null | undefined): string => {
-  if (!dateStr) return "";
-  if (!dateStr.includes("T")) return dateStr;
+  if (!dateStr) {return "";}
+  if (!dateStr.includes("T")) {return dateStr;}
   try {
     const d = new Date(dateStr);
     return isNaN(d.getTime())
@@ -208,9 +214,9 @@ const formatDate = (dateStr: string | null | undefined): string => {
 };
 
 const getYoutubeEmbedUrl = (urlOrId: string): string | null => {
-  if (!urlOrId) return null;
+  if (!urlOrId) {return null;}
   const str = String(urlOrId).trim();
-  if (!str) return null;
+  if (!str) {return null;}
   if (/^[a-zA-Z0-9_-]{11}$/.test(str)) {
     return `https://www.youtube.com/embed/${str}`;
   }
@@ -227,8 +233,8 @@ const getYoutubeEmbedUrl = (urlOrId: string): string | null => {
 };
 
 const getOptimizedImageUrl = (url: string): string => {
-  if (!url) return url;
-  if (/\.gif(?:\?.*)?$/i.test(url)) return url;
+  if (!url) {return url;}
+  if (/\.gif(?:\?.*)?$/i.test(url)) {return url;}
   return getRiotpixels240pUrl(url);
 };
 
@@ -353,7 +359,7 @@ const RepackCardCarousel: React.FC<{
   const mediaItems = useMemo(() => {
     const videoItems: Array<{ type: "video" | "image"; url: string; embedUrl?: string; label: string; isGif?: boolean }> = [];
     (post.videos || []).forEach((vid, i) => {
-      if (!vid) return;
+      if (!vid) {return;}
       const ytEmbed = getYoutubeEmbedUrl(vid);
       videoItems.push({
         type: "video",
@@ -367,7 +373,7 @@ const RepackCardCarousel: React.FC<{
     const screenshotItems: Array<{ type: "video" | "image"; url: string; embedUrl?: string; label: string; isGif?: boolean }> = [];
 
     (post.screenshots || []).forEach((sc, i) => {
-      if (!sc) return;
+      if (!sc) {return;}
       if (/\.gif(?:\?.*)?$/i.test(sc)) {
         gifItems.push({
           type: "image",
@@ -552,14 +558,14 @@ const RepackStatusActionGroup: React.FC<{
 
   const handleStatusChange = async (status: "installed" | "wishlist" | "completed" | "none") => {
     let targetStatus = status;
-    if (status === "installed" && isInst) targetStatus = "none";
-    else if (status === "wishlist" && isWish) targetStatus = "none";
-    else if (status === "completed" && isComp) targetStatus = "none";
+    if (status === "installed" && isInst) {targetStatus = "none";}
+    else if (status === "wishlist" && isWish) {targetStatus = "none";}
+    else if (status === "completed" && isComp) {targetStatus = "none";}
 
     let chosenExePath: string | undefined;
     if (targetStatus === "installed") {
       const picked = await promptForGameExePath(post.title);
-      if (picked) chosenExePath = picked;
+      if (picked) {chosenExePath = picked;}
     }
 
     setRepackStatus(post.id, post, targetStatus, chosenExePath);
@@ -903,29 +909,63 @@ const RepackGridCard: React.FC<{
   );
 });
 
+type CatalogDataSource = "all" | "fitgirl" | "steamrip" | "recomp";
+
 interface RepacksPostsViewProps {
   activeGameTitle?: string;
   externalSearchQuery?: string;
   onSearchChange?: (query: string) => void;
-  dataSource?: "fitgirl" | "steamrip" | "recomp";
-  onDataSourceChange?: (source: "fitgirl" | "steamrip" | "recomp") => void;
+  dataSource?: CatalogDataSource;
+  onDataSourceChange?: (source: CatalogDataSource) => void;
+  onAmbientArtworkChange?: (url: string | null) => void;
   onOpenTorrentDownload?: (magnetUrl: string, title?: string, coverUrl?: string, repackSize?: string) => void;
+}
+
+function igdbToRepackPost(ig: IgdbGameMetadata): RepackPost {
+  return {
+    id: `igdb-${ig.id}`,
+    title: ig.name,
+    url: `https://www.igdb.com/games/${ig.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+    coverUrl: ig.coverUrl,
+    repackSize: "",
+    originalSize: "",
+    genres: ig.genres || [],
+    companies: ig.developer || "IGDB",
+    languages: "",
+    description: ig.summary || ig.storyline || "",
+    screenshots: ig.screenshots || [],
+    videos: ig.videos || [],
+    mirrorGroups: [],
+    gameUpdates: [],
+    date: ig.releaseDate || (ig.releaseYear ? `${ig.releaseYear}-01-01` : ""),
+    isRead: true,
+    scrapedAt: "",
+    source: "fitgirl",
+  };
 }
 
 export const RepacksPostsView: React.FC<RepacksPostsViewProps> = ({
   activeGameTitle,
   externalSearchQuery,
   onSearchChange,
-  dataSource: initialDataSource = "fitgirl",
+  dataSource: initialDataSource = "all",
   onDataSourceChange,
+  onAmbientArtworkChange,
   onOpenTorrentDownload,
 }) => {
-  const [internalDataSource, setInternalDataSource] = useState<"fitgirl" | "steamrip" | "recomp">(initialDataSource);
+  const [internalDataSource, setInternalDataSource] = useState<CatalogDataSource>(initialDataSource);
   const dataSource = onDataSourceChange ? initialDataSource : internalDataSource;
   const [posts, setPosts] = useState<RepackPost[]>([]);
+  const [heroPosts, setHeroPosts] = useState<RepackPost[]>([]);
+  const [heroIndex, setHeroIndex] = useState(0);
+  const [heroSlideIndex, setHeroSlideIndex] = useState(0);
+  const [isHeroPaused, setIsHeroPaused] = useState(false);
+  const [topIgdbGames, setTopIgdbGames] = useState<IgdbGameMetadata[]>([]);
+  const [upcomingIgdbGames, setUpcomingIgdbGames] = useState<IgdbGameMetadata[]>([]);
+  const [isIgdbLoading, setIsIgdbLoading] = useState(true);
   const [popularFilter, setPopularFilter] = useState<"all" | "popular_month" | "popular_year">("all");
   const handleDataSourceChange = useCallback(
-    (nextSource: "fitgirl" | "steamrip" | "recomp") => {
+    (nextSource: CatalogDataSource) => {
       if (nextSource !== "fitgirl") {
         setPopularFilter("all");
       }
@@ -1012,6 +1052,23 @@ export const RepacksPostsView: React.FC<RepacksPostsViewProps> = ({
   const { online: isOnline = true } = useNetwork();
 
   const refreshGlobalStats = useCallback(() => {
+    if (dataSource === "all") {
+      Promise.all([
+        getRepackDatasetStats("fitgirl"),
+        getRepackDatasetStats("steamrip"),
+      ])
+        .then(([fg, sr]) => {
+          setGlobalStats({
+            totalCount: fg.totalCount + sr.totalCount,
+            unreadCount: fg.unreadCount + sr.unreadCount,
+            readCount: fg.readCount + sr.readCount,
+            topMonthCount: fg.topMonthCount,
+            topYearCount: fg.topYearCount,
+          });
+        })
+        .catch(() => {});
+      return;
+    }
     getRepackDatasetStats(dataSource)
       .then(setGlobalStats)
       .catch(() => {});
@@ -1021,11 +1078,189 @@ export const RepacksPostsView: React.FC<RepacksPostsViewProps> = ({
     refreshGlobalStats();
   }, [refreshGlobalStats]);
 
+  // Fetch FitGirl Top This Week hero posts & IGDB Top Games for the catalog landing page
+  useEffect(() => {
+    let cancelled = false;
+    loadRepacksPaginated({
+      page: 1,
+      perPage: 6,
+      popularFilter: "popular_month",
+      dataSource: "fitgirl",
+    })
+      .then((res) => {
+        if (cancelled) {return;}
+        if (res.items.length > 0) {
+          setHeroPosts(res.items);
+          setHeroIndex(0);
+        } else {
+          loadRepacksPaginated({ page: 1, perPage: 6, dataSource: "fitgirl" })
+            .then((fallback) => {
+              if (!cancelled && fallback.items.length > 0) {
+                setHeroPosts(fallback.items);
+                setHeroIndex(0);
+              }
+            })
+            .catch(() => {});
+        }
+      })
+      .catch(() => {});
+
+    Promise.allSettled([
+      fetchTopIgdbGames(10).then((games) => {
+        if (!cancelled && games.length > 0) {
+          setTopIgdbGames(games);
+        }
+      }),
+      fetchUpcomingAnticipatedIgdbGames(10).then((games) => {
+        if (!cancelled && games.length > 0) {
+          setUpcomingIgdbGames(games);
+        }
+      }),
+    ]).finally(() => {
+      if (!cancelled) {
+        setIsIgdbLoading(false);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Auto-cycle hero screenshots & top weekly games
+  useEffect(() => {
+    setHeroSlideIndex(0);
+  }, [heroIndex]);
+
+  useEffect(() => {
+    if (heroPosts.length === 0 || isHeroPaused) {return;}
+    const activeHero = heroPosts[heroIndex] || heroPosts[0];
+    const slides =
+      activeHero?.screenshots && activeHero.screenshots.length > 0
+        ? activeHero.screenshots.slice(0, 4)
+        : activeHero?.coverUrl
+          ? [activeHero.coverUrl]
+          : [];
+
+    const timer = setInterval(() => {
+      if (slides.length > 1 && heroSlideIndex + 1 < slides.length) {
+        setHeroSlideIndex((s) => s + 1);
+      } else {
+        setHeroSlideIndex(0);
+        setHeroIndex((i) => (i + 1) % heroPosts.length);
+      }
+    }, 3500);
+    return () => clearInterval(timer);
+  }, [heroPosts, heroIndex, heroSlideIndex, isHeroPaused]);
+
+  // Keep Catalog background blur synced with active hero game
+  useEffect(() => {
+    if (!onAmbientArtworkChange) {return;}
+    const activeHero = heroPosts[heroIndex] || posts[0];
+    const art =
+      activeHero?.screenshots?.[0] || activeHero?.coverUrl || null;
+    if (art) {
+      onAmbientArtworkChange(art);
+    }
+  }, [heroPosts, heroIndex, posts, onAmbientArtworkChange]);
+
+  const handleOpenIgdbDetails = useCallback(
+    async (ig: IgdbGameMetadata) => {
+      const basePost = igdbToRepackPost(ig);
+      setSelectedPost(basePost);
+      if (onAmbientArtworkChange) {
+        onAmbientArtworkChange(
+          ig.bannerUrl || ig.screenshots?.[0] || ig.coverUrl || null,
+        );
+      }
+
+      // Enrich with matching FitGirl / SteamRIP / Recomp download mirrors if available
+      try {
+        const [fgRes, srRes, rcRes] = await Promise.all([
+          loadRepacksPaginated({
+            page: 1,
+            perPage: 3,
+            searchQuery: ig.name,
+            dataSource: "fitgirl",
+          }),
+          loadRepacksPaginated({
+            page: 1,
+            perPage: 3,
+            searchQuery: ig.name,
+            dataSource: "steamrip",
+          }),
+          loadRepacksPaginated({
+            page: 1,
+            perPage: 3,
+            searchQuery: ig.name,
+            dataSource: "recomp",
+          }),
+        ]);
+        const candidates = [...fgRes.items, ...srRes.items, ...rcRes.items];
+        const match = candidates.find(
+          (item) => item.mirrorGroups && item.mirrorGroups.length > 0,
+        );
+        if (match) {
+          setSelectedPost((prev) =>
+            prev && prev.id === basePost.id
+              ? {
+                  ...prev,
+                  url: match.url || prev.url,
+                  repackSize: match.repackSize || prev.repackSize,
+                  originalSize: match.originalSize || prev.originalSize,
+                  mirrorGroups: match.mirrorGroups,
+                  gameUpdates: match.gameUpdates || prev.gameUpdates,
+                }
+              : prev,
+          );
+        }
+      } catch (_) {}
+    },
+    [onAmbientArtworkChange],
+  );
+
   // Load paginated repacks
   const fetchRepacks = useCallback(async () => {
     setIsLoading(true);
     setLoadError(null);
     try {
+      if (dataSource === "all") {
+        const perSource = Math.max(6, Math.ceil(itemsPerPage / 2));
+        const [fgRes, srRes] = await Promise.all([
+          loadRepacksPaginated({
+            page: currentPage,
+            perPage: perSource,
+            searchQuery: debouncedSearchQuery,
+            sortBy,
+            selectedCategories,
+            readFilter,
+            dataSource: "fitgirl",
+          }),
+          loadRepacksPaginated({
+            page: currentPage,
+            perPage: perSource,
+            searchQuery: debouncedSearchQuery,
+            sortBy,
+            selectedCategories,
+            readFilter,
+            dataSource: "steamrip",
+          }),
+        ]);
+
+        const combined = [...fgRes.items, ...srRes.items].sort(
+          (a, b) => {
+            if (sortBy === "title") {return a.title.localeCompare(b.title);}
+            const ta = Date.parse(a.date || "") || 0;
+            const tb = Date.parse(b.date || "") || 0;
+            return sortBy === "oldest" ? ta - tb : tb - ta;
+          },
+        );
+        setPosts(combined);
+        setTotalItems(fgRes.totalItems + srRes.totalItems);
+        setTotalPages(Math.max(1, fgRes.totalPages, srRes.totalPages));
+        return;
+      }
+
       const res = await loadRepacksPaginated({
         page: currentPage,
         perPage: itemsPerPage,
@@ -1129,7 +1364,7 @@ export const RepacksPostsView: React.FC<RepacksPostsViewProps> = ({
 
   // SteamRIP Scraper live updates & initial prompt trigger
   useEffect(() => {
-    if (dataSource !== "steamrip") return;
+    if (dataSource !== "steamrip") {return;}
     const unsub = subscribeSteamRipScrape((st) => {
       setScrapeProgress(st);
     });
@@ -1174,10 +1409,13 @@ export const RepacksPostsView: React.FC<RepacksPostsViewProps> = ({
   }, []);
 
   const handleToggleRead = (id: string, date?: string, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
+    if (e) {e.stopPropagation();}
     const targetPost = posts.find((p) => p.id === id);
     const postDate = date || targetPost?.date;
-    const newIsRead = togglePostReadState(id, postDate, dataSource);
+    const postSource = (
+      targetPost?.source || (dataSource === "all" ? "fitgirl" : dataSource)
+    ) as "fitgirl" | "steamrip" | "recomp";
+    const newIsRead = togglePostReadState(id, postDate, postSource);
     setPosts((prev) => prev.map((p) => (p.id === id ? { ...p, isRead: newIsRead } : p)));
     if (selectedPost && selectedPost.id === id) {
       setSelectedPost((prev) => (prev ? { ...prev, isRead: newIsRead } : null));
@@ -1190,7 +1428,15 @@ export const RepacksPostsView: React.FC<RepacksPostsViewProps> = ({
     try {
       setPosts((prev) => prev.map((p) => ({ ...p, isRead: true })));
       setGlobalStats((prev) => ({ ...prev, unreadCount: 0, readCount: prev.totalCount }));
-      await markAllRepacksAsRead(dataSource);
+      if (dataSource === "all") {
+        await Promise.all([
+          markAllRepacksAsRead("fitgirl"),
+          markAllRepacksAsRead("steamrip"),
+          markAllRepacksAsRead("recomp"),
+        ]);
+      } else {
+        await markAllRepacksAsRead(dataSource);
+      }
       refreshGlobalStats();
       fetchRepacks();
     } catch (err) {
@@ -1261,7 +1507,7 @@ export const RepacksPostsView: React.FC<RepacksPostsViewProps> = ({
     >
       {/* Left Catalog Search & Filter Sidebar */}
       <Box
-        w={{ base: 245, md: 275 }}
+        w={{ base: 255, md: 295 }}
         className="daze-glass-panel"
         style={{
           height: "100%",
@@ -1280,11 +1526,13 @@ export const RepacksPostsView: React.FC<RepacksPostsViewProps> = ({
         >
           <TextInput
             placeholder={
-              dataSource === "recomp"
-                ? "Search Recomp catalog..."
-                : dataSource === "steamrip"
-                  ? "Search SteamRIP games..."
-                  : "Search FitGirl repacks..."
+              dataSource === "all"
+                ? "Search all sources..."
+                : dataSource === "recomp"
+                  ? "Search Recomp catalog..."
+                  : dataSource === "steamrip"
+                    ? "Search SteamRIP games..."
+                    : "Search FitGirl repacks..."
             }
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.currentTarget.value)}
@@ -1323,17 +1571,34 @@ export const RepacksPostsView: React.FC<RepacksPostsViewProps> = ({
               <SegmentedControl
                 fullWidth
                 value={dataSource}
-                onChange={(val) => handleDataSourceChange(val as "fitgirl" | "steamrip" | "recomp")}
+                onChange={(val) => handleDataSourceChange(val as CatalogDataSource)}
                 size="xs"
                 radius="md"
-                color={dataSource === "recomp" ? "violet" : dataSource === "steamrip" ? "cyan" : "blue"}
+                color={
+                  dataSource === "all"
+                    ? "teal"
+                    : dataSource === "recomp"
+                      ? "violet"
+                      : dataSource === "steamrip"
+                        ? "cyan"
+                        : "blue"
+                }
                 bg="var(--mantine-color-body)"
                 data={[
                   {
+                    value: "all",
+                    label: (
+                      <Group gap={4} wrap="nowrap" justify="center">
+                        <LayoutGrid size={12} />
+                        <span>All</span>
+                      </Group>
+                    ),
+                  },
+                  {
                     value: "fitgirl",
                     label: (
-                      <Group gap={5} wrap="nowrap" justify="center">
-                        <DownloadCloud size={13} />
+                      <Group gap={4} wrap="nowrap" justify="center">
+                        <DownloadCloud size={12} />
                         <span>FitGirl</span>
                       </Group>
                     ),
@@ -1341,8 +1606,8 @@ export const RepacksPostsView: React.FC<RepacksPostsViewProps> = ({
                   {
                     value: "steamrip",
                     label: (
-                      <Group gap={5} wrap="nowrap" justify="center">
-                        <Flame size={13} />
+                      <Group gap={4} wrap="nowrap" justify="center">
+                        <Flame size={12} />
                         <span>SteamRIP</span>
                       </Group>
                     ),
@@ -1350,8 +1615,8 @@ export const RepacksPostsView: React.FC<RepacksPostsViewProps> = ({
                   {
                     value: "recomp",
                     label: (
-                      <Group gap={5} wrap="nowrap" justify="center">
-                        <Sparkles size={13} />
+                      <Group gap={4} wrap="nowrap" justify="center">
+                        <Sparkles size={12} />
                         <span>Recomp</span>
                       </Group>
                     ),
@@ -1635,6 +1900,365 @@ export const RepacksPostsView: React.FC<RepacksPostsViewProps> = ({
           </Stack>
         </Paper>
       )}
+
+      {/* Catalog Landing Hero & IGDB Top Games (when in All/Combined view without active search) */}
+      {dataSource === "all" && !debouncedSearchQuery.trim() && (
+        <Stack gap="lg">
+          {/* 1. FitGirl Top This Week Hero Section */}
+          {heroPosts.length > 0 && (() => {
+            const activeHero = heroPosts[heroIndex] || heroPosts[0];
+            const heroSlides =
+              activeHero.screenshots && activeHero.screenshots.length > 0
+                ? activeHero.screenshots.slice(0, 4)
+                : activeHero.coverUrl
+                  ? [activeHero.coverUrl]
+                  : [];
+            const heroBg =
+              heroSlides[heroSlideIndex % Math.max(1, heroSlides.length)] ||
+              activeHero.coverUrl;
+            return (
+              <Paper
+                radius="lg"
+                onMouseEnter={() => setIsHeroPaused(true)}
+                onMouseLeave={() => setIsHeroPaused(false)}
+                style={{
+                  position: "relative",
+                  overflow: "hidden",
+                  minHeight: 380,
+                  border: "1px solid rgba(255, 255, 255, 0.14)",
+                  backgroundColor: "#0b0d13",
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "flex-end",
+                }}
+              >
+                {heroBg && (
+                  <Box
+                    key={heroBg}
+                    className="hero-ken-burns"
+                    style={{
+                      position: "absolute",
+                      inset: -16,
+                      backgroundImage: `url(${heroBg})`,
+                      backgroundSize: "cover",
+                      backgroundPosition: "center center",
+                      filter: "brightness(0.85) saturate(1.25)",
+                      transition: "opacity 600ms ease",
+                    }}
+                  />
+                )}
+                <Box
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    background:
+                      "linear-gradient(90deg, rgba(8, 10, 15, 0.86) 0%, rgba(8, 10, 15, 0.42) 55%, rgba(8, 10, 15, 0.15) 100%), linear-gradient(180deg, rgba(8, 10, 15, 0.08) 0%, rgba(8, 10, 15, 0.84) 100%)",
+                  }}
+                />
+
+                <Box pos="relative" p={{ base: "md", sm: "xl" }} style={{ zIndex: 2 }}>
+                  <Group align="flex-end" justify="space-between" gap="lg" wrap="wrap">
+                    <Stack gap="xs" style={{ maxWidth: 560, flex: 1 }}>
+                      <Group gap="xs">
+                        <Badge
+                          color="blue"
+                          variant="filled"
+                          size="sm"
+                          leftSection={<Flame size={12} />}
+                        >
+                          #{heroIndex + 1} Top This Week • FitGirl
+                        </Badge>
+                        {activeHero.repackSize && (
+                          <Badge color="dark.5" variant="filled" size="sm">
+                            {activeHero.repackSize}
+                          </Badge>
+                        )}
+                      </Group>
+                      <Title order={2} c="white" style={{ lineHeight: 1.15 }}>
+                        {cleanGameTitle(activeHero.title)}
+                      </Title>
+                      {activeHero.genres && activeHero.genres.length > 0 && (
+                        <Group gap={6} wrap="wrap">
+                          {activeHero.genres.slice(0, 4).map((g) => (
+                            <Badge key={g} size="xs" variant="light" color="gray">
+                              {g}
+                            </Badge>
+                          ))}
+                        </Group>
+                      )}
+                      <Group gap="sm" mt={6}>
+                        <Button
+                          size="sm"
+                          radius="md"
+                          color="blue"
+                          leftSection={<Eye size={15} />}
+                          onClick={() => setSelectedPost(activeHero)}
+                        >
+                          View Details
+                        </Button>
+                        <Button
+                          size="sm"
+                          radius="md"
+                          variant="light"
+                          color="gray"
+                          onClick={() => handleDataSourceChange("fitgirl")}
+                        >
+                          Browse FitGirl
+                        </Button>
+                      </Group>
+                    </Stack>
+
+                    {/* Top 6 Selector Strip */}
+                    <Group gap="xs" wrap="nowrap" style={{ overflowX: "auto", maxWidth: "100%" }}>
+                      {heroPosts.map((hp, idx) => {
+                        const isSelected = idx === heroIndex;
+                        return (
+                          <UnstyledButton
+                            key={hp.id}
+                            onClick={() => setHeroIndex(idx)}
+                            style={{
+                              width: 72,
+                              borderRadius: 8,
+                              overflow: "hidden",
+                              border: isSelected
+                                ? "2px solid var(--mantine-color-blue-4)"
+                                : "1px solid rgba(255, 255, 255, 0.16)",
+                              opacity: isSelected ? 1 : 0.65,
+                              transform: isSelected ? "translateY(-2px)" : "none",
+                              transition: "all 150ms ease",
+                              flexShrink: 0,
+                            }}
+                            title={cleanGameTitle(hp.title)}
+                          >
+                            <Image
+                              src={hp.coverUrl}
+                              alt={cleanGameTitle(hp.title)}
+                              h={96}
+                              w={72}
+                              fit="cover"
+                            />
+                          </UnstyledButton>
+                        );
+                      })}
+                    </Group>
+                  </Group>
+                </Box>
+              </Paper>
+            );
+          })()}
+
+          {/* 2. Top Rated Games on IGDB */}
+          {(isIgdbLoading || topIgdbGames.length > 0) && (
+            <Box>
+              <Group justify="space-between" align="center" mb="sm">
+                <Group gap="xs">
+                  <Star size={16} color="#fcc419" fill="#fcc419" />
+                  <Title order={4}>Top Games of {new Date().getFullYear()}</Title>
+                </Group>
+                <Text size="xs" c="dimmed">
+                  {isIgdbLoading ? "Loading from IGDB..." : "Click any game to view details"}
+                </Text>
+              </Group>
+              <SimpleGrid cols={{ base: 2, sm: 3, md: 5 }} spacing="sm">
+                {isIgdbLoading && topIgdbGames.length === 0
+                  ? Array.from({ length: 10 }).map((_, idx) => (
+                      <Skeleton
+                        key={`top-igdb-skel-${idx}`}
+                        radius="md"
+                        style={{ aspectRatio: "3 / 4" }}
+                      />
+                    ))
+                  : topIgdbGames.slice(0, 10).map((ig) => (
+                  <Card
+                    key={ig.id}
+                    p={0}
+                    radius="md"
+                    className="daze-glass-card"
+                    onClick={() => handleOpenIgdbDetails(ig)}
+                    onMouseEnter={() => {
+                      if (onAmbientArtworkChange) {
+                        onAmbientArtworkChange(
+                          ig.bannerUrl || ig.screenshots?.[0] || ig.coverUrl || null,
+                        );
+                      }
+                    }}
+                    style={{
+                      cursor: "pointer",
+                      overflow: "hidden",
+                      transition: "transform 160ms ease, border-color 160ms ease",
+                    }}
+                  >
+                    <Box pos="relative" style={{ aspectRatio: "3 / 4", overflow: "hidden" }}>
+                      <Image
+                        src={ig.coverUrl}
+                        alt={ig.name}
+                        w="100%"
+                        h="100%"
+                        fit="cover"
+                      />
+                      <Box
+                        style={{
+                          position: "absolute",
+                          inset: 0,
+                          background:
+                            "linear-gradient(180deg, transparent 45%, rgba(8, 10, 15, 0.92) 100%)",
+                        }}
+                      />
+                      {typeof ig.rating === "number" && (
+                        <Badge
+                          size="xs"
+                          color="yellow"
+                          variant="filled"
+                          style={{ position: "absolute", top: 8, right: 8 }}
+                        >
+                          {Math.round(ig.rating)}
+                        </Badge>
+                      )}
+                      <Box pos="absolute" bottom={8} left={8} right={8}>
+                        <Text size="xs" fw={700} c="white" lineClamp={1}>
+                          {ig.name}
+                        </Text>
+                        {ig.releaseYear && (
+                          <Text size="10px" c="gray.4">
+                            {ig.releaseYear}
+                          </Text>
+                        )}
+                      </Box>
+                    </Box>
+                  </Card>
+                ))}
+              </SimpleGrid>
+            </Box>
+          )}
+
+          {/* 3. Most Anticipated Upcoming Games on IGDB */}
+          {(isIgdbLoading || upcomingIgdbGames.length > 0) && (
+            <Box>
+              <Group justify="space-between" align="center" mb="sm">
+                <Group gap="xs">
+                  <Sparkles size={16} color="#38bdf8" />
+                  <Title order={4}>Most Anticipated Upcoming Games</Title>
+                </Group>
+                <Text size="xs" c="dimmed">
+                  {isIgdbLoading ? "Loading from IGDB..." : "Click any game to view details"}
+                </Text>
+              </Group>
+              <SimpleGrid cols={{ base: 2, sm: 3, md: 5 }} spacing="sm">
+                {isIgdbLoading && upcomingIgdbGames.length === 0
+                  ? Array.from({ length: 10 }).map((_, idx) => (
+                      <Skeleton
+                        key={`upcoming-igdb-skel-${idx}`}
+                        radius="md"
+                        style={{ aspectRatio: "3 / 4" }}
+                      />
+                    ))
+                  : upcomingIgdbGames.slice(0, 10).map((ig) => (
+                  <Card
+                    key={ig.id}
+                    p={0}
+                    radius="md"
+                    className="daze-glass-card"
+                    onClick={() => handleOpenIgdbDetails(ig)}
+                    onMouseEnter={() => {
+                      if (onAmbientArtworkChange) {
+                        onAmbientArtworkChange(
+                          ig.bannerUrl || ig.screenshots?.[0] || ig.coverUrl || null,
+                        );
+                      }
+                    }}
+                    style={{
+                      cursor: "pointer",
+                      overflow: "hidden",
+                      transition: "transform 160ms ease, border-color 160ms ease",
+                    }}
+                  >
+                    <Box pos="relative" style={{ aspectRatio: "3 / 4", overflow: "hidden" }}>
+                      <Image
+                        src={ig.coverUrl}
+                        alt={ig.name}
+                        w="100%"
+                        h="100%"
+                        fit="cover"
+                      />
+                      <Box
+                        style={{
+                          position: "absolute",
+                          inset: 0,
+                          background:
+                            "linear-gradient(180deg, transparent 45%, rgba(8, 10, 15, 0.92) 100%)",
+                        }}
+                      />
+                      {ig.releaseDate && (
+                        <Badge
+                          size="xs"
+                          color="cyan"
+                          variant="filled"
+                          style={{ position: "absolute", top: 8, right: 8 }}
+                        >
+                          {Number.isNaN(Date.parse(ig.releaseDate))
+                            ? ig.releaseDate.slice(0, 10)
+                            : new Date(ig.releaseDate).toLocaleDateString(
+                                undefined,
+                                {
+                                  month: "short",
+                                  day: "numeric",
+                                  year: "numeric",
+                                },
+                              )}
+                        </Badge>
+                      )}
+                      <Box pos="absolute" bottom={8} left={8} right={8}>
+                        <Text size="xs" fw={700} c="white" lineClamp={1}>
+                          {ig.name}
+                        </Text>
+                        {ig.genres?.[0] && (
+                          <Text size="10px" c="gray.4" lineClamp={1}>
+                            {ig.genres[0]}
+                          </Text>
+                        )}
+                      </Box>
+                    </Box>
+                  </Card>
+                ))}
+              </SimpleGrid>
+            </Box>
+          )}
+        </Stack>
+      )}
+
+      {/* Latest Posts Header & Quick Source Filter */}
+      <Group justify="space-between" align="center" wrap="wrap" gap="xs">
+        <Title order={4}>
+          {dataSource === "all"
+            ? "Latest Posts (Combined)"
+            : dataSource === "fitgirl"
+              ? "FitGirl Repacks"
+              : dataSource === "steamrip"
+                ? "SteamRIP Releases"
+                : "Recomp Catalog"}
+        </Title>
+        <Group gap={6} wrap="wrap">
+          {(
+            [
+              { id: "all", label: "All Combined", color: "teal" },
+              { id: "fitgirl", label: "FitGirl", color: "blue" },
+              { id: "steamrip", label: "SteamRIP", color: "cyan" },
+              { id: "recomp", label: "Recomp", color: "violet" },
+            ] as const
+          ).map((src) => (
+            <Button
+              key={src.id}
+              size="xs"
+              radius="xl"
+              variant={dataSource === src.id ? "filled" : "light"}
+              color={src.color}
+              onClick={() => handleDataSourceChange(src.id)}
+            >
+              {src.label}
+            </Button>
+          ))}
+        </Group>
+      </Group>
 
       {/* Main Repacks Listing */}
       {isLoading && posts.length === 0 ? (

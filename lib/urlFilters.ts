@@ -3,7 +3,7 @@
  */
 
 export function isMediaOrBadDownloadUrl(url?: string): boolean {
-  if (!url) return true;
+  if (!url) {return true;}
   try {
     const parsed = new URL(url);
     const host = parsed.hostname.toLowerCase();
@@ -80,7 +80,7 @@ export function isMediaOrBadDownloadUrl(url?: string): boolean {
       "support.hytale.com",
     ];
 
-    if (badHosts.some((bh) => host === bh || host.endsWith("." + bh))) {
+    if (badHosts.some((bh) => host === bh || host.endsWith(`.${  bh}`))) {
       return true;
     }
 
@@ -94,7 +94,7 @@ export function isMediaOrBadDownloadUrl(url?: string): boolean {
  * Returns true if the URL or hoster requires special referrer handling (e.g. MegaDB)
  */
 export function isReferrerRestrictedUrl(url?: string): boolean {
-  if (!url) return false;
+  if (!url) {return false;}
   try {
     const host = new URL(url).hostname.toLowerCase();
     return host.includes("megadb.net");

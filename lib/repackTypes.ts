@@ -47,7 +47,7 @@ export function formatRepackFolderName(
   title: string,
   source: string = "Fitgirl-Repacks",
 ): string {
-  if (!title) return `Game [${source}]`;
+  if (!title) {return `Game [${source}]`;}
 
   // Standardize source tag
   const cleanSource = source.toLowerCase().includes("steamrip")

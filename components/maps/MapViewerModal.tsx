@@ -68,7 +68,7 @@ export function MapViewerModal({
       return;
     }
 
-    if (!opened || !gameSlug) return;
+    if (!opened || !gameSlug) {return;}
 
     let isMounted = true;
 
@@ -214,7 +214,7 @@ export function MapViewerModal({
           );
         }
 
-        if (!isMounted || !rawData) return;
+        if (!isMounted || !rawData) {return;}
 
         // Extract sprite coordinates & dimensions from HTML
         let extractedSpritePositions: Record<string, any> = {};

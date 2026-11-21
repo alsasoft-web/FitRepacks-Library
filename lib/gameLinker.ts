@@ -14,11 +14,11 @@ export { cleanGameTitle };
  * Convert any RiotPixels image URL into its optimized 240p thumbnail URL for fast card/carousel loading.
  */
 export function getRiotpixels240pUrl(url: string | null | undefined): string {
-  if (!url) return "";
-  if (/\.gif(?:\?.*)?$/i.test(url)) return url;
-  if (!url.includes("riotpixels.net")) return url;
+  if (!url) {return "";}
+  if (/\.gif(?:\?.*)?$/i.test(url)) {return url;}
+  if (!url.includes("riotpixels.net")) {return url;}
 
-  let clean = url
+  const clean = url
     .trim()
     .replace(/^http:\/\//i, "https://")
     .replace(/riotpixels\.net\/data\.s\//gi, "riotpixels.net/data/");
@@ -32,9 +32,9 @@ export function getRiotpixels240pUrl(url: string | null | undefined): string {
       return clean.replace(/\.png$/i, ".png.240p.jpg");
     } else if (/\.jpg$/i.test(clean)) {
       return clean.replace(/\.jpg$/i, ".jpg.240p.jpg");
-    } else {
-      return `${clean}.jpg.240p.jpg`;
     }
+      return `${clean}.jpg.240p.jpg`;
+    
   } else if (
     clean.endsWith(".240p.jpg") &&
     !clean.endsWith(".png.240p.jpg") &&
@@ -49,11 +49,11 @@ export function getRiotpixels240pUrl(url: string | null | undefined): string {
  * Convert any RiotPixels thumbnail URL (with .240p.jpg or .png.jpg) into its high-resolution original image URL for modal / lightbox viewing.
  */
 export function getRiotpixelsFullResUrl(url: string | null | undefined): string {
-  if (!url) return "";
-  if (/\.gif(?:\?.*)?$/i.test(url)) return url;
-  if (!url.includes("riotpixels.net")) return url;
+  if (!url) {return "";}
+  if (/\.gif(?:\?.*)?$/i.test(url)) {return url;}
+  if (!url.includes("riotpixels.net")) {return url;}
 
-  let clean = url
+  const clean = url
     .trim()
     .replace(/^http:\/\//i, "https://")
     .replace(/riotpixels\.net\/data\.s\//gi, "riotpixels.net/data/");
@@ -117,7 +117,7 @@ export function extractGameVersion(
   title: string,
   description?: string,
 ): string | undefined {
-  if (!title && !description) return undefined;
+  if (!title && !description) {return undefined;}
   const target = `${title || ""} ${description || ""}`;
 
   // 1. Version + Build combo e.g. "v1.0.12, Build 8813492" or "1.0.0.0 (Build 4838612)"
@@ -175,7 +175,7 @@ export async function searchSourceCandidates(
   source: "all" | "igdb" | "fitgirl" | "steamrip" = "all",
 ): Promise<SourceCandidate[]> {
   const cleanQ = (cleanSearchTitle(query) || query).trim();
-  if (!cleanQ) return [];
+  if (!cleanQ) {return [];}
 
   const results: SourceCandidate[] = [];
 
@@ -329,7 +329,7 @@ function parseVersionTokens(ver: string): { build?: number; semver: number[] } {
     const parts = vMatch[0].split(".");
     for (const p of parts) {
       const n = parseInt(p, 10);
-      if (!isNaN(n)) semver.push(n);
+      if (!isNaN(n)) {semver.push(n);}
     }
   }
 
@@ -343,18 +343,18 @@ function parseVersionTokens(ver: string): { build?: number; semver: number[] } {
  * 0 if equal
  */
 function compareTwoVersions(verA?: string, verB?: string): number {
-  if (!verA && !verB) return 0;
-  if (verA && !verB) return 1;
-  if (!verA && verB) return -1;
-  if (verA!.trim().toLowerCase() === verB!.trim().toLowerCase()) return 0;
+  if (!verA && !verB) {return 0;}
+  if (verA && !verB) {return 1;}
+  if (!verA && verB) {return -1;}
+  if (verA!.trim().toLowerCase() === verB!.trim().toLowerCase()) {return 0;}
 
   const tA = parseVersionTokens(verA!);
   const tB = parseVersionTokens(verB!);
 
   // Compare build numbers
   if (tA.build !== undefined && tB.build !== undefined) {
-    if (tA.build > tB.build) return 1;
-    if (tA.build < tB.build) return -1;
+    if (tA.build > tB.build) {return 1;}
+    if (tA.build < tB.build) {return -1;}
     return 0;
   }
 
@@ -364,8 +364,8 @@ function compareTwoVersions(verA?: string, verB?: string): number {
     for (let i = 0; i < maxLen; i++) {
       const a = tA.semver[i] || 0;
       const b = tB.semver[i] || 0;
-      if (a > b) return 1;
-      if (a < b) return -1;
+      if (a > b) {return 1;}
+      if (a < b) {return -1;}
     }
     return 0;
   }
@@ -377,12 +377,12 @@ function compareTwoVersions(verA?: string, verB?: string): number {
  * Safe date parser for FitGirl and SteamRIP date formats (e.g. "August 10, 2024", "2024-08-10", "10.08.2024", etc.)
  */
 export function parseReleaseDate(rawDate?: string): number | null {
-  if (!rawDate) return null;
+  if (!rawDate) {return null;}
   const clean = rawDate.trim();
-  if (!clean) return null;
+  if (!clean) {return null;}
 
   const parsed = Date.parse(clean);
-  if (!isNaN(parsed)) return parsed;
+  if (!isNaN(parsed)) {return parsed;}
 
   // Try parsing DD.MM.YYYY
   const partsDot = clean.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})/);
@@ -392,7 +392,7 @@ export function parseReleaseDate(rawDate?: string): number | null {
       parseInt(partsDot[2], 10) - 1,
       parseInt(partsDot[1], 10),
     );
-    if (!isNaN(d.getTime())) return d.getTime();
+    if (!isNaN(d.getTime())) {return d.getTime();}
   }
 
   // Try parsing YYYY.MM.DD or YYYY/MM/DD
@@ -403,7 +403,7 @@ export function parseReleaseDate(rawDate?: string): number | null {
       parseInt(partsYear[2], 10) - 1,
       parseInt(partsYear[3], 10),
     );
-    if (!isNaN(d.getTime())) return d.getTime();
+    if (!isNaN(d.getTime())) {return d.getTime();}
   }
 
   return null;
@@ -438,8 +438,8 @@ export function compareReleaseSources(
   const dateB = parseReleaseDate(sourceB.date);
 
   if (dateA !== null && dateB !== null) {
-    if (dateA > dateB) return 1;
-    if (dateA < dateB) return -1;
+    if (dateA > dateB) {return 1;}
+    if (dateA < dateB) {return -1;}
   } else if (dateA !== null && dateB === null) {
     return 1;
   } else if (dateA === null && dateB !== null) {
@@ -456,15 +456,15 @@ export function isHighestVersion(
   targetVer?: string,
   otherVersions: (string | undefined)[] = [],
 ): boolean {
-  if (!targetVer) return false;
+  if (!targetVer) {return false;}
   const validOthers = otherVersions.filter((v): v is string =>
     Boolean(v && v.trim()),
   );
-  if (validOthers.length === 0) return true;
+  if (validOthers.length === 0) {return true;}
 
   for (const other of validOthers) {
     const cmp = compareTwoVersions(targetVer, other);
-    if (cmp < 0) return false;
+    if (cmp < 0) {return false;}
   }
   return true;
 }
@@ -902,11 +902,11 @@ export async function linkGameToAllSources(
 export function extractMagnetLinks(
   mirrorGroups?: RepackMirrorGroup[],
 ): { name: string; url: string; groupName: string; sourceUrl?: string }[] {
-  if (!mirrorGroups || mirrorGroups.length === 0) return [];
+  if (!mirrorGroups || mirrorGroups.length === 0) {return [];}
   const magnets: { name: string; url: string; groupName: string }[] = [];
 
   for (const group of mirrorGroups) {
-    if (!group.links) continue;
+    if (!group.links) {continue;}
     for (const link of group.links) {
       if (link.url && link.url.startsWith("magnet:")) {
         magnets.push({
@@ -926,11 +926,11 @@ export function extractMagnetLinks(
 export function extractDirectDownloadLinks(
   mirrorGroups?: RepackMirrorGroup[],
 ): { name: string; url: string; groupName: string }[] {
-  if (!mirrorGroups || mirrorGroups.length === 0) return [];
+  if (!mirrorGroups || mirrorGroups.length === 0) {return [];}
   const directs: { name: string; url: string; groupName: string; sourceUrl?: string }[] = [];
 
   for (const group of mirrorGroups) {
-    if (!group.links) continue;
+    if (!group.links) {continue;}
     for (const link of group.links) {
       if (link.url && !link.url.startsWith("magnet:") && !isMediaOrBadDownloadUrl(link.url)) {
         directs.push({
@@ -950,7 +950,7 @@ export function extractDirectDownloadLinks(
  */
 export async function syncLibraryGamesWithLatestRepacks(force = false): Promise<void> {
   try {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined") {return;}
 
     const lastSyncKey = "fitrepacks_last_library_repacks_sync";
     const lastSync = localStorage.getItem(lastSyncKey);
@@ -961,7 +961,7 @@ export async function syncLibraryGamesWithLatestRepacks(force = false): Promise<
     }
 
     const games = getStoredGames();
-    if (!games || games.length === 0) return;
+    if (!games || games.length === 0) {return;}
 
     // Process only unlinked games or games without mirrors (max 10 at startup)
     const candidateGames = games
@@ -975,7 +975,7 @@ export async function syncLibraryGamesWithLatestRepacks(force = false): Promise<
 
     localStorage.setItem(lastSyncKey, String(now));
 
-    if (candidateGames.length === 0) return;
+    if (candidateGames.length === 0) {return;}
 
     let updatedCount = 0;
     for (const g of candidateGames) {

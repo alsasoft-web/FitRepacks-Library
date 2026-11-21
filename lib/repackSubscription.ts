@@ -22,9 +22,30 @@ import {
 let isSubscribed = false;
 let subscribePromise: Promise<() => void> | null = null;
 
-// In-memory de-duplication cache to prevent duplicate notifications
-const recentNotifications = new Map<string, number>();
-const DEDUPE_WINDOW_MS = 10000; // 10 seconds dedupe window
+// Persistent de-duplication cache to prevent duplicate notifications across events & restarts
+const NOTIF_DEDUPE_STORAGE_KEY = "fitrepacks_recent_notifications_v1";
+const DEDUPE_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours dedupe window
+
+function loadRecentNotifications(): Map<string, number> {
+  const map = new Map<string, number>();
+  if (typeof window === "undefined") return map;
+  try {
+    const raw = localStorage.getItem(NOTIF_DEDUPE_STORAGE_KEY);
+    if (!raw) return map;
+    const parsed = JSON.parse(raw);
+    const now = Date.now();
+    if (parsed && typeof parsed === "object") {
+      for (const [k, v] of Object.entries(parsed)) {
+        if (typeof v === "number" && now - v < DEDUPE_WINDOW_MS) {
+          map.set(k, v);
+        }
+      }
+    }
+  } catch (_) {}
+  return map;
+}
+
+const recentNotifications = loadRecentNotifications();
 
 // Cache to track the latest release content signature of games to detect real game updates vs ranking/metadata changes
 const knownReleaseSignatures = new Map<string, string>();
@@ -86,20 +107,20 @@ function getGameSource(
 ): "fitgirl" | "steamrip" | "manual" | "unknown" {
   if (game.source) {
     const s = game.source.toLowerCase();
-    if (s.includes("steamrip")) return "steamrip";
-    if (s.includes("fitgirl")) return "fitgirl";
-    if (s.includes("manual") || s.includes("imported")) return "manual";
+    if (s.includes("steamrip")) {return "steamrip";}
+    if (s.includes("fitgirl")) {return "fitgirl";}
+    if (s.includes("manual") || s.includes("imported")) {return "manual";}
   }
   if (game.tags && Array.isArray(game.tags)) {
     for (const tag of game.tags) {
       const lower = tag.toLowerCase();
-      if (lower === "steamrip" || lower.includes("steamrip")) return "steamrip";
-      if (lower === "fitgirl" || lower.includes("fitgirl")) return "fitgirl";
-      if (lower === "manual" || lower === "imported") return "manual";
+      if (lower === "steamrip" || lower.includes("steamrip")) {return "steamrip";}
+      if (lower === "fitgirl" || lower.includes("fitgirl")) {return "fitgirl";}
+      if (lower === "manual" || lower === "imported") {return "manual";}
     }
   }
   if (game.id && game.id.startsWith("repack-")) {
-    if (game.id.includes("steamrip")) return "steamrip";
+    if (game.id.includes("steamrip")) {return "steamrip";}
     return "fitgirl";
   }
   return "unknown";
@@ -124,7 +145,7 @@ function findMatchingLibraryGame(
   source: string,
   games: Game[],
 ): Game | null {
-  if (!games || games.length === 0) return null;
+  if (!games || games.length === 0) {return null;}
 
   const recordId = String(record.id || record.repack_id || "").trim();
   const recordTitle = String(record.title || "").trim();
@@ -179,6 +200,17 @@ let batchStartTime: number | null = null;
 const BATCH_DEBOUNCE_MS = 1500; // Wait 1.5s after the last event to group incoming updates
 const BATCH_MAX_WAIT_MS = 4000; // Max wait of 4s before forcing flush during continuous stream
 
+function persistRecentNotifications(): void {
+  if (typeof window === "undefined") return;
+  try {
+    const obj: Record<string, number> = {};
+    for (const [k, v] of recentNotifications.entries()) {
+      obj[k] = v;
+    }
+    localStorage.setItem(NOTIF_DEDUPE_STORAGE_KEY, JSON.stringify(obj));
+  } catch (_) {}
+}
+
 function isDuplicate(key: string): boolean {
   const now = Date.now();
   const lastTime = recentNotifications.get(key);
@@ -196,6 +228,7 @@ function isDuplicate(key: string): boolean {
       }
     }
   }
+  persistRecentNotifications();
   return false;
 }
 
@@ -205,7 +238,7 @@ function cleanNotificationTitle(raw: string): string {
     .replace(/\s*[–—-]\s*v\d[\s\S]*$/i, "")
     .replace(/\s*\+\s*\d+\s*DLCs?[\s\S]*$/i, "")
     .replace(/\s*\+\s*All\s+DLCs?[\s\S]*$/i, "")
-    .replace(/\s*[\[(](?:Build|v\d|Repack|Free Download)[^\])]*[\])]/gi, "")
+    .replace(/\s*[[(](?:Build|v\d|Repack|Free Download)[^\])]*[\])]/gi, "")
     .replace(/\s{2,}/g, " ")
     .trim();
   if (cleaned.length > 52) {
@@ -228,7 +261,7 @@ async function flushNotificationBatch(): Promise<void> {
   const batch = [...pendingBatch];
   pendingBatch = [];
 
-  if (batch.length === 0) return;
+  if (batch.length === 0) {return;}
 
   try {
     if (batch.length <= 2) {
@@ -243,7 +276,7 @@ async function flushNotificationBatch(): Promise<void> {
           : `New on ${sourceLabel}: ${shortTitle}`;
 
         const details: string[] = [];
-        if (item.repackSize) details.push(item.repackSize);
+        if (item.repackSize) {details.push(item.repackSize);}
         details.push(isUpdate ? "Update available" : "Ready to download");
         const bodyText = details.join(" • ");
 
@@ -274,8 +307,7 @@ async function flushNotificationBatch(): Promise<void> {
       const sampleTitles = batch.slice(0, 3).map((item) => cleanNotificationTitle(item.title));
       const remainingCount = batch.length - sampleTitles.length;
       const previewText =
-        `\n• ${sampleTitles.join("\n• ")}` +
-        (remainingCount > 0 ? `\n...and ${remainingCount} more` : "");
+        `\n• ${sampleTitles.join("\n• ")}${remainingCount > 0 ? `\n...and ${remainingCount} more` : ""}`;
 
       await sendDesktopNotification({
         title: "FitRepacks Library Updates",
@@ -299,10 +331,12 @@ async function handleRepackEvent(
   e: { action: string; record: any },
   forcedSource?: "fitgirl" | "steamrip",
 ) {
-  console.log("[handleRepackEvent] Event received:", e);
+  if (process.env.NODE_ENV === "development") {
+    console.log("[handleRepackEvent] Event received:", e);
+  }
 
   if (!e || (e.action !== "create" && e.action !== "update") || !e.record)
-    return;
+    {return;}
 
   const record = e.record;
   const title = String(record.title || "").trim();
@@ -437,19 +471,19 @@ async function handleRepackEvent(
         : matchedLibraryGame.mirrorGroups;
     matchedLibraryGame.gameUpdates =
       mergedUpdates.length > 0 ? mergedUpdates : matchedLibraryGame.gameUpdates;
-    if (cleanUrl) matchedLibraryGame.repackUrl = cleanUrl;
-    if (record.repack_size) matchedLibraryGame.repackSize = record.repack_size;
+    if (cleanUrl) {matchedLibraryGame.repackUrl = cleanUrl;}
+    if (record.repack_size) {matchedLibraryGame.repackSize = record.repack_size;}
 
     if (source === "fitgirl") {
-      if (cleanUrl) matchedLibraryGame.linkedFitgirlUrl = cleanUrl;
+      if (cleanUrl) {matchedLibraryGame.linkedFitgirlUrl = cleanUrl;}
       if (record.post_date)
-        matchedLibraryGame.fitgirlUploadDate = record.post_date;
-      if (version) matchedLibraryGame.fitgirlVersion = version;
+        {matchedLibraryGame.fitgirlUploadDate = record.post_date;}
+      if (version) {matchedLibraryGame.fitgirlVersion = version;}
     } else if (source === "steamrip") {
-      if (cleanUrl) matchedLibraryGame.linkedSteamripUrl = cleanUrl;
+      if (cleanUrl) {matchedLibraryGame.linkedSteamripUrl = cleanUrl;}
       if (record.post_date)
-        matchedLibraryGame.steamripUploadDate = record.post_date;
-      if (version) matchedLibraryGame.steamripVersion = version;
+        {matchedLibraryGame.steamripUploadDate = record.post_date;}
+      if (version) {matchedLibraryGame.steamripVersion = version;}
     }
 
     // Check if game is already installed and whether this repack is genuinely newer by date
@@ -536,8 +570,8 @@ async function handleRepackEvent(
     }
   }
 
-  // 6. De-duplicate identical events
-  const dedupeKey = `${source}_${record.id || record.repack_id}_${e.action}`;
+  // 6. De-duplicate identical releases across create/update events & restarts
+  const dedupeKey = `${source}_${record.id || record.repack_id}_${getReleaseSignature(record)}`;
   if (isDuplicate(dedupeKey)) {
     return;
   }
@@ -587,7 +621,7 @@ let isCheckingNewReleases = false;
  * Proactively check for new releases that arrived while app was closed or between realtime events
  */
 export async function checkAndNotifyNewReleases(): Promise<void> {
-  if (typeof window === "undefined" || isCheckingNewReleases) return;
+  if (typeof window === "undefined" || isCheckingNewReleases) {return;}
   isCheckingNewReleases = true;
 
   const notifSettings = getNotificationSettings();
@@ -694,9 +728,9 @@ export async function checkAndNotifyNewReleases(): Promise<void> {
  * Initialize AlsaBase realtime subscriptions for both 'repacks' and 'steamrip' collections
  */
 export async function initRepackSubscription(): Promise<() => void> {
-  if (typeof window === "undefined") return () => {};
-  if (isSubscribed) return unsubscribeRepackSubscription;
-  if (subscribePromise) return subscribePromise;
+  if (typeof window === "undefined") {return () => {};}
+  if (isSubscribed) {return unsubscribeRepackSubscription;}
+  if (subscribePromise) {return subscribePromise;}
 
   subscribePromise = (async () => {
     try {
